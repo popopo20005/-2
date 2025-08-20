@@ -1,0 +1,512 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 25%, #bae6fd 50%, #f8fafc 75%, #f0f9ff 100%);
+  background-size: 400% 400%;
+  animation: gradientShift 15s ease infinite;
+  position: relative;
+}
+
+/* テクスチャー用の疑似要素 */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: 
+    radial-gradient(circle at 20% 50%, rgba(120, 119, 198, 0.03) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(255, 99, 132, 0.03) 0%, transparent 50%),
+    radial-gradient(circle at 40% 80%, rgba(54, 162, 235, 0.03) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+@keyframes gradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.dark body {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 25%, #334155 50%, #1e293b 75%, #0f172a 100%);
+  background-size: 400% 400%;
+  animation: gradientShift 20s ease infinite;
+  color: #f9fafb;
+}
+
+.dark body::before {
+  background-image: 
+    radial-gradient(circle at 25% 60%, rgba(139, 92, 246, 0.08) 0%, transparent 50%),
+    radial-gradient(circle at 75% 30%, rgba(14, 165, 233, 0.08) 0%, transparent 50%),
+    radial-gradient(circle at 50% 90%, rgba(34, 197, 94, 0.06) 0%, transparent 50%);
+}
+
+/* ポップなクイズアクションボタンスタイル */
+button.quiz-action-button,
+input[type="button"].quiz-action-button,
+input[type="submit"].quiz-action-button,
+button[class*="quiz-action-button"] {
+  background: linear-gradient(135deg, #06b6d4 0%, #0891b2 50%, #0e7490 100%) !important;
+  color: white !important;
+  border: 2px solid #22d3ee !important;
+  border-radius: 16px !important;
+  box-shadow: 
+    0 8px 25px rgba(6, 182, 212, 0.4),
+    0 4px 12px rgba(14, 116, 144, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+  transform: translateY(0) !important;
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+  font-weight: 600 !important;
+  position: relative !important;
+  overflow: hidden !important;
+  margin: 4px !important;
+  backdrop-filter: blur(10px) !important;
+  /* Tailwindの特定クラスを上書き */
+  --tw-bg-opacity: 1 !important;
+  --tw-text-opacity: 1 !important;
+  --tw-border-opacity: 1 !important;
+}
+
+/* キラキラ効果 */
+button.quiz-action-button::before,
+input[type="button"].quiz-action-button::before,
+input[type="submit"].quiz-action-button::before,
+button[class*="quiz-action-button"]::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+  border-radius: 18px;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: -1;
+}
+
+/* マイクロインタラクション - 微細な輝き */
+button.quiz-action-button::after,
+input[type="button"].quiz-action-button::after,
+input[type="submit"].quiz-action-button::after,
+button[class*="quiz-action-button"]::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -100%;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+  transition: left 0.5s ease;
+  transform: translateY(-50%);
+}
+
+/* ポップなホバー効果 */
+button.quiz-action-button:hover,
+input[type="button"].quiz-action-button:hover,
+input[type="submit"].quiz-action-button:hover,
+button[class*="quiz-action-button"]:hover {
+  background: linear-gradient(135deg, #0891b2 0%, #0e7490 50%, #155e75 100%) !important;
+  transform: translateY(-4px) scale(1.05) !important;
+  box-shadow: 
+    0 12px 35px rgba(6, 182, 212, 0.5),
+    0 8px 20px rgba(14, 116, 144, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+  border-color: #06b6d4 !important;
+  color: white !important;
+  filter: brightness(1.1) !important;
+}
+
+button.quiz-action-button:hover::before,
+input[type="button"].quiz-action-button:hover::before,
+input[type="submit"].quiz-action-button:hover::before,
+button[class*="quiz-action-button"]:hover::before {
+  opacity: 1;
+}
+
+button.quiz-action-button:hover::after,
+input[type="button"].quiz-action-button:hover::after,
+input[type="submit"].quiz-action-button:hover::after,
+button[class*="quiz-action-button"]:hover::after {
+  left: 100%;
+}
+
+/* ダークモード用ポップなボタン */
+.dark button.quiz-action-button,
+html.dark button.quiz-action-button,
+.dark input[type="button"].quiz-action-button,
+html.dark input[type="button"].quiz-action-button,
+.dark button[class*="quiz-action-button"],
+html.dark button[class*="quiz-action-button"] {
+  background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%) !important;
+  border: 2px solid #06b6d4 !important;
+  box-shadow: 0 4px 12px rgba(8, 145, 178, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3) !important;
+  color: white !important;
+}
+
+.dark button.quiz-action-button:hover,
+html.dark button.quiz-action-button:hover,
+.dark input[type="button"].quiz-action-button:hover,
+html.dark input[type="button"].quiz-action-button:hover,
+.dark button[class*="quiz-action-button"]:hover,
+html.dark button[class*="quiz-action-button"]:hover {
+  background: linear-gradient(135deg, #0e7490 0%, #155e75 100%) !important;
+  transform: translateY(-2px) scale(1.02) !important;
+  box-shadow: 0 6px 20px rgba(8, 145, 178, 0.5), 0 4px 8px rgba(0, 0, 0, 0.4) !important;
+  border-color: #22d3ee !important;
+}
+
+/* フォーカス状態（キーボードナビゲーション） */
+button.quiz-action-button:focus,
+input[type="button"].quiz-action-button:focus,
+input[type="submit"].quiz-action-button:focus,
+button[class*="quiz-action-button"]:focus {
+  outline: 3px solid rgba(34, 211, 238, 0.5) !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 4px 12px rgba(6, 182, 212, 0.4), 0 2px 4px rgba(0, 0, 0, 0.1), 0 0 0 3px rgba(34, 211, 238, 0.3) !important;
+}
+
+/* アクティブ状態（クリック時）のポップ効果 */
+button.quiz-action-button:active,
+input[type="button"].quiz-action-button:active,
+input[type="submit"].quiz-action-button:active,
+button[class*="quiz-action-button"]:active {
+  transform: translateY(1px) scale(0.98) !important;
+  box-shadow: 0 2px 8px rgba(6, 182, 212, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* ゆらゆら動くアニメーション */
+@keyframes gentle-sway {
+  0%, 100% { transform: translateX(0px) translateY(0px); }
+  25% { transform: translateX(1px) translateY(-0.5px); }
+  50% { transform: translateX(0px) translateY(-1px); }
+  75% { transform: translateX(-1px) translateY(-0.5px); }
+}
+
+/* メインメニューボタンに微細な動き */
+.main-menu-button:not(:hover) {
+  animation: gentle-sway 4s ease-in-out infinite;
+}
+
+/* ホバー時のキラキラ効果を強化 */
+.main-menu-button:hover::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+  border-radius: inherit;
+  opacity: 0;
+  animation: sparkle 2s ease-in-out infinite;
+  z-index: -1;
+}
+
+/* 無効化状態のポップなスタイル */
+button.quiz-action-button:disabled,
+input[type="button"].quiz-action-button:disabled,
+input[type="submit"].quiz-action-button:disabled,
+button[class*="quiz-action-button"]:disabled {
+  background: linear-gradient(135deg, #9ca3af 0%, #6b7280 100%) !important;
+  color: #d1d5db !important;
+  border: 2px solid #9ca3af !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !important;
+  transform: none !important;
+  cursor: not-allowed !important;
+  opacity: 0.6 !important;
+}
+
+/* ボタン要素のTailwindクラス組み合わせのみ上書き */
+button.quiz-action-button.bg-white,
+button.quiz-action-button.bg-gray-50,
+button.quiz-action-button.bg-gray-100,
+button.quiz-action-button.bg-gray-200,
+button.quiz-action-button.bg-gray-300,
+button.quiz-action-button.bg-gray-400,
+button.quiz-action-button.bg-gray-500,
+button.quiz-action-button.bg-gray-600,
+button.quiz-action-button.bg-gray-700,
+button.quiz-action-button.bg-gray-800,
+button.quiz-action-button.bg-gray-900 {
+  background-color: #06b6d4 !important;
+  color: white !important;
+}
+
+/* ボタン内のテキスト色のみ強制 */
+button.quiz-action-button .text-gray-900,
+button.quiz-action-button .text-gray-700,
+button.quiz-action-button .text-gray-600,
+button.quiz-action-button .text-gray-500,
+button.quiz-action-button h3,
+button.quiz-action-button p {
+  color: white !important;
+}
+
+/* メインメニューボタンの間隔調整 - さらにコンパクト */
+.main-menu-button,
+button.main-menu-button,
+.main-menu-button.main-menu-button {
+  margin: 2px !important;
+  min-height: 120px !important;
+  padding: 16px !important; /* より小さなパディング */
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+/* メインメニューボタンの子要素 - 極小サイズ */
+.main-menu-button div:first-child,
+button.main-menu-button div:first-child {
+  font-size: 1.25rem !important; /* text-xl相当 */
+  margin-bottom: 0.25rem !important; /* mb-1相当 */
+}
+
+.main-menu-button h3,
+button.main-menu-button h3 {
+  font-size: 0.875rem !important; /* text-sm相当 */
+  line-height: 1rem !important;
+  font-weight: 600 !important;
+  margin-bottom: 0.125rem !important;
+}
+
+.main-menu-button p,
+button.main-menu-button p {
+  font-size: 0.75rem !important; /* text-xs */
+  line-height: 1rem !important;
+}
+
+/* より具体的なセレクター */
+button.main-menu-button[class*="quiz-action-button"] div div:first-child {
+  font-size: 1.25rem !important; /* text-xl */
+  margin-bottom: 0.25rem !important;
+}
+
+button.main-menu-button[class*="quiz-action-button"] h3 {
+  font-size: 0.875rem !important; /* text-sm */
+}
+
+button.main-menu-button[class*="quiz-action-button"] p {
+  font-size: 0.75rem !important; /* text-xs */
+}
+
+/* カードスタイルの強化 */
+.main-menu-button {
+  background: rgba(255, 255, 255, 0.9) !important;
+  backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  box-sizing: border-box !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+.dark .main-menu-button {
+  background: rgba(30, 41, 59, 0.8) !important;
+  border: 1px solid rgba(148, 163, 184, 0.2) !important;
+}
+
+/* カードのホバー効果 */
+.main-menu-button:hover {
+  background: rgba(255, 255, 255, 0.95) !important;
+  transform: translateY(-2px) scale(1.02) !important;
+  box-shadow: 
+    0 10px 40px rgba(0, 0, 0, 0.1),
+    0 4px 20px rgba(0, 0, 0, 0.05) !important;
+}
+
+.dark .main-menu-button:hover {
+  background: rgba(30, 41, 59, 0.9) !important;
+  box-shadow: 
+    0 10px 40px rgba(0, 0, 0, 0.3),
+    0 4px 20px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* グリッドの間隔をさらに詰める */
+.grid.gap-4 {
+  gap: 1rem !important;
+}
+
+/* フルスクリーン時のグリッド調整 */
+@media (min-width: 1280px) {
+  .grid.grid-cols-1.md\\:grid-cols-2.lg\\:grid-cols-3 {
+    grid-template-columns: repeat(3, minmax(280px, 1fr)) !important;
+    justify-content: center !important;
+    max-width: 1000px !important;
+    margin: 0 auto !important;
+  }
+}
+
+@media (min-width: 1536px) {
+  .grid.grid-cols-1.md\\:grid-cols-2.lg\\:grid-cols-3 {
+    grid-template-columns: repeat(3, 320px) !important;
+    gap: 2rem !important;
+    justify-content: center !important;
+  }
+}
+
+/* フルスクリーン対応の余白調整 */
+@media (min-width: 1536px) {
+  main.max-w-5xl {
+    max-width: 1200px !important;
+    padding-left: 3rem !important;
+    padding-right: 3rem !important;
+  }
+}
+
+@media (min-width: 1920px) {
+  main.max-w-5xl {
+    max-width: 1400px !important;
+    padding-left: 4rem !important;
+    padding-right: 4rem !important;
+  }
+}
+
+/* フローティングパーティクル効果 */
+@keyframes float {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  33% { transform: translateY(-10px) rotate(120deg); }
+  66% { transform: translateY(10px) rotate(240deg); }
+}
+
+@keyframes sparkle {
+  0%, 100% { opacity: 0; transform: scale(0); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+/* パーティクル要素 */
+.floating-particles {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+  overflow: hidden;
+}
+
+.particle {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  background: radial-gradient(circle, rgba(6, 182, 212, 0.6) 0%, transparent 70%);
+  border-radius: 50%;
+  animation: float 6s ease-in-out infinite;
+}
+
+.dark .particle {
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.6) 0%, transparent 70%);
+}
+
+/* パルス効果 */
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 0.7; }
+  50% { transform: scale(1.1); opacity: 1; }
+}
+
+/* メインコンテナに微細な境界線効果 */
+.min-h-screen.bg-gray-50 {
+  position: relative;
+  overflow-x: hidden;
+}
+
+.min-h-screen.bg-gray-50::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: 
+    radial-gradient(600px circle at 25% 25%, rgba(14, 165, 233, 0.05), transparent 50%),
+    radial-gradient(800px circle at 75% 75%, rgba(139, 92, 246, 0.05), transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.dark .min-h-screen.bg-gray-50::before,
+.dark .min-h-screen::before {
+  background: 
+    radial-gradient(600px circle at 25% 25%, rgba(14, 165, 233, 0.08), transparent 50%),
+    radial-gradient(800px circle at 75% 75%, rgba(139, 92, 246, 0.08), transparent 50%);
+}
+
+/* コンテンツのz-indexを調整 */
+main, .main-menu, [role="main"] {
+  position: relative;
+  z-index: 2;
+}
+
+/* グラスモーフィズム効果の強化 */
+.glassmorphism {
+  background: rgba(255, 255, 255, 0.25) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+}
+
+.dark .glassmorphism {
+  background: rgba(30, 41, 59, 0.6) !important;
+  border: 1px solid rgba(148, 163, 184, 0.2) !important;
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+}
+
+/* スムーズなトランジション */
+* {
+  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease, transform 0.2s ease;
+}
+
+/* カードのシャドウを強化 */
+.shadow-lg {
+  box-shadow: 
+    0 20px 25px -5px rgba(0, 0, 0, 0.1), 
+    0 10px 10px -5px rgba(0, 0, 0, 0.04),
+    0 0 0 1px rgba(255, 255, 255, 0.1) !important;
+}
+
+.dark .shadow-lg {
+  box-shadow: 
+    0 20px 25px -5px rgba(0, 0, 0, 0.4), 
+    0 10px 10px -5px rgba(0, 0, 0, 0.2),
+    0 0 0 1px rgba(255, 255, 255, 0.05) !important;
+}
+
+/* ローディング画面の改善 */
+.animate-spin {
+  background: linear-gradient(45deg, #06b6d4, #0891b2, #0e7490);
+  background-size: 200% 200%;
+  animation: spin 1s linear infinite, gradientShift 3s ease infinite;
+}
+
+.dark .animate-spin {
+  background: linear-gradient(45deg, #8b5cf6, #7c3aed, #6d28d9);
+  background-size: 200% 200%;
+}
+
+/* テキストにグラデーション効果 */
+.text-4xl.font-bold {
+  background: linear-gradient(135deg, #1f2937, #374151, #4b5563);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+}
+
+.dark .text-4xl.font-bold {
+  background: linear-gradient(135deg, #f9fafb, #e5e7eb, #d1d5db);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+/* デバッグ用のbefore疑似要素を無効化 */
