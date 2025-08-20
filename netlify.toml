@@ -1,9 +1,8 @@
 [build]
-    base = "quiz-app-react"
-    command = "npm run build"
-    publish = "dist"
+    command = "cd quiz-app-react && npm install && npm run build"
+    publish = "quiz-app-react/dist"
 
-  [[redirects]]
+[[redirects]]
     from = "/*"
     to = "/index.html"
     status = 200
