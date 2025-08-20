@@ -1,0 +1,15 @@
+{
+  "name": "Minguella",
+  "short_name": "Minguella",
+  "description": "学習クイズアプリケーション - あなたの学習をサポート",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#3b82f6",
+  "orientation": "portrait-primary",
+  "categories": ["education", "productivity"],
+  "lang": "ja",
+  "icons": [],
+  "related_applications": [],
+  "prefer_related_applications": false
+}
