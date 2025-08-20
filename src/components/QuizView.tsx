@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { categoryService, problemService, quizSetService, historyService, quizSessionService, statisticsService } from '../lib/database';
+import { categoryService, problemService, quizSetService, historyService, quizSessionService } from '../lib/database';
 import type { Problem, QuizSet, QuizSession } from '../types';
 
 interface QuizParams {
@@ -539,7 +539,7 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
   };
 
   const startQuiz = async (type: QuizType, useLatestOnly: boolean = true) => {
-    return startQuizWithParams(type, selectedCategory, selectedQuizSet, useLatestOnly);
+    return startQuizWithParams(type, selectedCategory, selectedQuizSet || undefined, useLatestOnly);
   };
 
   const resumeSession = async (sessionId: string) => {

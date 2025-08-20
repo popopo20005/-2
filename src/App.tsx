@@ -149,13 +149,13 @@ function App() {
     setCurrentView('quiz');
   };
 
-  const startCategoryQuiz = (category: string) => {
-    setQuizParams({
-      category,
-      mode: 'categoryQuiz'
-    });
-    setCurrentView('quiz');
-  };
+  // const startCategoryQuiz = (category: string) => {
+  //   setQuizParams({
+  //     category,
+  //     mode: 'categoryQuiz'
+  //   });
+  //   setCurrentView('quiz');
+  // };
 
   const startQuizSetQuiz = (quizSetId: number) => {
     setQuizParams({
