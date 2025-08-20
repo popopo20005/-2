@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { quizSetService, problemService } from '../lib/database';
-import type { QuizSet, Problem } from '../types';
+import type { QuizSet } from '../types';
 
 interface QuizSetCategorySelectorProps {
   onBack: () => void;

@@ -15,7 +15,7 @@ interface ExtendedQuizSet extends QuizSet {
   updatedDate: string;
 }
 
-export function QuizSetManager({ onBack, onStartQuiz, onStartCategoryQuiz }: QuizSetManagerProps) {
+export function QuizSetManager({ onBack }: QuizSetManagerProps) {
   const [language, setLanguage] = useState(localStorage.getItem('language') || 'ja');
   const [isLoading, setIsLoading] = useState(true);
   const [quizSets, setQuizSets] = useState<ExtendedQuizSet[]>([]);
@@ -231,7 +231,7 @@ export function QuizSetManager({ onBack, onStartQuiz, onStartCategoryQuiz }: Qui
         totalProblemsCount: 'Total Problems',
         totalCategoriesCount: 'Total Categories',
         createSamplePrompt: 'No problems or quiz sets found.\n\nWould you like to create sample data?',
-        creatingample: 'Creating sample data...',
+        creatingsample: 'Creating sample data...',
         sampleCreated: 'Sample data created successfully',
         sampleCreateError: 'Sample data creation error:',
         loadingData: 'Loading quiz set data...',
