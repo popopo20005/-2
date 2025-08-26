@@ -827,16 +827,27 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
     const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
     
     // 既存フォーマットの検出: category,question,answer,explanation,option1,option2,option3,option4
-    const isLegacyFormat = headers.includes('answer') && !headers.includes('type') && 
+    // typeカラムがなく、answerカラムがある場合は既存フォーマット
+    const isLegacyFormat = !headers.includes('type') && headers.includes('answer') && 
                           headers.includes('category') && headers.includes('question') && 
                           headers.includes('explanation');
+    
+    console.log('CSV Headers:', headers);
+    console.log('Is Legacy Format:', isLegacyFormat);
     
     // 新フォーマットの検証
     if (!isLegacyFormat) {
       const requiredHeaders = ['category', 'question', 'type', 'explanation'];
       const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
       if (missingHeaders.length > 0) {
-        throw new Error(`必要なカラムがありません: ${missingHeaders.join(', ')}`);
+        const legacyHeaders = ['category', 'question', 'answer', 'explanation'];
+        const missingLegacyHeaders = legacyHeaders.filter(h => !headers.includes(h));
+        
+        if (missingLegacyHeaders.length === 0) {
+          throw new Error(`既存フォーマットのようですが、option1-4カラムが不足している可能性があります。\n検出されたヘッダー: ${headers.join(', ')}`);
+        } else {
+          throw new Error(`新フォーマットに必要なカラムがありません: ${missingHeaders.join(', ')}\n\n既存フォーマット用: category,question,answer,explanation,option1,option2,option3,option4\n新フォーマット用: category,question,type,answer,option1,option2,option3,option4,correctAnswer,explanation\n\n検出されたヘッダー: ${headers.join(', ')}`);
+        }
       }
     }
 
