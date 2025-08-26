@@ -520,56 +520,56 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode }: SettingsProps
               <div className="p-6 overflow-y-auto max-h-[calc(90vh-200px)] bg-white dark:bg-gray-800">
                 <div className="space-y-4">
                   <div className="bg-white dark:bg-gray-700 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-600">
-                    <h4 className="font-semibold text-gray-900 dark:text-white mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2">{t[currentLang].modals.usage.quiz.title}</h4>
-                    <ul className="text-sm text-gray-700 dark:text-gray-200 space-y-2">
+                    <h4 className="font-semibold mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2" style={{ color: isDarkMode ? '#ffffff' : '#ffffff' }}>{t[currentLang].modals.usage.quiz.title}</h4>
+                    <ul className="text-sm space-y-2">
                       {t[currentLang].modals.usage.quiz.items.map((item, index) => (
                         <li key={index} className="flex items-start bg-green-50 dark:bg-green-900/20 p-2 rounded border-l-4 border-green-400">
                           <span className="text-green-600 mr-2">•</span>
-                          <span>{item}</span>
+                          <span style={{ color: isDarkMode ? '#e5e7eb' : '#ffffff' }}>{item}</span>
                         </li>
                       ))}
                     </ul>
                   </div>
                   <div className="bg-white dark:bg-gray-700 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-600">
-                    <h4 className="font-semibold text-gray-900 dark:text-white mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2">{t[currentLang].modals.usage.editor.title}</h4>
-                    <ul className="text-sm text-gray-700 dark:text-gray-200 space-y-2">
+                    <h4 className="font-semibold mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2" style={{ color: isDarkMode ? '#ffffff' : '#ffffff' }}>{t[currentLang].modals.usage.editor.title}</h4>
+                    <ul className="text-sm space-y-2">
                       {t[currentLang].modals.usage.editor.items.map((item, index) => (
                         <li key={index} className="flex items-start bg-yellow-50 dark:bg-yellow-900/20 p-2 rounded border-l-4 border-yellow-400">
                           <span className="text-yellow-600 mr-2">•</span>
-                          <span>{item}</span>
+                          <span style={{ color: isDarkMode ? '#e5e7eb' : '#ffffff' }}>{item}</span>
                         </li>
                       ))}
                     </ul>
                   </div>
                   <div className="bg-white dark:bg-gray-700 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-600">
-                    <h4 className="font-semibold text-gray-900 dark:text-white mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2">{t[currentLang].modals.usage.quizSets.title}</h4>
-                    <ul className="text-sm text-gray-700 dark:text-gray-200 space-y-2">
+                    <h4 className="font-semibold mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2" style={{ color: isDarkMode ? '#ffffff' : '#ffffff' }}>{t[currentLang].modals.usage.quizSets.title}</h4>
+                    <ul className="text-sm space-y-2">
                       {t[currentLang].modals.usage.quizSets.items.map((item, index) => (
                         <li key={index} className="flex items-start bg-purple-50 dark:bg-purple-900/20 p-2 rounded border-l-4 border-purple-400">
                           <span className="text-purple-600 mr-2">•</span>
-                          <span>{item}</span>
+                          <span style={{ color: isDarkMode ? '#e5e7eb' : '#ffffff' }}>{item}</span>
                         </li>
                       ))}
                     </ul>
                   </div>
                   <div className="bg-white dark:bg-gray-700 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-600">
-                    <h4 className="font-semibold text-gray-900 dark:text-white mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2">{t[currentLang].modals.usage.stats.title}</h4>
-                    <ul className="text-sm text-gray-700 dark:text-gray-200 space-y-2">
+                    <h4 className="font-semibold mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2" style={{ color: isDarkMode ? '#ffffff' : '#ffffff' }}>{t[currentLang].modals.usage.stats.title}</h4>
+                    <ul className="text-sm space-y-2">
                       {t[currentLang].modals.usage.stats.items.map((item, index) => (
                         <li key={index} className="flex items-start bg-orange-50 dark:bg-orange-900/20 p-2 rounded border-l-4 border-orange-400">
                           <span className="text-orange-600 mr-2">•</span>
-                          <span>{item}</span>
+                          <span style={{ color: isDarkMode ? '#e5e7eb' : '#ffffff' }}>{item}</span>
                         </li>
                       ))}
                     </ul>
                   </div>
                   <div className="bg-white dark:bg-gray-700 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-600">
-                    <h4 className="font-semibold text-gray-900 dark:text-white mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2">{t[currentLang].modals.usage.backup.title}</h4>
-                    <ul className="text-sm text-gray-700 dark:text-gray-200 space-y-2">
+                    <h4 className="font-semibold mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2" style={{ color: isDarkMode ? '#ffffff' : '#ffffff' }}>{t[currentLang].modals.usage.backup.title}</h4>
+                    <ul className="text-sm space-y-2">
                       {t[currentLang].modals.usage.backup.items.map((item, index) => (
                         <li key={index} className="flex items-start bg-cyan-50 dark:bg-cyan-900/20 p-2 rounded border-l-4 border-cyan-400">
                           <span className="text-cyan-600 mr-2">•</span>
-                          <span>{item}</span>
+                          <span style={{ color: isDarkMode ? '#e5e7eb' : '#ffffff' }}>{item}</span>
                         </li>
                       ))}
                     </ul>
