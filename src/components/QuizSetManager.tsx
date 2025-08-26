@@ -45,6 +45,12 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
     description: ''
   });
   const [createSelectedProblems, setCreateSelectedProblems] = useState<Set<number>>(new Set());
+  
+  // 一括追加モーダル
+  const [isBulkAddModalOpen, setIsBulkAddModalOpen] = useState(false);
+  const [bulkAddQuizSet, setBulkAddQuizSet] = useState<QuizSet | null>(null);
+  const [bulkAddSelectedProblems, setBulkAddSelectedProblems] = useState<Set<number>>(new Set());
+  const [bulkAddAvailableProblems, setBulkAddAvailableProblems] = useState<Problem[]>([]);
 
   useEffect(() => {
     loadData();
@@ -94,6 +100,7 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
         createSample: '🌟 サンプル作成',
         edit: '✏️',
         delete: '🗑️',
+        bulkAdd: '📥 問題を追加',
         cancel: 'キャンセル',
         save: '保存',
         selectAll: '全選択',
@@ -118,6 +125,8 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
       modals: {
         editTitle: '問題集を編集',
         createTitle: '新しい問題集を作成',
+        bulkAddTitle: '問題を一括追加',
+        bulkAddDescription: 'に問題を追加',
         nameLabel: '問題集名',
         nameRequired: '問題集名 *',
         namePlaceholder: '問題集名を入力...',
@@ -125,7 +134,9 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
         descriptionPlaceholder: '問題集の説明を入力...',
         problemSelection: '問題選択',
         problemsSelected: '問選択中',
-        createButtonText: '作成'
+        availableProblems: '追加可能な問題',
+        createButtonText: '作成',
+        addSelectedText: '選択した問題を追加'
       },
       messages: {
         noQuizSets: '問題集がありません',
@@ -148,7 +159,10 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
         quizSetCreated: '問題集を作成しました',
         createError: '問題集の作成に失敗しました',
         detailsComingSoon: '詳細表示機能は復旧中です',
-        createSampleData: '🌟 サンプルデータを作成'
+        createSampleData: '🌟 サンプルデータを作成',
+        bulkAddSuccess: '個の問題を追加しました',
+        bulkAddError: '問題の追加に失敗しました',
+        noAvailableProblems: '追加可能な問題がありません'
       },
       sample: {
         quizSetName: 'サンプル問題集',
@@ -191,6 +205,7 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
         createSample: '🌟 Create Sample',
         edit: '✏️',
         delete: '🗑️',
+        bulkAdd: '📥 Add Problems',
         cancel: 'Cancel',
         save: 'Save',
         selectAll: 'Select All',
@@ -215,6 +230,8 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
       modals: {
         editTitle: 'Edit Quiz Set',
         createTitle: 'Create New Quiz Set',
+        bulkAddTitle: 'Bulk Add Problems',
+        bulkAddDescription: 'Add problems to',
         nameLabel: 'Quiz Set Name',
         nameRequired: 'Quiz Set Name *',
         namePlaceholder: 'Enter quiz set name...',
@@ -222,7 +239,9 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
         descriptionPlaceholder: 'Enter quiz set description...',
         problemSelection: 'Problem Selection',
         problemsSelected: 'problems selected',
-        createButtonText: 'Create'
+        availableProblems: 'Available Problems',
+        createButtonText: 'Create',
+        addSelectedText: 'Add Selected Problems'
       },
       messages: {
         noQuizSets: 'No quiz sets found',
@@ -245,7 +264,10 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
         quizSetCreated: 'Quiz set created successfully',
         createError: 'Failed to create quiz set',
         detailsComingSoon: 'Detail view feature is under development',
-        createSampleData: '🌟 Create Sample Data'
+        createSampleData: '🌟 Create Sample Data',
+        bulkAddSuccess: 'problems added successfully',
+        bulkAddError: 'Failed to add problems',
+        noAvailableProblems: 'No problems available to add'
       },
       sample: {
         quizSetName: 'Sample Quiz Set',
@@ -560,6 +582,61 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
     }
   };
 
+  // 一括追加関数
+  const openBulkAddModal = async (quizSet: ExtendedQuizSet) => {
+    try {
+      // 現在の問題集に含まれていない問題のみを表示
+      const currentProblems = await problemService.getByQuizSetId(quizSet.id!);
+      const currentProblemIds = new Set(currentProblems.map(p => p.id!));
+      const available = allProblems.filter(p => !currentProblemIds.has(p.id!));
+      
+      setBulkAddQuizSet(quizSet);
+      setBulkAddAvailableProblems(available);
+      setBulkAddSelectedProblems(new Set());
+      setIsBulkAddModalOpen(true);
+    } catch (error) {
+      console.error('一括追加モーダル開封エラー:', error);
+    }
+  };
+
+  const closeBulkAddModal = () => {
+    setIsBulkAddModalOpen(false);
+    setBulkAddQuizSet(null);
+    setBulkAddAvailableProblems([]);
+    setBulkAddSelectedProblems(new Set());
+  };
+
+  const bulkAddProblems = async () => {
+    if (!bulkAddQuizSet || bulkAddSelectedProblems.size === 0) {
+      alert(t[currentLang].messages.selectAtLeastOne);
+      return;
+    }
+
+    try {
+      // 現在の問題IDを取得
+      const currentProblems = await problemService.getByQuizSetId(bulkAddQuizSet.id!);
+      const currentProblemIds = currentProblems.map(p => p.id!);
+      
+      // 選択された問題を追加
+      const newProblemIds = [...currentProblemIds, ...Array.from(bulkAddSelectedProblems)];
+      
+      // 問題集を更新
+      const updatedQuizSet = {
+        ...bulkAddQuizSet,
+        problemIds: newProblemIds,
+        updatedAt: new Date()
+      };
+      
+      await quizSetService.update(updatedQuizSet.id!, updatedQuizSet);
+      await loadData();
+      closeBulkAddModal();
+      alert(`${bulkAddSelectedProblems.size}${t[currentLang].messages.bulkAddSuccess}`);
+    } catch (error) {
+      console.error('一括追加エラー:', error);
+      alert(t[currentLang].messages.bulkAddError);
+    }
+  };
+
   // フィルタリングとソート
   const filteredQuizSets = quizSets
     .filter(quizSet => {
@@ -782,6 +859,13 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
                         title="編集"
                       >
                         {t[currentLang].buttons.edit}
+                      </button>
+                      <button
+                        onClick={() => openBulkAddModal(quizSet)}
+                        className="quiz-action-button p-1 text-sm rounded bg-green-500 hover:bg-green-600"
+                        title="問題を追加"
+                      >
+                        {t[currentLang].buttons.bulkAdd}
                       </button>
                       <button
                         onClick={() => deleteQuizSet(quizSet.id!)}
@@ -1328,6 +1412,161 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
                 }}
               >
                 {t[currentLang].modals.createButtonText}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 一括追加モーダル */}
+      {isBulkAddModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '8px',
+            padding: '24px',
+            maxWidth: '600px',
+            width: '90%',
+            maxHeight: '80vh',
+            overflow: 'auto'
+          }}>
+            <h3 style={{ marginBottom: '16px', fontSize: '18px', fontWeight: 'bold' }}>
+              {t[currentLang].modals.bulkAddTitle}
+            </h3>
+            
+            {bulkAddQuizSet && (
+              <p style={{ marginBottom: '16px', color: '#666' }}>
+                {t[currentLang].modals.bulkAddDescription}「{bulkAddQuizSet.name}」
+              </p>
+            )}
+
+            <h4 style={{ marginBottom: '12px', fontSize: '16px', fontWeight: '600' }}>
+              {t[currentLang].modals.availableProblems} ({bulkAddAvailableProblems.length}件)
+            </h4>
+
+            {bulkAddAvailableProblems.length === 0 ? (
+              <p style={{ color: '#999', fontStyle: 'italic' }}>
+                {t[currentLang].messages.noAvailableProblems}
+              </p>
+            ) : (
+              <>
+                <div style={{ marginBottom: '12px' }}>
+                  <button
+                    onClick={() => {
+                      if (bulkAddSelectedProblems.size === bulkAddAvailableProblems.length) {
+                        setBulkAddSelectedProblems(new Set());
+                      } else {
+                        setBulkAddSelectedProblems(new Set(bulkAddAvailableProblems.map(p => p.id!)));
+                      }
+                    }}
+                    className="quiz-action-button"
+                    style={{ padding: '4px 8px', fontSize: '12px' }}
+                  >
+                    {bulkAddSelectedProblems.size === bulkAddAvailableProblems.length ? 
+                      t[currentLang].buttons.deselectAll : t[currentLang].buttons.selectAll}
+                  </button>
+                  <span style={{ marginLeft: '12px', color: '#666', fontSize: '14px' }}>
+                    {bulkAddSelectedProblems.size} / {bulkAddAvailableProblems.length} {t[currentLang].modals.problemsSelected}
+                  </span>
+                </div>
+
+                <div style={{ 
+                  maxHeight: '300px', 
+                  overflowY: 'auto', 
+                  border: '1px solid #e5e7eb', 
+                  borderRadius: '4px',
+                  marginBottom: '16px'
+                }}>
+                  {bulkAddAvailableProblems.map(problem => (
+                    <label
+                      key={problem.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        padding: '12px',
+                        borderBottom: '1px solid #f3f4f6',
+                        cursor: 'pointer',
+                        backgroundColor: bulkAddSelectedProblems.has(problem.id!) ? '#f0f9ff' : 'white'
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={bulkAddSelectedProblems.has(problem.id!)}
+                        onChange={(e) => {
+                          const newSelected = new Set(bulkAddSelectedProblems);
+                          if (e.target.checked) {
+                            newSelected.add(problem.id!);
+                          } else {
+                            newSelected.delete(problem.id!);
+                          }
+                          setBulkAddSelectedProblems(newSelected);
+                        }}
+                        style={{ marginRight: '8px', marginTop: '2px' }}
+                      />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: '500', marginBottom: '4px' }}>
+                          {problem.question}
+                        </div>
+                        {problem.category && (
+                          <div style={{ 
+                            fontSize: '12px', 
+                            color: '#6b7280',
+                            backgroundColor: '#f3f4f6',
+                            padding: '2px 6px',
+                            borderRadius: '12px',
+                            display: 'inline-block'
+                          }}>
+                            {problem.category}
+                          </div>
+                        )}
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={closeBulkAddModal}
+                className="glassmorphism"
+                style={{
+                  padding: '8px 16px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  transition: 'background-color 0.2s'
+                }}
+              >
+                {t[currentLang].buttons.cancel}
+              </button>
+              <button
+                onClick={bulkAddProblems}
+                disabled={bulkAddSelectedProblems.size === 0}
+                className="quiz-action-button"
+                style={{
+                  padding: '8px 16px',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  cursor: bulkAddSelectedProblems.size === 0 ? 'not-allowed' : 'pointer',
+                  opacity: bulkAddSelectedProblems.size === 0 ? 0.5 : 1,
+                  transition: 'background-color 0.2s'
+                }}
+              >
+                {t[currentLang].modals.addSelectedText} ({bulkAddSelectedProblems.size})
               </button>
             </div>
           </div>
