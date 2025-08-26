@@ -786,7 +786,7 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
         updatedAt: new Date()
       };
       
-      await quizSetService.update(updatedQuizSet.id!, updatedQuizSet);
+      await quizSetService.save(updatedQuizSet);
       await loadData();
       closeBulkAddModal();
       alert(`${validProblems.length}${t[currentLang].messages.bulkAddSuccess}`);
@@ -824,16 +824,22 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
       throw new Error('CSVファイルにはヘッダー行とデータ行が必要です。');
     }
 
-    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+    // 重複ヘッダー行の除去（最初の行が2回出現する場合）
+    let headerLine = lines[0];
+    let dataStartIndex = 1;
+    
+    // 最初の行と2行目が同じ場合、2行目をスキップ
+    if (lines.length > 1 && lines[0] === lines[1]) {
+      dataStartIndex = 2;
+    }
+    
+    const headers = headerLine.split(',').map(h => h.trim().replace(/"/g, ''));
     
     // 既存フォーマットの検出: category,question,answer,explanation,option1,option2,option3,option4
     // typeカラムがなく、answerカラムがある場合は既存フォーマット
     const isLegacyFormat = !headers.includes('type') && headers.includes('answer') && 
                           headers.includes('category') && headers.includes('question') && 
                           headers.includes('explanation');
-    
-    console.log('CSV Headers:', headers);
-    console.log('Is Legacy Format:', isLegacyFormat);
     
     // 新フォーマットの検証
     if (!isLegacyFormat) {
@@ -852,7 +858,7 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
     }
 
     const problems = [];
-    for (let i = 1; i < lines.length; i++) {
+    for (let i = dataStartIndex; i < lines.length; i++) {
       const line = lines[i];
       if (!line.trim()) continue;
       
