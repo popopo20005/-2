@@ -952,7 +952,7 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-6 bg-white dark:bg-gray-800 rounded-lg shadow-lg">
+    <div className="max-w-4xl mx-auto p-6 bg-white dark:bg-gray-800 rounded-lg shadow-lg relative" style={{ zIndex: showScanner ? 1 : 'auto' }}>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
           {t[currentLang].pageTitle}
