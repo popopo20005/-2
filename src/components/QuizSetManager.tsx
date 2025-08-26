@@ -46,11 +46,19 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
   });
   const [createSelectedProblems, setCreateSelectedProblems] = useState<Set<number>>(new Set());
   
-  // 一括追加モーダル
+  // 一括追加モーダル（新しい問題作成用）
   const [isBulkAddModalOpen, setIsBulkAddModalOpen] = useState(false);
   const [bulkAddQuizSet, setBulkAddQuizSet] = useState<QuizSet | null>(null);
-  const [bulkAddSelectedProblems, setBulkAddSelectedProblems] = useState<Set<number>>(new Set());
-  const [bulkAddAvailableProblems, setBulkAddAvailableProblems] = useState<Problem[]>([]);
+  const [newProblems, setNewProblems] = useState<Array<{
+    category: string;
+    question: string;
+    type: 'true-false' | 'multiple-choice';
+    answer?: boolean;
+    options?: string[];
+    correctAnswer?: number;
+    explanation: string;
+  }>>([]);
+  const [currentProblemIndex, setCurrentProblemIndex] = useState(0);
 
   useEffect(() => {
     loadData();
@@ -125,8 +133,8 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
       modals: {
         editTitle: '問題集を編集',
         createTitle: '新しい問題集を作成',
-        bulkAddTitle: '問題を一括追加',
-        bulkAddDescription: 'に問題を追加',
+        bulkAddTitle: '新しい問題を作成して追加',
+        bulkAddDescription: 'に新しい問題を作成して追加',
         nameLabel: '問題集名',
         nameRequired: '問題集名 *',
         namePlaceholder: '問題集名を入力...',
@@ -136,7 +144,23 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
         problemsSelected: '問選択中',
         availableProblems: '追加可能な問題',
         createButtonText: '作成',
-        addSelectedText: '選択した問題を追加'
+        addSelectedText: '選択した問題を追加',
+        addNewProblem: '新しい問題を追加',
+        problemForm: '問題作成フォーム',
+        questionLabel: '問題文',
+        questionPlaceholder: '問題文を入力...',
+        categoryLabel: 'カテゴリ',
+        typeLabel: '問題タイプ',
+        trueFalse: '○×問題',
+        multipleChoice: '選択問題',
+        answerLabel: '正解',
+        optionsLabel: '選択肢',
+        explanationLabel: '解説',
+        explanationPlaceholder: '解説を入力...',
+        addOption: '選択肢を追加',
+        removeOption: '削除',
+        createProblems: '問題を作成して追加',
+        problemCount: '問題'
       },
       messages: {
         noQuizSets: '問題集がありません',
@@ -230,8 +254,8 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
       modals: {
         editTitle: 'Edit Quiz Set',
         createTitle: 'Create New Quiz Set',
-        bulkAddTitle: 'Bulk Add Problems',
-        bulkAddDescription: 'Add problems to',
+        bulkAddTitle: 'Create and Add New Problems',
+        bulkAddDescription: 'Create new problems for',
         nameLabel: 'Quiz Set Name',
         nameRequired: 'Quiz Set Name *',
         namePlaceholder: 'Enter quiz set name...',
@@ -241,7 +265,23 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
         problemsSelected: 'problems selected',
         availableProblems: 'Available Problems',
         createButtonText: 'Create',
-        addSelectedText: 'Add Selected Problems'
+        addSelectedText: 'Add Selected Problems',
+        addNewProblem: 'Add New Problem',
+        problemForm: 'Problem Creation Form',
+        questionLabel: 'Question',
+        questionPlaceholder: 'Enter question...',
+        categoryLabel: 'Category',
+        typeLabel: 'Problem Type',
+        trueFalse: 'True/False',
+        multipleChoice: 'Multiple Choice',
+        answerLabel: 'Answer',
+        optionsLabel: 'Options',
+        explanationLabel: 'Explanation',
+        explanationPlaceholder: 'Enter explanation...',
+        addOption: 'Add Option',
+        removeOption: 'Remove',
+        createProblems: 'Create and Add Problems',
+        problemCount: 'problems'
       },
       messages: {
         noQuizSets: 'No quiz sets found',
@@ -582,64 +622,146 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
     }
   };
 
-  // 一括追加関数
+  // 新しい問題作成・一括追加関数
   const openBulkAddModal = async (quizSet: ExtendedQuizSet) => {
     console.log('openBulkAddModal called with:', quizSet);
-    console.log('allProblems length:', allProblems.length);
     
-    try {
-      // 現在の問題集に含まれていない問題のみを表示
-      const currentProblemIds = new Set(quizSet.problemIds || []);
-      console.log('currentProblemIds:', currentProblemIds);
-      
-      const available = allProblems.filter(p => !currentProblemIds.has(p.id!));
-      console.log('available problems:', available.length);
-      
-      setBulkAddQuizSet(quizSet);
-      setBulkAddAvailableProblems(available);
-      setBulkAddSelectedProblems(new Set());
-      setIsBulkAddModalOpen(true);
-      
-      console.log('Modal should now be open, isBulkAddModalOpen set to true');
-    } catch (error) {
-      console.error('一括追加モーダル開封エラー:', error);
-      alert('モーダルを開くことができませんでした: ' + error.message);
-    }
+    setBulkAddQuizSet(quizSet);
+    // 最初の問題のテンプレートを作成
+    setNewProblems([{
+      category: '',
+      question: '',
+      type: 'true-false',
+      answer: true,
+      explanation: ''
+    }]);
+    setCurrentProblemIndex(0);
+    setIsBulkAddModalOpen(true);
+    
+    console.log('Modal should now be open for creating new problems');
   };
 
   const closeBulkAddModal = () => {
     setIsBulkAddModalOpen(false);
     setBulkAddQuizSet(null);
-    setBulkAddAvailableProblems([]);
-    setBulkAddSelectedProblems(new Set());
+    setNewProblems([]);
+    setCurrentProblemIndex(0);
   };
 
-  const bulkAddProblems = async () => {
-    if (!bulkAddQuizSet || bulkAddSelectedProblems.size === 0) {
+  // 新しい問題を追加
+  const addNewProblem = () => {
+    setNewProblems(prev => [...prev, {
+      category: '',
+      question: '',
+      type: 'true-false',
+      answer: true,
+      explanation: ''
+    }]);
+  };
+
+  // 問題を削除
+  const removeProblem = (index: number) => {
+    if (newProblems.length > 1) {
+      setNewProblems(prev => prev.filter((_, i) => i !== index));
+      if (currentProblemIndex >= newProblems.length - 1) {
+        setCurrentProblemIndex(Math.max(0, newProblems.length - 2));
+      }
+    }
+  };
+
+  // 問題フィールドを更新
+  const updateProblem = (index: number, field: string, value: any) => {
+    setNewProblems(prev => prev.map((problem, i) => 
+      i === index ? { ...problem, [field]: value } : problem
+    ));
+  };
+
+  // 選択肢を追加
+  const addOption = (problemIndex: number) => {
+    const problem = newProblems[problemIndex];
+    const options = problem.options || ['', ''];
+    updateProblem(problemIndex, 'options', [...options, '']);
+  };
+
+  // 選択肢を削除
+  const removeOption = (problemIndex: number, optionIndex: number) => {
+    const problem = newProblems[problemIndex];
+    const options = problem.options || [];
+    if (options.length > 2) {
+      const newOptions = options.filter((_, i) => i !== optionIndex);
+      updateProblem(problemIndex, 'options', newOptions);
+      // 正解インデックスを調整
+      if (problem.correctAnswer !== undefined && problem.correctAnswer >= optionIndex) {
+        updateProblem(problemIndex, 'correctAnswer', Math.max(0, problem.correctAnswer - 1));
+      }
+    }
+  };
+
+  // 問題を作成して問題集に追加
+  const createAndAddProblems = async () => {
+    if (!bulkAddQuizSet || newProblems.length === 0) {
       alert(t[currentLang].messages.selectAtLeastOne);
       return;
     }
 
+    // 問題の検証
+    const validProblems = newProblems.filter(problem => {
+      if (!problem.category || !problem.question || !problem.explanation) {
+        return false;
+      }
+      if (problem.type === 'multiple-choice') {
+        return problem.options && problem.options.length >= 2 && 
+               problem.options.every(opt => opt.trim()) &&
+               problem.correctAnswer !== undefined;
+      }
+      return true;
+    });
+
+    if (validProblems.length === 0) {
+      alert('有効な問題がありません。すべてのフィールドを入力してください。');
+      return;
+    }
+
     try {
-      // 現在の問題IDを取得
-      const currentProblemIds = bulkAddQuizSet.problemIds || [];
+      // 新しい問題をデータベースに保存
+      const createdProblemIds: number[] = [];
       
-      // 選択された問題を追加
-      const newProblemIds = [...currentProblemIds, ...Array.from(bulkAddSelectedProblems)];
+      for (const problem of validProblems) {
+        const problemData = {
+          category: problem.category,
+          question: problem.question,
+          type: problem.type,
+          explanation: problem.explanation,
+          ...(problem.type === 'true-false' 
+            ? { answer: problem.answer }
+            : { 
+                options: problem.options, 
+                correctAnswer: problem.correctAnswer 
+              }
+          )
+        };
+        
+        const problemId = await problemService.add(problemData);
+        createdProblemIds.push(problemId);
+        
+        // カテゴリーも追加
+        await categoryService.add(problem.category);
+      }
       
       // 問題集を更新
+      const currentProblemIds = bulkAddQuizSet.problemIds || [];
       const updatedQuizSet = {
         ...bulkAddQuizSet,
-        problemIds: newProblemIds,
+        problemIds: [...currentProblemIds, ...createdProblemIds],
         updatedAt: new Date()
       };
       
       await quizSetService.update(updatedQuizSet.id!, updatedQuizSet);
       await loadData();
       closeBulkAddModal();
-      alert(`${bulkAddSelectedProblems.size}${t[currentLang].messages.bulkAddSuccess}`);
+      alert(`${validProblems.length}${t[currentLang].messages.bulkAddSuccess}`);
     } catch (error) {
-      console.error('一括追加エラー:', error);
+      console.error('問題作成エラー:', error);
       alert(t[currentLang].messages.bulkAddError);
     }
   };
@@ -1459,91 +1581,237 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
               </p>
             )}
 
-            <h4 style={{ marginBottom: '12px', fontSize: '16px', fontWeight: '600' }}>
-              {t[currentLang].modals.availableProblems} ({bulkAddAvailableProblems.length}件)
-            </h4>
+{/* 問題作成フォーム */}
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                <h4 style={{ fontSize: '16px', fontWeight: '600', margin: 0 }}>
+                  {t[currentLang].modals.problemForm} ({newProblems.length} {t[currentLang].modals.problemCount})
+                </h4>
+                <button
+                  onClick={addNewProblem}
+                  className="quiz-action-button"
+                  style={{ padding: '4px 8px', fontSize: '12px' }}
+                >
+                  {t[currentLang].modals.addNewProblem}
+                </button>
+              </div>
 
-            {bulkAddAvailableProblems.length === 0 ? (
-              <p style={{ color: '#999', fontStyle: 'italic' }}>
-                {t[currentLang].messages.noAvailableProblems}
-              </p>
-            ) : (
-              <>
-                <div style={{ marginBottom: '12px' }}>
-                  <button
-                    onClick={() => {
-                      if (bulkAddSelectedProblems.size === bulkAddAvailableProblems.length) {
-                        setBulkAddSelectedProblems(new Set());
-                      } else {
-                        setBulkAddSelectedProblems(new Set(bulkAddAvailableProblems.map(p => p.id!)));
-                      }
-                    }}
-                    className="quiz-action-button"
-                    style={{ padding: '4px 8px', fontSize: '12px' }}
-                  >
-                    {bulkAddSelectedProblems.size === bulkAddAvailableProblems.length ? 
-                      t[currentLang].buttons.deselectAll : t[currentLang].buttons.selectAll}
-                  </button>
-                  <span style={{ marginLeft: '12px', color: '#666', fontSize: '14px' }}>
-                    {bulkAddSelectedProblems.size} / {bulkAddAvailableProblems.length} {t[currentLang].modals.problemsSelected}
-                  </span>
-                </div>
-
-                <div style={{ 
-                  maxHeight: '300px', 
-                  overflowY: 'auto', 
-                  border: '1px solid #e5e7eb', 
-                  borderRadius: '4px',
-                  marginBottom: '16px'
-                }}>
-                  {bulkAddAvailableProblems.map(problem => (
-                    <label
-                      key={problem.id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        padding: '12px',
-                        borderBottom: '1px solid #f3f4f6',
-                        cursor: 'pointer',
-                        backgroundColor: bulkAddSelectedProblems.has(problem.id!) ? '#f0f9ff' : 'white'
+              {/* 問題ナビゲーション */}
+              {newProblems.length > 1 && (
+                <div style={{ marginBottom: '12px', display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                  {newProblems.map((_, index) => (
+                    <button
+                      key={index}
+                      onClick={() => setCurrentProblemIndex(index)}
+                      className={currentProblemIndex === index ? "quiz-action-button" : "glassmorphism"}
+                      style={{ 
+                        padding: '4px 8px', 
+                        fontSize: '12px',
+                        border: '1px solid #d1d5db'
                       }}
                     >
-                      <input
-                        type="checkbox"
-                        checked={bulkAddSelectedProblems.has(problem.id!)}
-                        onChange={(e) => {
-                          const newSelected = new Set(bulkAddSelectedProblems);
-                          if (e.target.checked) {
-                            newSelected.add(problem.id!);
-                          } else {
-                            newSelected.delete(problem.id!);
-                          }
-                          setBulkAddSelectedProblems(newSelected);
-                        }}
-                        style={{ marginRight: '8px', marginTop: '2px' }}
-                      />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: '500', marginBottom: '4px' }}>
-                          {problem.question}
-                        </div>
-                        {problem.category && (
-                          <div style={{ 
-                            fontSize: '12px', 
-                            color: '#6b7280',
-                            backgroundColor: '#f3f4f6',
-                            padding: '2px 6px',
-                            borderRadius: '12px',
-                            display: 'inline-block'
-                          }}>
-                            {problem.category}
-                          </div>
-                        )}
-                      </div>
-                    </label>
+                      問題 {index + 1}
+                    </button>
                   ))}
                 </div>
-              </>
-            )}
+              )}
+
+              {/* 現在の問題フォーム */}
+              {newProblems[currentProblemIndex] && (
+                <div style={{ 
+                  border: '1px solid #e5e7eb', 
+                  borderRadius: '8px', 
+                  padding: '16px',
+                  backgroundColor: '#f9fafb',
+                  marginBottom: '12px'
+                }}>
+                  <div style={{ display: 'flex', gap: '12px', marginBottom: '12px' }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500' }}>
+                        {t[currentLang].modals.categoryLabel} *
+                      </label>
+                      <input
+                        type="text"
+                        value={newProblems[currentProblemIndex].category}
+                        onChange={(e) => updateProblem(currentProblemIndex, 'category', e.target.value)}
+                        placeholder="カテゴリを入力..."
+                        style={{
+                          width: '100%',
+                          padding: '8px',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '4px'
+                        }}
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500' }}>
+                        {t[currentLang].modals.typeLabel}
+                      </label>
+                      <select
+                        value={newProblems[currentProblemIndex].type}
+                        onChange={(e) => {
+                          const type = e.target.value as 'true-false' | 'multiple-choice';
+                          updateProblem(currentProblemIndex, 'type', type);
+                          if (type === 'multiple-choice') {
+                            updateProblem(currentProblemIndex, 'options', ['', '']);
+                            updateProblem(currentProblemIndex, 'correctAnswer', 0);
+                          }
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '8px',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '4px'
+                        }}
+                      >
+                        <option value="true-false">{t[currentLang].modals.trueFalse}</option>
+                        <option value="multiple-choice">{t[currentLang].modals.multipleChoice}</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: '12px' }}>
+                    <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500' }}>
+                      {t[currentLang].modals.questionLabel} *
+                    </label>
+                    <textarea
+                      value={newProblems[currentProblemIndex].question}
+                      onChange={(e) => updateProblem(currentProblemIndex, 'question', e.target.value)}
+                      placeholder={t[currentLang].modals.questionPlaceholder}
+                      rows={3}
+                      style={{
+                        width: '100%',
+                        padding: '8px',
+                        border: '1px solid #d1d5db',
+                        borderRadius: '4px',
+                        resize: 'vertical'
+                      }}
+                    />
+                  </div>
+
+                  {/* 回答部分 */}
+                  {newProblems[currentProblemIndex].type === 'true-false' ? (
+                    <div style={{ marginBottom: '12px' }}>
+                      <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500' }}>
+                        {t[currentLang].modals.answerLabel}
+                      </label>
+                      <div style={{ display: 'flex', gap: '12px' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <input
+                            type="radio"
+                            name={`answer-${currentProblemIndex}`}
+                            checked={newProblems[currentProblemIndex].answer === true}
+                            onChange={() => updateProblem(currentProblemIndex, 'answer', true)}
+                          />
+                          ○（正しい）
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <input
+                            type="radio"
+                            name={`answer-${currentProblemIndex}`}
+                            checked={newProblems[currentProblemIndex].answer === false}
+                            onChange={() => updateProblem(currentProblemIndex, 'answer', false)}
+                          />
+                          ×（間違い）
+                        </label>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ marginBottom: '12px' }}>
+                      <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500' }}>
+                        {t[currentLang].modals.optionsLabel} *
+                      </label>
+                      {(newProblems[currentProblemIndex].options || []).map((option, optIndex) => (
+                        <div key={optIndex} style={{ display: 'flex', gap: '8px', marginBottom: '4px', alignItems: 'center' }}>
+                          <input
+                            type="radio"
+                            name={`correct-${currentProblemIndex}`}
+                            checked={newProblems[currentProblemIndex].correctAnswer === optIndex}
+                            onChange={() => updateProblem(currentProblemIndex, 'correctAnswer', optIndex)}
+                          />
+                          <input
+                            type="text"
+                            value={option}
+                            onChange={(e) => {
+                              const newOptions = [...(newProblems[currentProblemIndex].options || [])];
+                              newOptions[optIndex] = e.target.value;
+                              updateProblem(currentProblemIndex, 'options', newOptions);
+                            }}
+                            placeholder={`選択肢 ${optIndex + 1}`}
+                            style={{
+                              flex: 1,
+                              padding: '6px',
+                              border: '1px solid #d1d5db',
+                              borderRadius: '4px'
+                            }}
+                          />
+                          {(newProblems[currentProblemIndex].options || []).length > 2 && (
+                            <button
+                              onClick={() => removeOption(currentProblemIndex, optIndex)}
+                              style={{
+                                padding: '4px 8px',
+                                backgroundColor: '#ef4444',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                fontSize: '12px'
+                              }}
+                            >
+                              {t[currentLang].modals.removeOption}
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <button
+                        onClick={() => addOption(currentProblemIndex)}
+                        className="quiz-action-button"
+                        style={{ padding: '4px 8px', fontSize: '12px', marginTop: '4px' }}
+                      >
+                        {t[currentLang].modals.addOption}
+                      </button>
+                    </div>
+                  )}
+
+                  <div style={{ marginBottom: '12px' }}>
+                    <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500' }}>
+                      {t[currentLang].modals.explanationLabel} *
+                    </label>
+                    <textarea
+                      value={newProblems[currentProblemIndex].explanation}
+                      onChange={(e) => updateProblem(currentProblemIndex, 'explanation', e.target.value)}
+                      placeholder={t[currentLang].modals.explanationPlaceholder}
+                      rows={2}
+                      style={{
+                        width: '100%',
+                        padding: '8px',
+                        border: '1px solid #d1d5db',
+                        borderRadius: '4px',
+                        resize: 'vertical'
+                      }}
+                    />
+                  </div>
+
+                  {/* 問題削除ボタン */}
+                  {newProblems.length > 1 && (
+                    <div style={{ textAlign: 'right' }}>
+                      <button
+                        onClick={() => removeProblem(currentProblemIndex)}
+                        style={{
+                          padding: '4px 8px',
+                          backgroundColor: '#ef4444',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          fontSize: '12px'
+                        }}
+                      >
+                        この問題を削除
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
               <button
@@ -1561,20 +1829,20 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
                 {t[currentLang].buttons.cancel}
               </button>
               <button
-                onClick={bulkAddProblems}
-                disabled={bulkAddSelectedProblems.size === 0}
+                onClick={createAndAddProblems}
+                disabled={newProblems.length === 0}
                 className="quiz-action-button"
                 style={{
                   padding: '8px 16px',
                   border: 'none',
                   borderRadius: '6px',
                   fontSize: '14px',
-                  cursor: bulkAddSelectedProblems.size === 0 ? 'not-allowed' : 'pointer',
-                  opacity: bulkAddSelectedProblems.size === 0 ? 0.5 : 1,
+                  cursor: newProblems.length === 0 ? 'not-allowed' : 'pointer',
+                  opacity: newProblems.length === 0 ? 0.5 : 1,
                   transition: 'background-color 0.2s'
                 }}
               >
-                {t[currentLang].modals.addSelectedText} ({bulkAddSelectedProblems.size})
+                {t[currentLang].modals.createProblems} ({newProblems.length})
               </button>
             </div>
           </div>
