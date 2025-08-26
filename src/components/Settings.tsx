@@ -624,8 +624,8 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode }: SettingsProps
                 <div className="space-y-4">
                   {t[currentLang].modals.faq.items.map((item, index) => (
                     <div key={index} className="bg-white dark:bg-gray-700 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-600">
-                      <h4 className="font-semibold text-gray-900 dark:text-white mb-3 text-base">{item.q}</h4>
-                      <p className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed bg-blue-50 dark:bg-blue-900/20 p-3 rounded border-l-4 border-blue-400">{item.a}</p>
+                      <h4 className="font-semibold mb-3 text-base" style={{ color: isDarkMode ? '#ffffff' : '#ffffff' }}>{item.q}</h4>
+                      <p className="text-sm leading-relaxed bg-blue-50 dark:bg-blue-900/20 p-3 rounded border-l-4 border-blue-400" style={{ color: isDarkMode ? '#e5e7eb' : '#ffffff' }}>{item.a}</p>
                     </div>
                   ))}
                 </div>
