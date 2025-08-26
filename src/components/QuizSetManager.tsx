@@ -155,7 +155,8 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
         uploadFile: 'ファイルをアップロード',
         uploadDescription: 'CSV または JSON ファイルから問題を一括追加できます',
         fileFormats: 'サポート形式: .csv, .json',
-        csvFormat: 'CSV形式',
+        csvFormat: '新CSV形式',
+        legacyCsvFormat: '既存CSV形式',
         jsonFormat: 'JSON形式',
         downloadTemplate: 'テンプレートをダウンロード',
         parseFile: 'ファイルを解析',
@@ -287,7 +288,8 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
         uploadFile: 'Upload File',
         uploadDescription: 'Bulk add problems from CSV or JSON files',
         fileFormats: 'Supported formats: .csv, .json',
-        csvFormat: 'CSV Format',
+        csvFormat: 'New CSV Format',
+        legacyCsvFormat: 'Legacy CSV Format',
         jsonFormat: 'JSON Format',
         downloadTemplate: 'Download Template',
         parseFile: 'Parse File',
@@ -823,11 +825,19 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
     }
 
     const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-    const requiredHeaders = ['category', 'question', 'type', 'explanation'];
     
-    const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
-    if (missingHeaders.length > 0) {
-      throw new Error(`必要なカラムがありません: ${missingHeaders.join(', ')}`);
+    // 既存フォーマットの検出: category,question,answer,explanation,option1,option2,option3,option4
+    const isLegacyFormat = headers.includes('answer') && !headers.includes('type') && 
+                          headers.includes('category') && headers.includes('question') && 
+                          headers.includes('explanation');
+    
+    // 新フォーマットの検証
+    if (!isLegacyFormat) {
+      const requiredHeaders = ['category', 'question', 'type', 'explanation'];
+      const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+      if (missingHeaders.length > 0) {
+        throw new Error(`必要なカラムがありません: ${missingHeaders.join(', ')}`);
+      }
     }
 
     const problems = [];
@@ -846,38 +856,74 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
         problemData[header] = values[index];
       });
 
-      // 必要なフィールドの検証
-      if (!problemData.category || !problemData.question || !problemData.type || !problemData.explanation) {
-        console.warn(`行 ${i + 1}: 必要なフィールドが不足しています`);
-        continue;
-      }
+      let problem: any;
 
-      const problem: any = {
-        category: problemData.category,
-        question: problemData.question,
-        type: problemData.type === 'multiple-choice' ? 'multiple-choice' : 'true-false',
-        explanation: problemData.explanation
-      };
+      if (isLegacyFormat) {
+        // 既存フォーマットの処理: category,question,answer,explanation,option1,option2,option3,option4
+        if (!problemData.category || !problemData.question || !problemData.explanation) {
+          console.warn(`行 ${i + 1}: 必要なフィールドが不足しています (既存形式)`);
+          continue;
+        }
 
-      if (problem.type === 'true-false') {
-        problem.answer = problemData.answer === 'true' || problemData.answer === '1' || problemData.answer === 'TRUE';
-      } else if (problem.type === 'multiple-choice') {
+        // 選択肢の存在をチェックして問題タイプを決定
         const options = [
           problemData.option1,
           problemData.option2,
           problemData.option3,
           problemData.option4
         ].filter(opt => opt && opt.trim());
-        
-        if (options.length < 2) {
-          console.warn(`行 ${i + 1}: 多択問題には最低2つの選択肢が必要です`);
+
+        problem = {
+          category: problemData.category,
+          question: problemData.question,
+          explanation: problemData.explanation
+        };
+
+        if (options.length >= 2) {
+          // 多択問題
+          problem.type = 'multiple-choice';
+          problem.options = options;
+          problem.correctAnswer = 0; // デフォルトで最初の選択肢を正解に
+        } else {
+          // 真偽問題
+          problem.type = 'true-false';
+          const answerValue = problemData.answer;
+          problem.answer = answerValue === 'true' || answerValue === '1' || answerValue === 'TRUE' || answerValue === true;
+        }
+      } else {
+        // 新フォーマットの処理: category,question,type,answer,option1,option2,option3,option4,correctAnswer,explanation
+        if (!problemData.category || !problemData.question || !problemData.type || !problemData.explanation) {
+          console.warn(`行 ${i + 1}: 必要なフィールドが不足しています (新形式)`);
           continue;
         }
 
-        problem.options = options;
-        problem.correctAnswer = parseInt(problemData.correctAnswer || '0', 10);
-        if (problem.correctAnswer >= options.length) {
-          problem.correctAnswer = 0;
+        problem = {
+          category: problemData.category,
+          question: problemData.question,
+          type: problemData.type === 'multiple-choice' ? 'multiple-choice' : 'true-false',
+          explanation: problemData.explanation
+        };
+
+        if (problem.type === 'true-false') {
+          problem.answer = problemData.answer === 'true' || problemData.answer === '1' || problemData.answer === 'TRUE';
+        } else if (problem.type === 'multiple-choice') {
+          const options = [
+            problemData.option1,
+            problemData.option2,
+            problemData.option3,
+            problemData.option4
+          ].filter(opt => opt && opt.trim());
+          
+          if (options.length < 2) {
+            console.warn(`行 ${i + 1}: 多択問題には最低2つの選択肢が必要です`);
+            continue;
+          }
+
+          problem.options = options;
+          problem.correctAnswer = parseInt(problemData.correctAnswer || '0', 10);
+          if (problem.correctAnswer >= options.length) {
+            problem.correctAnswer = 0;
+          }
         }
       }
 
@@ -965,7 +1011,7 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
   };
 
   // テンプレートファイルをダウンロード
-  const downloadTemplate = (format: 'csv' | 'json') => {
+  const downloadTemplate = (format: 'csv' | 'json' | 'legacy-csv') => {
     if (format === 'csv') {
       const csvContent = [
         'category,question,type,answer,option1,option2,option3,option4,correctAnswer,explanation',
@@ -976,7 +1022,19 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'quiz_template.csv';
+      link.download = 'quiz_template_new.csv';
+      link.click();
+    } else if (format === 'legacy-csv') {
+      const csvContent = [
+        'category,question,answer,explanation,option1,option2,option3,option4',
+        '"サンプル","これは真偽問題のサンプルです","true","これは真偽問題の解説です","","","",""',
+        '"サンプル","これは多択問題のサンプルです","","これは多択問題の解説です","選択肢1","選択肢2","選択肢3","選択肢4"'
+      ].join('\n');
+      
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'quiz_template_legacy.csv';
       link.click();
     } else if (format === 'json') {
       const jsonContent = [
@@ -1873,6 +1931,13 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
                 <div style={{ marginBottom: '16px' }}>
                   <p style={{ marginBottom: '8px', fontWeight: '500' }}>{t[currentLang].modals.downloadTemplate}</p>
                   <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      onClick={() => downloadTemplate('legacy-csv')}
+                      className="quiz-action-button"
+                      style={{ padding: '6px 12px', fontSize: '12px' }}
+                    >
+                      {t[currentLang].modals.legacyCsvFormat}
+                    </button>
                     <button
                       onClick={() => downloadTemplate('csv')}
                       className="quiz-action-button"
