@@ -59,6 +59,9 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
     explanation: string;
   }>>([]);
   const [currentProblemIndex, setCurrentProblemIndex] = useState(0);
+  const [activeTab, setActiveTab] = useState<'manual' | 'file'>('manual');
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [parseMessage, setParseMessage] = useState<string>('');
 
   useEffect(() => {
     loadData();
@@ -147,6 +150,17 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
         addSelectedText: '選択した問題を追加',
         addNewProblem: '新しい問題を追加',
         problemForm: '問題作成フォーム',
+        fileUploadTab: 'ファイルから一括追加',
+        manualCreateTab: '手動作成',
+        uploadFile: 'ファイルをアップロード',
+        uploadDescription: 'CSV または JSON ファイルから問題を一括追加できます',
+        fileFormats: 'サポート形式: .csv, .json',
+        csvFormat: 'CSV形式',
+        jsonFormat: 'JSON形式',
+        downloadTemplate: 'テンプレートをダウンロード',
+        parseFile: 'ファイルを解析',
+        fileParseSuccess: '個の問題を読み込みました',
+        fileParseError: 'ファイルの解析に失敗しました',
         questionLabel: '問題文',
         questionPlaceholder: '問題文を入力...',
         categoryLabel: 'カテゴリ',
@@ -268,6 +282,17 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
         addSelectedText: 'Add Selected Problems',
         addNewProblem: 'Add New Problem',
         problemForm: 'Problem Creation Form',
+        fileUploadTab: 'Bulk Upload from File',
+        manualCreateTab: 'Manual Creation',
+        uploadFile: 'Upload File',
+        uploadDescription: 'Bulk add problems from CSV or JSON files',
+        fileFormats: 'Supported formats: .csv, .json',
+        csvFormat: 'CSV Format',
+        jsonFormat: 'JSON Format',
+        downloadTemplate: 'Download Template',
+        parseFile: 'Parse File',
+        fileParseSuccess: 'problems loaded successfully',
+        fileParseError: 'Failed to parse file',
         questionLabel: 'Question',
         questionPlaceholder: 'Enter question...',
         categoryLabel: 'Category',
@@ -646,6 +671,9 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
     setBulkAddQuizSet(null);
     setNewProblems([]);
     setCurrentProblemIndex(0);
+    setActiveTab('manual');
+    setUploadedFile(null);
+    setParseMessage('');
   };
 
   // 新しい問題を追加
@@ -764,6 +792,224 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
       console.error('問題作成エラー:', error);
       alert(t[currentLang].messages.bulkAddError);
     }
+  };
+
+  // ファイル解析関数
+  const parseUploadedFile = async (file: File) => {
+    setParseMessage('');
+    const fileName = file.name.toLowerCase();
+    
+    try {
+      if (fileName.endsWith('.csv')) {
+        await parseCSVFile(file);
+      } else if (fileName.endsWith('.json')) {
+        await parseJSONFile(file);
+      } else {
+        throw new Error('サポートされていないファイル形式です。CSV または JSON ファイルを選択してください。');
+      }
+    } catch (error) {
+      console.error('ファイル解析エラー:', error);
+      setParseMessage(t[currentLang].modals.fileParseError + ': ' + (error as Error).message);
+    }
+  };
+
+  // CSV ファイル解析
+  const parseCSVFile = async (file: File) => {
+    const text = await file.text();
+    const lines = text.split('\n').filter(line => line.trim());
+    
+    if (lines.length < 2) {
+      throw new Error('CSVファイルにはヘッダー行とデータ行が必要です。');
+    }
+
+    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+    const requiredHeaders = ['category', 'question', 'type', 'explanation'];
+    
+    const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+    if (missingHeaders.length > 0) {
+      throw new Error(`必要なカラムがありません: ${missingHeaders.join(', ')}`);
+    }
+
+    const problems = [];
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line.trim()) continue;
+      
+      const values = parseCSVLine(line);
+      if (values.length !== headers.length) {
+        console.warn(`行 ${i + 1}: カラム数が一致しません`);
+        continue;
+      }
+
+      const problemData: any = {};
+      headers.forEach((header, index) => {
+        problemData[header] = values[index];
+      });
+
+      // 必要なフィールドの検証
+      if (!problemData.category || !problemData.question || !problemData.type || !problemData.explanation) {
+        console.warn(`行 ${i + 1}: 必要なフィールドが不足しています`);
+        continue;
+      }
+
+      const problem: any = {
+        category: problemData.category,
+        question: problemData.question,
+        type: problemData.type === 'multiple-choice' ? 'multiple-choice' : 'true-false',
+        explanation: problemData.explanation
+      };
+
+      if (problem.type === 'true-false') {
+        problem.answer = problemData.answer === 'true' || problemData.answer === '1' || problemData.answer === 'TRUE';
+      } else if (problem.type === 'multiple-choice') {
+        const options = [
+          problemData.option1,
+          problemData.option2,
+          problemData.option3,
+          problemData.option4
+        ].filter(opt => opt && opt.trim());
+        
+        if (options.length < 2) {
+          console.warn(`行 ${i + 1}: 多択問題には最低2つの選択肢が必要です`);
+          continue;
+        }
+
+        problem.options = options;
+        problem.correctAnswer = parseInt(problemData.correctAnswer || '0', 10);
+        if (problem.correctAnswer >= options.length) {
+          problem.correctAnswer = 0;
+        }
+      }
+
+      problems.push(problem);
+    }
+
+    setNewProblems(problems);
+    setCurrentProblemIndex(0);
+    setParseMessage(`${problems.length}${t[currentLang].modals.fileParseSuccess}`);
+  };
+
+  // CSV行を解析（カンマ区切りでクォートを考慮）
+  const parseCSVLine = (line: string): string[] => {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      
+      if (char === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === ',' && !inQuotes) {
+        result.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    
+    result.push(current.trim());
+    return result;
+  };
+
+  // JSON ファイル解析
+  const parseJSONFile = async (file: File) => {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    
+    if (!Array.isArray(data)) {
+      throw new Error('JSONファイルは問題の配列である必要があります。');
+    }
+
+    const problems = [];
+    for (let i = 0; i < data.length; i++) {
+      const item = data[i];
+      
+      if (!item.category || !item.question || !item.type || !item.explanation) {
+        console.warn(`問題 ${i + 1}: 必要なフィールドが不足しています`);
+        continue;
+      }
+
+      const problem: any = {
+        category: item.category,
+        question: item.question,
+        type: item.type === 'multiple-choice' ? 'multiple-choice' : 'true-false',
+        explanation: item.explanation
+      };
+
+      if (problem.type === 'true-false') {
+        problem.answer = Boolean(item.answer);
+      } else if (problem.type === 'multiple-choice') {
+        if (!Array.isArray(item.options) || item.options.length < 2) {
+          console.warn(`問題 ${i + 1}: 多択問題には最低2つの選択肢が必要です`);
+          continue;
+        }
+        problem.options = item.options;
+        problem.correctAnswer = parseInt(item.correctAnswer || '0', 10);
+        if (problem.correctAnswer >= item.options.length) {
+          problem.correctAnswer = 0;
+        }
+      }
+
+      problems.push(problem);
+    }
+
+    setNewProblems(problems);
+    setCurrentProblemIndex(0);
+    setParseMessage(`${problems.length}${t[currentLang].modals.fileParseSuccess}`);
+  };
+
+  // テンプレートファイルをダウンロード
+  const downloadTemplate = (format: 'csv' | 'json') => {
+    if (format === 'csv') {
+      const csvContent = [
+        'category,question,type,answer,option1,option2,option3,option4,correctAnswer,explanation',
+        'サンプル,これは真偽問題のサンプルです,true-false,true,,,,,,"これは真偽問題の解説です"',
+        'サンプル,これは多択問題のサンプルです,multiple-choice,,選択肢1,選択肢2,選択肢3,選択肢4,0,"これは多択問題の解説です"'
+      ].join('\n');
+      
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'quiz_template.csv';
+      link.click();
+    } else if (format === 'json') {
+      const jsonContent = [
+        {
+          category: 'サンプル',
+          question: 'これは真偽問題のサンプルです',
+          type: 'true-false',
+          answer: true,
+          explanation: 'これは真偽問題の解説です'
+        },
+        {
+          category: 'サンプル',
+          question: 'これは多択問題のサンプルです',
+          type: 'multiple-choice',
+          options: ['選択肢1', '選択肢2', '選択肢3', '選択肢4'],
+          correctAnswer: 0,
+          explanation: 'これは多択問題の解説です'
+        }
+      ];
+      
+      const blob = new Blob([JSON.stringify(jsonContent, null, 2)], { type: 'application/json' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'quiz_template.json';
+      link.click();
+    }
+  };
+
+  // ファイル選択のリセット
+  const resetFileUpload = () => {
+    setUploadedFile(null);
+    setParseMessage('');
+    setActiveTab('manual');
   };
 
   // フィルタリングとソート
@@ -1581,7 +1827,144 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
               </p>
             )}
 
-{/* 問題作成フォーム */}
+            {/* タブ選択 */}
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ display: 'flex', borderBottom: '1px solid #e5e7eb' }}>
+                <button
+                  onClick={() => setActiveTab('manual')}
+                  style={{
+                    padding: '8px 16px',
+                    border: 'none',
+                    backgroundColor: activeTab === 'manual' ? '#3b82f6' : 'transparent',
+                    color: activeTab === 'manual' ? 'white' : '#374151',
+                    borderBottom: activeTab === 'manual' ? '2px solid #3b82f6' : '2px solid transparent',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {t[currentLang].modals.manualCreateTab}
+                </button>
+                <button
+                  onClick={() => setActiveTab('file')}
+                  style={{
+                    padding: '8px 16px',
+                    border: 'none',
+                    backgroundColor: activeTab === 'file' ? '#3b82f6' : 'transparent',
+                    color: activeTab === 'file' ? 'white' : '#374151',
+                    borderBottom: activeTab === 'file' ? '2px solid #3b82f6' : '2px solid transparent',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {t[currentLang].modals.fileUploadTab}
+                </button>
+              </div>
+            </div>
+
+            {/* ファイルアップロードタブ */}
+            {activeTab === 'file' && (
+              <div style={{ marginBottom: '16px' }}>
+                <p style={{ marginBottom: '16px', color: '#666', fontSize: '14px' }}>
+                  {t[currentLang].modals.uploadDescription}
+                </p>
+                <p style={{ marginBottom: '16px', color: '#888', fontSize: '12px' }}>
+                  {t[currentLang].modals.fileFormats}
+                </p>
+
+                {/* テンプレートダウンロード */}
+                <div style={{ marginBottom: '16px' }}>
+                  <p style={{ marginBottom: '8px', fontWeight: '500' }}>{t[currentLang].modals.downloadTemplate}</p>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      onClick={() => downloadTemplate('csv')}
+                      className="quiz-action-button"
+                      style={{ padding: '6px 12px', fontSize: '12px' }}
+                    >
+                      {t[currentLang].modals.csvFormat}
+                    </button>
+                    <button
+                      onClick={() => downloadTemplate('json')}
+                      className="quiz-action-button"
+                      style={{ padding: '6px 12px', fontSize: '12px' }}
+                    >
+                      {t[currentLang].modals.jsonFormat}
+                    </button>
+                  </div>
+                </div>
+
+                {/* ファイルアップロード */}
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
+                    {t[currentLang].modals.uploadFile}
+                  </label>
+                  <input
+                    type="file"
+                    accept=".csv,.json"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setUploadedFile(file);
+                      }
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '8px',
+                      border: '2px dashed #d1d5db',
+                      borderRadius: '4px',
+                      backgroundColor: '#f9fafb'
+                    }}
+                  />
+                </div>
+
+                {uploadedFile && (
+                  <div style={{ marginBottom: '16px' }}>
+                    <p style={{ marginBottom: '8px', fontSize: '14px' }}>
+                      選択ファイル: <strong>{uploadedFile.name}</strong>
+                    </p>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        onClick={() => parseUploadedFile(uploadedFile)}
+                        className="quiz-action-button"
+                        style={{ padding: '6px 12px', fontSize: '12px' }}
+                      >
+                        {t[currentLang].modals.parseFile}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setUploadedFile(null);
+                          setParseMessage('');
+                        }}
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: '12px',
+                          backgroundColor: '#6b7280',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        リセット
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {parseMessage && (
+                  <div style={{ 
+                    padding: '8px 12px', 
+                    marginBottom: '16px',
+                    backgroundColor: parseMessage.includes('失敗') ? '#fee2e2' : '#dcfce7',
+                    color: parseMessage.includes('失敗') ? '#dc2626' : '#16a34a',
+                    borderRadius: '4px',
+                    fontSize: '14px'
+                  }}>
+                    {parseMessage}
+                  </div>
+                )}
+              </div>
+            )}
+
+{/* 手動問題作成フォーム */}
+            {activeTab === 'manual' && (
             <div style={{ marginBottom: '16px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                 <h4 style={{ fontSize: '16px', fontWeight: '600', margin: 0 }}>
@@ -1812,6 +2195,7 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
                 </div>
               )}
             </div>
+            )}
 
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
               <button
