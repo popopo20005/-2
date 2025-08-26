@@ -817,29 +817,30 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
 
   // CSV ファイル解析
   const parseCSVFile = async (file: File) => {
-    const text = await file.text();
-    const lines = text.split('\n').filter(line => line.trim());
-    
-    if (lines.length < 2) {
-      throw new Error('CSVファイルにはヘッダー行とデータ行が必要です。');
-    }
+    try {
+      const text = await file.text();
+      const lines = text.split('\n').filter(line => line.trim());
+      
+      if (lines.length < 2) {
+        throw new Error('CSVファイルにはヘッダー行とデータ行が必要です。');
+      }
 
-    // 重複ヘッダー行の除去（最初の行が2回出現する場合）
-    let headerLine = lines[0];
-    let dataStartIndex = 1;
-    
-    // 最初の行と2行目が同じ場合、2行目をスキップ
-    if (lines.length > 1 && lines[0] === lines[1]) {
-      dataStartIndex = 2;
-    }
-    
-    const headers = headerLine.split(',').map(h => h.trim().replace(/"/g, ''));
-    
-    // 既存フォーマットの検出: category,question,answer,explanation,option1,option2,option3,option4
-    // typeカラムがなく、answerカラムがある場合は既存フォーマット
-    const isLegacyFormat = !headers.includes('type') && headers.includes('answer') && 
-                          headers.includes('category') && headers.includes('question') && 
-                          headers.includes('explanation');
+      // 重複ヘッダー行の除去（最初の行が2回出現する場合）
+      let headerLine = lines[0];
+      let dataStartIndex = 1;
+      
+      // 最初の行と2行目が同じ場合、2行目をスキップ
+      if (lines.length > 1 && lines[0] === lines[1]) {
+        dataStartIndex = 2;
+      }
+      
+      const headers = headerLine.split(',').map(h => h.trim().replace(/"/g, ''));
+      
+      // 既存フォーマットの検出: category,question,answer,explanation (option1-4は任意)
+      // typeカラムがなく、answerカラムがある場合は既存フォーマット
+      const isLegacyFormat = !headers.includes('type') && headers.includes('answer') && 
+                            headers.includes('category') && headers.includes('question') && 
+                            headers.includes('explanation');
     
     // 新フォーマットの検証
     if (!isLegacyFormat) {
@@ -950,6 +951,10 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
     setNewProblems(problems);
     setCurrentProblemIndex(0);
     setParseMessage(`${problems.length}${t[currentLang].modals.fileParseSuccess}`);
+    } catch (error) {
+      console.error('Error in parseCSVFile:', error);
+      throw error;
+    }
   };
 
   // CSV行を解析（カンマ区切りでクォートを考慮）
