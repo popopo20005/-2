@@ -677,26 +677,26 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode }: SettingsProps
               <div className="p-6 overflow-y-auto max-h-[calc(90vh-200px)] bg-white dark:bg-gray-800">
                 <div className="space-y-4">
                   <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
-                    <h4 className="font-medium mb-2 text-gray-800 dark:text-yellow-100">{t[currentLang].modals.notice.dataManagement.title}</h4>
-                    <ul className="text-sm space-y-1 text-gray-700 dark:text-yellow-200">
+                    <h4 className="font-medium mb-2" style={{ color: isDarkMode ? '#fef3c7' : '#1f2937' }}>{t[currentLang].modals.notice.dataManagement.title}</h4>
+                    <ul className="text-sm space-y-1" style={{ color: isDarkMode ? '#fde68a' : '#374151' }}>
                       {t[currentLang].modals.notice.dataManagement.items.map((item, index) => (
-                        <li key={index}>• {item}</li>
+                        <li key={index} style={{ color: isDarkMode ? '#fde68a' : '#374151' }}>• {item}</li>
                       ))}
                     </ul>
                   </div>
                   <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                    <h4 className="font-medium mb-2 text-gray-800 dark:text-blue-100">{t[currentLang].modals.notice.network.title}</h4>
-                    <ul className="text-sm space-y-1 text-gray-700 dark:text-blue-200">
+                    <h4 className="font-medium mb-2" style={{ color: isDarkMode ? '#dbeafe' : '#1f2937' }}>{t[currentLang].modals.notice.network.title}</h4>
+                    <ul className="text-sm space-y-1" style={{ color: isDarkMode ? '#bfdbfe' : '#374151' }}>
                       {t[currentLang].modals.notice.network.items.map((item, index) => (
-                        <li key={index}>• {item}</li>
+                        <li key={index} style={{ color: isDarkMode ? '#bfdbfe' : '#374151' }}>• {item}</li>
                       ))}
                     </ul>
                   </div>
                   <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-                    <h4 className="font-medium mb-2 text-gray-800 dark:text-red-100">{t[currentLang].modals.notice.privacy.title}</h4>
-                    <ul className="text-sm space-y-1 text-gray-700 dark:text-red-200">
+                    <h4 className="font-medium mb-2" style={{ color: isDarkMode ? '#fecaca' : '#1f2937' }}>{t[currentLang].modals.notice.privacy.title}</h4>
+                    <ul className="text-sm space-y-1" style={{ color: isDarkMode ? '#fca5a5' : '#374151' }}>
                       {t[currentLang].modals.notice.privacy.items.map((item, index) => (
-                        <li key={index}>• {item}</li>
+                        <li key={index} style={{ color: isDarkMode ? '#fca5a5' : '#374151' }}>• {item}</li>
                       ))}
                     </ul>
                   </div>
