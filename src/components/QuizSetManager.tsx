@@ -584,18 +584,27 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
 
   // 一括追加関数
   const openBulkAddModal = async (quizSet: ExtendedQuizSet) => {
+    console.log('openBulkAddModal called with:', quizSet);
+    console.log('allProblems length:', allProblems.length);
+    
     try {
       // 現在の問題集に含まれていない問題のみを表示
       const currentProblems = await problemService.getByQuizSetId(quizSet.id!);
+      console.log('currentProblems:', currentProblems);
+      
       const currentProblemIds = new Set(currentProblems.map(p => p.id!));
       const available = allProblems.filter(p => !currentProblemIds.has(p.id!));
+      console.log('available problems:', available.length);
       
       setBulkAddQuizSet(quizSet);
       setBulkAddAvailableProblems(available);
       setBulkAddSelectedProblems(new Set());
       setIsBulkAddModalOpen(true);
+      
+      console.log('Modal should now be open, isBulkAddModalOpen set to true');
     } catch (error) {
       console.error('一括追加モーダル開封エラー:', error);
+      alert('モーダルを開くことができませんでした: ' + error.message);
     }
   };
 
@@ -1419,6 +1428,7 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
       )}
 
       {/* 一括追加モーダル */}
+      {console.log('Rendering modal check, isBulkAddModalOpen:', isBulkAddModalOpen)}
       {isBulkAddModalOpen && (
         <div style={{
           position: 'fixed',
