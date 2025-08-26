@@ -36,10 +36,19 @@ export function QRScanner({ onScan, onError, onClose }: QRScannerProps) {
             setIsScanning(false);
           },
           {
-            highlightScanRegion: true,
+            highlightScanRegion: false,
             highlightCodeOutline: true,
             maxScansPerSecond: 5,
-            preferredCamera: 'environment' // 背面カメラを優先
+            preferredCamera: 'environment', // 背面カメラを優先
+            calculateScanRegion: (video) => {
+              // 動画全体をスキャン領域として使用
+              return {
+                x: 0,
+                y: 0,
+                width: video.videoWidth,
+                height: video.videoHeight,
+              };
+            }
           }
         );
 
@@ -77,42 +86,187 @@ export function QRScanner({ onScan, onError, onClose }: QRScannerProps) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-            📱 QRコードをスキャン
-          </h3>
-          <button
-            onClick={onClose}
-            className="quiz-action-button text-sm px-2 py-1 rounded"
-          >
-            ✕
-          </button>
-        </div>
+    <div 
+      className="fixed inset-0 bg-black bg-opacity-75"
+      style={{
+        overflow: 'auto',
+        WebkitOverflowScrolling: 'touch',
+        height: '100vh',
+        width: '100vw',
+        zIndex: 9999999,
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0
+      }}
+      onClick={onClose}
+    >
+      <div 
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'center',
+          padding: '20px'
+        }}
+      >
+        <div 
+          className="bg-white dark:bg-gray-800 rounded-lg w-full"
+          style={{
+            maxWidth: '600px',
+            maxHeight: 'none',
+            marginTop: '20px',
+            marginBottom: '20px'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* ヘッダー */}
+          <div className="flex justify-between items-center p-4 border-b border-gray-200 dark:border-gray-600">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              📱 QRコードをスキャン
+            </h3>
+            <button
+              onClick={onClose}
+              className="quiz-action-button text-sm px-2 py-1 rounded"
+            >
+              ✕
+            </button>
+          </div>
+          
+          {/* メインコンテンツ */}
+          <div className="p-4">
 
         {hasCamera ? (
           <div className="space-y-4">
-            <div className="relative">
+            <div className="relative bg-black rounded-lg overflow-hidden">
               <video
                 ref={videoRef}
-                className="w-full h-48 bg-black rounded-lg object-cover"
                 playsInline
                 muted
+                style={{
+                  width: '100%',
+                  height: 'auto',
+                  minHeight: '600px',
+                  display: 'block'
+                }}
               />
-              {isScanning && (
-                <div className="absolute inset-0 border-2 border-blue-500 rounded-lg pointer-events-none">
-                  <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-blue-500"></div>
-                  <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-blue-500"></div>
-                  <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-blue-500"></div>
-                  <div className="absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 border-blue-500"></div>
+              {/* QRコード読み取り用ガイド枠線（常に表示） */}
+              <div 
+                className="absolute inset-0 pointer-events-none"
+                style={{ 
+                  zIndex: 999,
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0
+                }}
+              >
+                {/* スキャンエリアの外側を暗くする */}
+                <div style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: 'rgba(0, 0, 0, 0.5)'
+                }}></div>
+                
+                {/* 中央のクリアエリア */}
+                <div style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  width: '250px',
+                  height: '250px',
+                  transform: 'translate(-50%, -50%)',
+                  backgroundColor: 'transparent',
+                  boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.5)'
+                }}></div>
+                
+                {/* 角の枠線 - シンプルな実装 */}
+                <div style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  width: '250px',
+                  height: '250px',
+                  transform: 'translate(-50%, -50%)',
+                  border: '2px solid rgba(255, 255, 255, 0.3)',
+                  borderRadius: '4px'
+                }}>
+                  {/* 左上の角 */}
+                  <div style={{
+                    position: 'absolute',
+                    top: '-2px',
+                    left: '-2px',
+                    width: '30px',
+                    height: '30px',
+                    borderTop: '4px solid #ffffff',
+                    borderLeft: '4px solid #ffffff'
+                  }}></div>
+                  {/* 右上の角 */}
+                  <div style={{
+                    position: 'absolute',
+                    top: '-2px',
+                    right: '-2px',
+                    width: '30px',
+                    height: '30px',
+                    borderTop: '4px solid #ffffff',
+                    borderRight: '4px solid #ffffff'
+                  }}></div>
+                  {/* 左下の角 */}
+                  <div style={{
+                    position: 'absolute',
+                    bottom: '-2px',
+                    left: '-2px',
+                    width: '30px',
+                    height: '30px',
+                    borderBottom: '4px solid #ffffff',
+                    borderLeft: '4px solid #ffffff'
+                  }}></div>
+                  {/* 右下の角 */}
+                  <div style={{
+                    position: 'absolute',
+                    bottom: '-2px',
+                    right: '-2px',
+                    width: '30px',
+                    height: '30px',
+                    borderBottom: '4px solid #ffffff',
+                    borderRight: '4px solid #ffffff'
+                  }}></div>
+                  
+                  {/* 中央のクロス */}
+                  <div style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    width: '20px',
+                    height: '2px',
+                    backgroundColor: '#ffffff',
+                    transform: 'translate(-50%, -50%)'
+                  }}></div>
+                  <div style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    width: '2px',
+                    height: '20px',
+                    backgroundColor: '#ffffff',
+                    transform: 'translate(-50%, -50%)'
+                  }}></div>
                 </div>
-              )}
+              </div>
+              
             </div>
             
             <div className="text-center">
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
                 QRコードをカメラの中央に合わせてください
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-500 mb-2">
+                カメラ映像が見切れている場合は、画面をスクロールして全体を確認してください
               </p>
               {isScanning && (
                 <div className="flex items-center justify-center space-x-2">
@@ -154,6 +308,8 @@ export function QRScanner({ onScan, onError, onClose }: QRScannerProps) {
           >
             キャンセル
           </button>
+        </div>
+          </div>
         </div>
       </div>
     </div>
