@@ -589,10 +589,9 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
     
     try {
       // 現在の問題集に含まれていない問題のみを表示
-      const currentProblems = await problemService.getByQuizSetId(quizSet.id!);
-      console.log('currentProblems:', currentProblems);
+      const currentProblemIds = new Set(quizSet.problemIds || []);
+      console.log('currentProblemIds:', currentProblemIds);
       
-      const currentProblemIds = new Set(currentProblems.map(p => p.id!));
       const available = allProblems.filter(p => !currentProblemIds.has(p.id!));
       console.log('available problems:', available.length);
       
@@ -623,8 +622,7 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
 
     try {
       // 現在の問題IDを取得
-      const currentProblems = await problemService.getByQuizSetId(bulkAddQuizSet.id!);
-      const currentProblemIds = currentProblems.map(p => p.id!);
+      const currentProblemIds = bulkAddQuizSet.problemIds || [];
       
       // 選択された問題を追加
       const newProblemIds = [...currentProblemIds, ...Array.from(bulkAddSelectedProblems)];
