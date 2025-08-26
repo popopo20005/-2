@@ -1085,12 +1085,6 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
     }
   };
 
-  // ファイル選択のリセット
-  const resetFileUpload = () => {
-    setUploadedFile(null);
-    setParseMessage('');
-    setActiveTab('manual');
-  };
 
   // フィルタリングとソート
   const filteredQuizSets = quizSets
@@ -1625,8 +1619,7 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
         </div>
       )}
 
-      {/* 新規作成モーダル */}
-      {isCreateModalOpen && (
+      {isCreateModalOpen ? (
         <div 
           style={{
             position: 'fixed',
@@ -1871,10 +1864,9 @@ export function QuizSetManager({ onBack }: QuizSetManagerProps) {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* 一括追加モーダル */}
-      {console.log('Rendering modal check, isBulkAddModalOpen:', isBulkAddModalOpen)}
       {isBulkAddModalOpen && (
         <div style={{
           position: 'fixed',
