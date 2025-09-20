@@ -53,6 +53,12 @@ export function MainMenu({ onNavigate, onToggleDarkMode, isDarkMode }: MainMenuP
         history: { title: '解答履歴', description: '過去の解答を振り返り' },
         backup: { title: 'バックアップ', description: 'データの保護と復元' },
         share: { title: '共有センター', description: 'みんなで問題を共有' },
+        diary: { title: '学習日記', description: '学習の記録と振り返り' },
+        insights: { title: '学習インサイト', description: '統計分析による学習効果の可視化' },
+        recommendations: { title: '学習推薦', description: '学習データに基づく最適化提案' },
+        sessionSettings: { title: 'セッション設定', description: 'Pomodoro・集中モードの設定' },
+        reminderSettings: { title: 'リマインダー', description: '学習通知とリマインダー管理' },
+        difficultySettings: { title: '難易度調整', description: '適応的難易度管理システム' },
         settings: { title: '設定', description: 'アプリの設定とヘルプ' }
       }
     },
@@ -77,6 +83,12 @@ export function MainMenu({ onNavigate, onToggleDarkMode, isDarkMode }: MainMenuP
         history: { title: 'Answer History', description: 'Review past answers' },
         backup: { title: 'Backup', description: 'Data protection and restore' },
         share: { title: 'Share Center', description: 'Share problems with everyone' },
+        diary: { title: 'Study Diary', description: 'Record and reflect on learning' },
+        insights: { title: 'Learning Insights', description: 'Statistical analysis-based learning visualization' },
+        recommendations: { title: 'Learning Recommendations', description: 'Data-driven learning optimization suggestions' },
+        sessionSettings: { title: 'Session Settings', description: 'Pomodoro & focus mode configuration' },
+        reminderSettings: { title: 'Reminder Settings', description: 'Learning notifications and reminder management' },
+        difficultySettings: { title: 'Difficulty Settings', description: 'Adaptive difficulty management system' },
         settings: { title: 'Settings', description: 'App settings and help' }
       }
     }
@@ -146,6 +158,48 @@ export function MainMenu({ onNavigate, onToggleDarkMode, isDarkMode }: MainMenuP
       title: t[currentLang].menuItems.share.title,
       description: t[currentLang].menuItems.share.description,
       icon: '🤝',
+      isQuizAction: true
+    },
+    {
+      id: 'diary' as View,
+      title: t[currentLang].menuItems.diary.title,
+      description: t[currentLang].menuItems.diary.description,
+      icon: '📖',
+      isQuizAction: true
+    },
+    {
+      id: 'insights' as View,
+      title: t[currentLang].menuItems.insights.title,
+      description: t[currentLang].menuItems.insights.description,
+      icon: '📊',
+      isQuizAction: true
+    },
+    {
+      id: 'recommendations' as View,
+      title: t[currentLang].menuItems.recommendations.title,
+      description: t[currentLang].menuItems.recommendations.description,
+      icon: '🎯',
+      isQuizAction: true
+    },
+    {
+      id: 'sessionSettings' as View,
+      title: t[currentLang].menuItems.sessionSettings.title,
+      description: t[currentLang].menuItems.sessionSettings.description,
+      icon: '⏰',
+      isQuizAction: true
+    },
+    {
+      id: 'reminderSettings' as View,
+      title: t[currentLang].menuItems.reminderSettings.title,
+      description: t[currentLang].menuItems.reminderSettings.description,
+      icon: '🔔',
+      isQuizAction: true
+    },
+    {
+      id: 'difficultySettings' as View,
+      title: t[currentLang].menuItems.difficultySettings.title,
+      description: t[currentLang].menuItems.difficultySettings.description,
+      icon: '⚖️',
       isQuizAction: true
     },
     {

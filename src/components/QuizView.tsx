@@ -1,12 +1,16 @@
 import { useState, useEffect } from 'react';
-import { categoryService, problemService, quizSetService, historyService, quizSessionService } from '../lib/database';
-import type { Problem, QuizSet, QuizSession } from '../types';
+import { categoryService, problemService, quizSetService, historyService, quizSessionService, statisticsService } from '../lib/database';
+import { AnalyticsManager, AnalyticsTracker } from '../lib/analyticsTracker';
+import { SubjectiveFeedback } from './SubjectiveFeedback';
+import { LearningStateEstimator } from '../lib/learningStateEstimator';
+import type { Problem, QuizSet, QuizSession, SubjectiveFeedbackData } from '../types';
 
 interface QuizParams {
   quizSetId?: number;
   useLatestOnly?: boolean;
-  mode?: 'quizSetWorstProblems' | 'categoryQuiz';
+  mode?: 'quizSetWorstProblems' | 'categoryQuiz' | 'review';
   category?: string;
+  problemIds?: number[];
 }
 
 interface QuizViewProps {
@@ -41,12 +45,22 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
   const [userAnswers, setUserAnswers] = useState<(boolean | number)[]>([]);
   const [showFeedback, setShowFeedback] = useState(false);
   const [startTime, setStartTime] = useState<Date | null>(null);
+
+  // 主観的フィードバック関連
+  const [showSubjectiveFeedback, setShowSubjectiveFeedback] = useState(false);
+  const [pendingSubjectiveFeedback, setPendingSubjectiveFeedback] = useState<{
+    problemIndex: number;
+    answer: boolean | number;
+  } | null>(null);
   
   // セッション管理
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [isResuming, setIsResuming] = useState(false);
   const [autoSaveInterval, setAutoSaveInterval] = useState<NodeJS.Timeout | null>(null);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+
+  // 学習分析トラッキング
+  const [analyticsTracker, setAnalyticsTracker] = useState<AnalyticsTracker | null>(null);
   
   useEffect(() => {
     loadData();
@@ -296,9 +310,16 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
   useEffect(() => {
     if (initialParams && !isLoading) {
       if (initialParams.mode === 'quizSetWorstProblems' && initialParams.quizSetId) {
-        // 統計画面からの苦手問題プレイ開始
+        // 統計画面からの苦手問題プレイ開始または問題集カテゴリー別間違い問題プレイ
         setSelectedQuizSet(initialParams.quizSetId);
-        startQuiz('quizSetWorstProblems', initialParams.useLatestOnly || true);
+        if (initialParams.category) {
+          // カテゴリー別間違い問題
+          setSelectedCategory(initialParams.category);
+          startQuizSetCategoryWorstProblems(initialParams.quizSetId, initialParams.category, initialParams.useLatestOnly || true);
+        } else {
+          // 問題集全体の間違い問題
+          startQuiz('quizSetWorstProblems', initialParams.useLatestOnly || true);
+        }
       } else if (initialParams.mode === 'categoryQuiz' && initialParams.category) {
         // カテゴリー別クイズ開始
         setSelectedCategory(initialParams.category);
@@ -306,6 +327,10 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
           setSelectedQuizSet(initialParams.quizSetId);
         }
         startQuizWithParams('category', initialParams.category, initialParams.quizSetId);
+      } else if (initialParams.mode === 'review' && initialParams.problemIds) {
+        // 復習問題クイズ開始
+        console.log('復習問題クイズ開始:', initialParams.problemIds);
+        startReviewQuiz(initialParams.problemIds);
       } else if (initialParams.quizSetId && !initialParams.mode) {
         // 問題集クイズ開始
         setSelectedQuizSet(initialParams.quizSetId);
@@ -522,7 +547,16 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
       setShowFeedback(false);
       setStartTime(new Date());
       setMode('playing');
-      
+
+      // 学習分析トラッカーを開始
+      const tracker = AnalyticsManager.startSession(sessionId);
+      setAnalyticsTracker(tracker);
+
+      // 最初の問題をトラッキング開始
+      if (shuffledProblems.length > 0 && shuffledProblems[0].id) {
+        tracker.startProblem(shuffledProblems[0].id);
+      }
+
       // 自動保存タイマーを開始（30秒間隔）
       const interval = setInterval(async () => {
         if (currentSessionId) {
@@ -539,7 +573,130 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
   };
 
   const startQuiz = async (type: QuizType, useLatestOnly: boolean = true) => {
-    return startQuizWithParams(type, selectedCategory, selectedQuizSet || undefined, useLatestOnly);
+    return startQuizWithParams(type, selectedCategory, selectedQuizSet ?? undefined, useLatestOnly);
+  };
+
+  // 復習問題クイズを開始
+  const startReviewQuiz = async (problemIds: number[]) => {
+    try {
+      console.log('復習問題クイズ開始:', {
+        requestedIds: problemIds,
+        requestedCount: problemIds.length
+      });
+
+      // 問題IDから問題を取得
+      const reviewProblems = await problemService.getByIds(problemIds);
+
+      console.log('復習問題取得結果:', {
+        requestedCount: problemIds.length,
+        retrievedCount: reviewProblems.length,
+        retrievedIds: reviewProblems.map(p => p.id),
+        missingIds: problemIds.filter(id => !reviewProblems.some(p => p.id === id))
+      });
+
+      if (reviewProblems.length === 0) {
+        alert('復習問題が見つかりません');
+        return;
+      }
+
+      // 取得できた問題数が予想より少ない場合の警告
+      if (reviewProblems.length < problemIds.length * 0.7) {
+        const missingCount = problemIds.length - reviewProblems.length;
+        console.warn(`復習問題の一部が見つかりません (${missingCount}問不足)`);
+        alert(`復習問題の一部（${missingCount}問）が見つかりませんでした。\n利用可能な${reviewProblems.length}問でクイズを開始します。`);
+      }
+
+      // シャッフル
+      const shuffledProblems = [...reviewProblems].sort(() => Math.random() - 0.5);
+
+      // クイズ開始
+      setCurrentProblems(shuffledProblems);
+      setCurrentIndex(0);
+      setScore(0);
+      setUserAnswers([]);
+      setShowFeedback(false);
+      setMode('playing');
+      setStartTime(new Date());
+
+      // セッション作成
+      const sessionId = `review-${Date.now()}`;
+      setCurrentSessionId(sessionId);
+
+      const newSession: QuizSession = {
+        id: sessionId,
+        problems: shuffledProblems,
+        currentIndex: 0,
+        score: 0,
+        answers: [],
+        startTime: new Date(),
+        isCompleted: false,
+        isPaused: false
+      };
+
+      await quizSessionService.save(newSession);
+      console.log('復習問題セッション作成完了:', sessionId);
+
+    } catch (error) {
+      console.error('復習問題クイズ開始エラー:', error);
+      alert('復習問題の開始に失敗しました');
+    }
+  };
+
+  // 問題集のカテゴリー別間違い問題を開始
+  const startQuizSetCategoryWorstProblems = async (quizSetId: number, category: string, useLatestOnly: boolean = true) => {
+    try {
+      console.log('カテゴリー別間違い問題クイズ開始:', { quizSetId, category, useLatestOnly });
+      
+      // 問題集のカテゴリー別間違い問題を取得
+      const incorrectProblems = await statisticsService.getQuizSetCategoryWorstProblems(quizSetId, category, 1000, useLatestOnly);
+      
+      if (incorrectProblems.length === 0) {
+        alert(`「${category}」カテゴリーに間違い問題がありません`);
+        return;
+      }
+      
+      console.log(`${category}カテゴリーの間違い問題数:`, incorrectProblems.length);
+      
+      // シャッフル
+      const shuffledProblems = [...incorrectProblems.map(item => item.problem)].sort(() => Math.random() - 0.5);
+      
+      // セッション作成
+      const sessionId = quizSessionService.generateSessionId();
+      const session: QuizSession = {
+        id: sessionId,
+        quizSetId,
+        category,
+        problems: shuffledProblems,
+        currentIndex: 0,
+        score: 0,
+        answers: [],
+        startTime: new Date(),
+        isCompleted: false,
+        isPaused: false
+      };
+      
+      await quizSessionService.save(session);
+      
+      // クイズ開始
+      setCurrentSessionId(sessionId);
+      setCurrentProblems(shuffledProblems);
+      setCurrentIndex(0);
+      setScore(0);
+      setUserAnswers([]);
+      setShowFeedback(false);
+      setStartTime(new Date());
+      setMode('playing');
+      
+      // 自動保存の設定
+      const interval = setInterval(async () => {
+        setLastSaved(new Date());
+      }, 10000);
+      setAutoSaveInterval(interval);
+      
+    } catch (error) {
+      console.error('カテゴリー別間違い問題クイズ開始エラー:', error);
+      alert('クイズの開始に失敗しました');
+    }
   };
 
   const resumeSession = async (sessionId: string) => {
@@ -661,18 +818,175 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
   };
 
   const handleAnswer = async (answer: boolean | number) => {
+    console.log('handleAnswer called with:', answer);
     const currentProblem = currentProblems[currentIndex];
-    if (!currentProblem) return;
+    if (!currentProblem) {
+      console.log('No current problem found');
+      return;
+    }
 
-    const isCorrect = currentProblem.type === 'multiple-choice' 
+    const isCorrect = currentProblem.type === 'multiple-choice'
       ? answer === currentProblem.correctAnswer
       : answer === currentProblem.answer;
+
+    console.log('Processing answer:', { answer, isCorrect });
+
+    // 主観的フィードバックが有効かチェック（デフォルトで有効）
+    const saved = localStorage.getItem('subjective-feedback-enabled');
+    const isSubjectiveFeedbackEnabled = saved === null ? true : saved === 'true';
+
+    console.log('Subjective feedback settings:', {
+      localStorage_value: localStorage.getItem('subjective-feedback-enabled'),
+      isEnabled: isSubjectiveFeedbackEnabled,
+      showSubjectiveFeedback,
+      pendingSubjectiveFeedback
+    });
+
+    if (isSubjectiveFeedbackEnabled) {
+      // 主観的フィードバックモーダルを表示
+      console.log('Setting up subjective feedback modal');
+      setPendingSubjectiveFeedback({ problemIndex: currentIndex, answer });
+      setShowSubjectiveFeedback(true);
+      console.log('Modal state should be set to true');
+    } else {
+      // 直接次に進む
+      console.log('Proceeding directly without feedback');
+      await processAnswerDirect(answer, isCorrect);
+    }
+  };
+
+  const handleSubjectiveFeedbackSubmit = async (feedbackData: SubjectiveFeedbackData) => {
+    setShowSubjectiveFeedback(false);
+
+    if (!pendingSubjectiveFeedback) return;
+
+    const { answer } = pendingSubjectiveFeedback;
+    const currentProblem = currentProblems[currentIndex];
+    const isCorrect = currentProblem.type === 'multiple-choice'
+      ? answer === currentProblem.correctAnswer
+      : answer === currentProblem.answer;
+
+    await processAnswerWithFeedback(answer, isCorrect, feedbackData);
+    setPendingSubjectiveFeedback(null);
+  };
+
+  const handleSubjectiveFeedbackSkip = async () => {
+    setShowSubjectiveFeedback(false);
+
+    if (!pendingSubjectiveFeedback) return;
+
+    const { answer } = pendingSubjectiveFeedback;
+    const currentProblem = currentProblems[currentIndex];
+    const isCorrect = currentProblem.type === 'multiple-choice'
+      ? answer === currentProblem.correctAnswer
+      : answer === currentProblem.answer;
+
+    await processAnswerDirect(answer, isCorrect);
+    setPendingSubjectiveFeedback(null);
+  };
+
+  const processAnswerWithFeedback = async (
+    answer: boolean | number,
+    isCorrect: boolean,
+    feedbackData: SubjectiveFeedbackData
+  ) => {
+    const currentProblem = currentProblems[currentIndex];
+
+    // 学習分析データを記録（推定された学習状態を使用）
+    if (analyticsTracker && currentProblem.id) {
+      // 理解度と正解/不正解から詳細な学習状態を推定
+      const estimatedState = LearningStateEstimator.estimateLearningState({
+        understood: feedbackData.understood,
+        isCorrect: isCorrect,
+        responseTime: Date.now() - (startTime?.getTime() || Date.now()),
+        averageResponseTime: 30000, // TODO: ユーザーの平均回答時間を取得
+        problemDifficulty: 3, // TODO: 問題の客観的難易度を設定
+        recentAccuracy: 0.7 // TODO: 最近の正答率を取得
+      });
+
+      console.log('推定された学習状態:', estimatedState);
+
+      await analyticsTracker.recordAnswer(
+        answer,
+        isCorrect,
+        estimatedState.confidence,
+        estimatedState.wasGuessing,
+        estimatedState.perceivedDifficulty
+      );
+    }
+
+    // 履歴に主観的フィードバックを含めて保存
+    try {
+      await historyService.add({
+        problemId: currentProblem.id!,
+        category: currentProblem.category,
+        isCorrect: isCorrect,
+        userAnswer: answer,
+        questionText: currentProblem.question,
+        subjectiveFeedback: feedbackData
+      });
+    } catch (error) {
+      console.error('履歴保存エラー:', error);
+    }
+
+    // 通常の処理を続行
+    const newAnswers = [...userAnswers];
+    newAnswers[currentIndex] = answer;
+    setUserAnswers(newAnswers);
 
     if (isCorrect) {
       setScore(score + 1);
     }
 
-    const newAnswers = [...userAnswers, answer];
+    setShowFeedback(true);
+
+    // 1.5秒後に次の問題へ自動進行
+    setTimeout(async () => {
+      setShowFeedback(false);
+      if (currentIndex < currentProblems.length - 1) {
+        const nextIndex = currentIndex + 1;
+        setCurrentIndex(nextIndex);
+
+        // 次の問題のトラッキングを開始
+        if (analyticsTracker && currentProblems[nextIndex]?.id) {
+          analyticsTracker.startProblem(currentProblems[nextIndex].id);
+        }
+      } else {
+        // クイズ完了
+        if (analyticsTracker) {
+          const casualAnswerCount = 0;
+          await analyticsTracker.recordSessionComplete(
+            currentProblems.length,
+            currentIndex + 1,
+            casualAnswerCount
+          );
+        }
+        setMode('result');
+      }
+    }, 1500);
+  };
+
+  const processAnswerDirect = async (answer: boolean | number, isCorrect: boolean) => {
+    console.log('processAnswerDirect called:', { answer, isCorrect, currentIndex });
+    const currentProblem = currentProblems[currentIndex];
+
+    // 学習分析データを記録（モーダルなし）
+    if (analyticsTracker && currentProblem.id) {
+      await analyticsTracker.recordAnswer(
+        answer,
+        isCorrect,
+        'medium', // デフォルト確信度
+        false,    // 適当回答ではない
+        3         // デフォルト難易度
+      );
+    }
+
+    if (isCorrect) {
+      setScore(score + 1);
+    }
+
+    const newAnswers = [...userAnswers];
+    newAnswers[currentIndex] = answer;
     setUserAnswers(newAnswers);
 
     // 履歴に記録
@@ -689,13 +1003,55 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
     }
 
     setShowFeedback(true);
+
+    // 1.5秒後に次の問題へ自動進行
+    setTimeout(async () => {
+      setShowFeedback(false);
+      if (currentIndex < currentProblems.length - 1) {
+        const nextIndex = currentIndex + 1;
+        setCurrentIndex(nextIndex);
+
+        // 次の問題のトラッキングを開始
+        if (analyticsTracker && currentProblems[nextIndex]?.id) {
+          analyticsTracker.startProblem(currentProblems[nextIndex].id);
+        }
+      } else {
+        // クイズ完了
+        if (analyticsTracker) {
+          const casualAnswerCount = 0;
+          await analyticsTracker.recordSessionComplete(
+            currentProblems.length,
+            currentIndex + 1,
+            casualAnswerCount
+          );
+        }
+        setMode('result');
+      }
+    }, 1500);
   };
+
+  // 選択肢クリック時に分析トラッカーに記録
+  const handleAnswerClick = (answer: boolean | number) => {
+    console.log('Answer clicked:', answer);
+    if (analyticsTracker) {
+      analyticsTracker.recordAnswerChange();
+    }
+    handleAnswer(answer);
+  };
+
 
   const nextQuestion = async () => {
     if (currentIndex < currentProblems.length - 1) {
-      setCurrentIndex(currentIndex + 1);
+      const nextIndex = currentIndex + 1;
+      setCurrentIndex(nextIndex);
       setShowFeedback(false);
       setIsResuming(false); // 次の問題に進んだら再開状態を解除
+
+      // 次の問題のトラッキングを開始
+      if (analyticsTracker && currentProblems[nextIndex]?.id) {
+        analyticsTracker.startProblem(currentProblems[nextIndex].id);
+      }
+
       // セッションの進捗を自動保存
       await saveSession();
     } else {
@@ -1107,7 +1463,7 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
                     {currentProblem.options.map((option, index) => (
                       <button
                         key={index}
-                        onClick={() => handleAnswer(index)}
+                        onClick={() => handleAnswerClick(index)}
                         className="quiz-action-button w-full p-4 text-left rounded-lg transition-all transform hover:scale-102 shadow-md hover:shadow-lg backdrop-blur-sm"
                       >
                         <span className="font-bold text-white drop-shadow-sm">
@@ -1119,14 +1475,14 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
                 ) : (
                   <div className="flex space-x-4">
                     <button
-                      onClick={() => handleAnswer(true)}
+                      onClick={() => handleAnswerClick(true)}
                       className="quiz-action-button flex-1 p-6 rounded-lg transition-all transform hover:scale-105 shadow-md hover:shadow-lg backdrop-blur-sm"
                     >
                       <span className="text-3xl font-bold text-white drop-shadow-md">○</span>
                       <p className="text-white/95 mt-2 font-medium">{t[currentLang].labels.correct}</p>
                     </button>
                     <button
-                      onClick={() => handleAnswer(false)}
+                      onClick={() => handleAnswerClick(false)}
                       className="quiz-action-button flex-1 p-6 rounded-lg transition-all transform hover:scale-105 shadow-md hover:shadow-lg backdrop-blur-sm"
                     >
                       <span className="text-3xl font-bold text-white drop-shadow-md">×</span>
@@ -1185,6 +1541,14 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
             )}
           </div>
         </div>
+
+        {/* 主観的フィードバックモーダル */}
+        <SubjectiveFeedback
+          onSubmit={handleSubjectiveFeedbackSubmit}
+          onSkip={handleSubjectiveFeedbackSkip}
+          isEnabled={showSubjectiveFeedback}
+          language={language as 'ja' | 'en'}
+        />
       </div>
     );
   }
@@ -1195,7 +1559,8 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
     const playTime = startTime ? Math.floor((endTime.getTime() - startTime.getTime()) / 1000) : 0;
 
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-8">
+      <>
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-8">
         <div className="max-w-4xl mx-auto">
           <header className="mb-8">
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white text-center">{t[currentLang].pageTitle.result}</h1>
@@ -1246,6 +1611,45 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
           </div>
         </div>
       </div>
+
+      {/* 主観的フィードバックモーダル */}
+      {console.log('Rendering SubjectiveFeedback with state:', { showSubjectiveFeedback })}
+
+      {/* テスト用の簡易モーダル */}
+      {showSubjectiveFeedback && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-xl max-w-md w-full mx-4 border border-gray-200 dark:border-gray-600">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              🔧 デバッグ用モーダル
+            </h3>
+            <p className="text-gray-600 dark:text-gray-400 mb-4">
+              基本的なモーダル表示機能をテスト中です。<br/>
+              状態: showSubjectiveFeedback = {showSubjectiveFeedback.toString()}
+            </p>
+            <div className="flex space-x-3">
+              <button
+                onClick={handleSubjectiveFeedbackSkip}
+                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition"
+              >
+                スキップ
+              </button>
+              <button
+                onClick={() => handleSubjectiveFeedbackSubmit({
+                  understood: true,
+                  confidence: 'medium',
+                  wasGuessing: false,
+                  perceivedDifficulty: 3
+                })}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+              >
+                送信
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      </>
     );
   }
 

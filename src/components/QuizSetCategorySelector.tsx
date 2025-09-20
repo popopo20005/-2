@@ -57,7 +57,10 @@ export function QuizSetCategorySelector({ onBack, onStartQuiz }: QuizSetCategory
       categoryCount: 'カテゴリー数:',
       categories: 'カテゴリー:',
       categoriesUnit: '個',
-      dataLoadError: 'データ読み込みエラー:'
+      dataLoadError: 'データ読み込みエラー:',
+      playAll: 'すべて',
+      playIncorrect: '間違い問題のみ',
+      noIncorrectProblems: '間違い問題なし'
     },
     en: {
       loading: 'Loading quiz set data...',
@@ -75,7 +78,10 @@ export function QuizSetCategorySelector({ onBack, onStartQuiz }: QuizSetCategory
       categoryCount: 'Categories:',
       categories: 'Categories:',
       categoriesUnit: '',
-      dataLoadError: 'Data loading error:'
+      dataLoadError: 'Data loading error:',
+      playAll: 'All Problems',
+      playIncorrect: 'Incorrect Only',
+      noIncorrectProblems: 'No incorrect'
     }
   };
 
@@ -171,7 +177,7 @@ export function QuizSetCategorySelector({ onBack, onStartQuiz }: QuizSetCategory
               <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
                 {t[currentLang].selectCategory}
               </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {selectedQuizSet.categories.map(category => (
                   <button
                     key={category}

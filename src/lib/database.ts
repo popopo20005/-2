@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { Category, Problem, HistoryEntry, QuizSet, BackupData, QuizSession } from '../types';
+import type { Category, Problem, HistoryEntry, QuizSet, BackupData, QuizSession, StudyDiaryEntry, StudyGoal, AnswerAnalytics, SessionAnalytics, LearningPattern, ReliabilityAssessment } from '../types';
 
 export class QuizAppDatabase extends Dexie {
   categories!: Table<Category>;
@@ -8,6 +8,13 @@ export class QuizAppDatabase extends Dexie {
   quizSets!: Table<QuizSet>;
   backups!: Table<BackupData>;
   quizSessions!: Table<QuizSession>;
+  studyDiary!: Table<StudyDiaryEntry>;
+  studyGoals!: Table<StudyGoal>;
+  // 学習分析テーブル
+  answerAnalytics!: Table<AnswerAnalytics>;
+  sessionAnalytics!: Table<SessionAnalytics>;
+  learningPatterns!: Table<LearningPattern>;
+  reliabilityAssessments!: Table<ReliabilityAssessment>;
 
   constructor() {
     super('QuizAppDB');
@@ -35,6 +42,33 @@ export class QuizAppDatabase extends Dexie {
       quizSets: '++id, name, createdAt',
       backups: '++id, timestamp, type',
       quizSessions: '&id, quizSetId, category, isCompleted, isPaused'
+    });
+    
+    this.version(4).stores({
+      categories: 'name',
+      problems: '++id, category, question, type',
+      history: '++id, problemId, category, isCorrect, timestamp',
+      quizSets: '++id, name, createdAt',
+      backups: '++id, timestamp, type',
+      quizSessions: '&id, quizSetId, category, isCompleted, isPaused',
+      studyDiary: '++id, date, createdAt',
+      studyGoals: '++id, isCompleted, createdAt, targetDate'
+    });
+
+    // 学習分析機能追加
+    this.version(5).stores({
+      categories: 'name',
+      problems: '++id, category, question, type',
+      history: '++id, problemId, category, isCorrect, timestamp',
+      quizSets: '++id, name, createdAt',
+      backups: '++id, timestamp, type',
+      quizSessions: '&id, quizSetId, category, isCompleted, isPaused',
+      studyDiary: '++id, date, createdAt',
+      studyGoals: '++id, isCompleted, createdAt, targetDate',
+      answerAnalytics: '++id, sessionId, problemId, answerStartTime, createdAt',
+      sessionAnalytics: '++id, &sessionId, sessionStartTime, createdAt',
+      learningPatterns: '++id, userId, lastUpdated',
+      reliabilityAssessments: '++id, answerAnalyticsId, reliabilityScore, createdAt'
     });
   }
 }
@@ -398,6 +432,10 @@ export const quizSessionService = {
 
   generateSessionId(): string {
     return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  },
+
+  async getAll(): Promise<QuizSession[]> {
+    return await db.quizSessions.toArray();
   }
 };
 
@@ -634,6 +672,100 @@ export const statisticsService = {
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   },
 
+  // 問題集のカテゴリー別間違い問題を取得
+  async getQuizSetCategoryWorstProblems(quizSetId: number, category: string, limit: number = 10, useLatestOnly: boolean = true): Promise<Array<{
+    problem: Problem;
+    incorrectCount: number;
+    totalAnswered: number;
+    accuracy: number;
+  }>> {
+    const [quizSet, history, problems] = await Promise.all([
+      db.quizSets.get(quizSetId),
+      db.history.toArray(),
+      db.problems.toArray()
+    ]);
+
+    if (!quizSet) return [];
+
+    // この問題集の指定カテゴリーの問題のみをフィルタ
+    const quizSetProblems = problems.filter(p => 
+      p.id && 
+      quizSet.problemIds.includes(p.id) && 
+      p.category === category
+    );
+    const quizSetHistory = history.filter(entry => 
+      quizSet.problemIds.includes(entry.problemId) &&
+      entry.category === category
+    );
+
+    const problemStats = new Map<number, {
+      incorrectCount: number;
+      totalAnswered: number;
+    }>();
+
+    if (useLatestOnly) {
+      // 最新の回答履歴から間違えた問題を取得
+      const problemAnswers = new Map<number, { isCorrect: boolean; count: number }>();
+      const sortedHistory = quizSetHistory.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+      
+      for (const entry of sortedHistory) {
+        if (!problemAnswers.has(entry.problemId)) {
+          problemAnswers.set(entry.problemId, { isCorrect: entry.isCorrect, count: 1 });
+        } else {
+          problemAnswers.get(entry.problemId)!.count++;
+        }
+      }
+      
+      // 最新で間違えた問題のみを対象とする
+      for (const [problemId, { isCorrect, count }] of problemAnswers) {
+        if (!isCorrect) {
+          problemStats.set(problemId, {
+            incorrectCount: 1,
+            totalAnswered: count
+          });
+        }
+      }
+    } else {
+      // 全履歴から統計を計算
+      quizSetHistory.forEach(entry => {
+        if (!problemStats.has(entry.problemId)) {
+          problemStats.set(entry.problemId, {
+            incorrectCount: 0,
+            totalAnswered: 0
+          });
+        }
+        const stats = problemStats.get(entry.problemId)!;
+        stats.totalAnswered++;
+        if (!entry.isCorrect) {
+          stats.incorrectCount++;
+        }
+      });
+    }
+
+    const worstProblems = Array.from(problemStats.entries())
+      .map(([problemId, stats]) => {
+        const problem = quizSetProblems.find(p => p.id === problemId);
+        if (!problem) return null;
+        
+        return {
+          problem,
+          incorrectCount: stats.incorrectCount,
+          totalAnswered: stats.totalAnswered,
+          accuracy: stats.totalAnswered > 0 ? ((stats.totalAnswered - stats.incorrectCount) / stats.totalAnswered * 100) : 100
+        };
+      })
+      .filter(item => item !== null && (useLatestOnly || item.totalAnswered >= 2))
+      .sort((a, b) => a!.accuracy - b!.accuracy)
+      .slice(0, limit) as Array<{
+        problem: Problem;
+        incorrectCount: number;
+        totalAnswered: number;
+        accuracy: number;
+      }>;
+
+    return worstProblems;
+  },
+
   async getQuizSetWorstProblems(quizSetId: number, limit: number = 10, useLatestOnly: boolean = true): Promise<Array<{
     problem: Problem;
     incorrectCount: number;
@@ -718,6 +850,299 @@ export const statisticsService = {
       }>;
 
     return worstProblems;
+  },
+
+  // 問題集ごとの間違いが多い問題を取得
+  async getWorstProblemsByQuizSet(quizSetId: number, limit: number = 10): Promise<Array<{
+    problem: Problem;
+    incorrectCount: number;
+    totalAnswered: number;
+    accuracy: number;
+  }>> {
+    const [quizSet, history, problems] = await Promise.all([
+      db.quizSets.get(quizSetId),
+      db.history.toArray(),
+      db.problems.toArray()
+    ]);
+
+    if (!quizSet) return [];
+
+    // この問題集の問題のみをフィルタ
+    const quizSetProblems = problems.filter(p => 
+      p.id && quizSet.problemIds.includes(p.id)
+    );
+    const quizSetHistory = history.filter(entry => 
+      quizSet.problemIds.includes(entry.problemId)
+    );
+
+    // 各問題の統計を計算
+    const problemStats = quizSetProblems.map(problem => {
+      const problemHistory = quizSetHistory.filter(entry => entry.problemId === problem.id);
+      const totalAnswered = problemHistory.length;
+      const totalCorrect = problemHistory.filter(entry => entry.isCorrect).length;
+      const incorrectCount = totalAnswered - totalCorrect;
+      const accuracy = totalAnswered > 0 ? (totalCorrect / totalAnswered * 100) : 0;
+
+      return {
+        problem,
+        incorrectCount,
+        totalAnswered,
+        accuracy
+      };
+    });
+
+    // 間違いが多い順にソート（同数の場合は正解率の低い順）
+    return problemStats
+      .filter(stat => stat.totalAnswered > 0)
+      .sort((a, b) => {
+        if (a.incorrectCount !== b.incorrectCount) {
+          return b.incorrectCount - a.incorrectCount;
+        }
+        return a.accuracy - b.accuracy;
+      })
+      .slice(0, limit);
+  },
+
+  // カテゴリーごとの間違いが多い問題を取得
+  async getWorstProblemsByCategory(category: string, limit: number = 10): Promise<Array<{
+    problem: Problem;
+    incorrectCount: number;
+    totalAnswered: number;
+    accuracy: number;
+  }>> {
+    const [history, problems] = await Promise.all([
+      db.history.toArray(),
+      db.problems.where('category').equals(category).toArray()
+    ]);
+
+    // 各問題の統計を計算
+    const problemStats = problems.map(problem => {
+      const problemHistory = history.filter(entry => entry.problemId === problem.id);
+      const totalAnswered = problemHistory.length;
+      const totalCorrect = problemHistory.filter(entry => entry.isCorrect).length;
+      const incorrectCount = totalAnswered - totalCorrect;
+      const accuracy = totalAnswered > 0 ? (totalCorrect / totalAnswered * 100) : 0;
+
+      return {
+        problem,
+        incorrectCount,
+        totalAnswered,
+        accuracy
+      };
+    });
+
+    // 間違いが多い順にソート（同数の場合は正解率の低い順）
+    return problemStats
+      .filter(stat => stat.totalAnswered > 0)
+      .sort((a, b) => {
+        if (a.incorrectCount !== b.incorrectCount) {
+          return b.incorrectCount - a.incorrectCount;
+        }
+        return a.accuracy - b.accuracy;
+      })
+      .slice(0, limit);
+  },
+
+  // 問題集内の問題を取得
+  async getProblemsByQuizSetId(quizSetId: number): Promise<Problem[]> {
+    return await db.problems.where('quizSetId').equals(quizSetId).toArray();
+  },
+
+  // 特定の問題の統計を取得
+  async getProblemStats(problemId: number): Promise<{
+    totalAnswered: number;
+    totalCorrect: number;
+    incorrectCount: number;
+    accuracy: number;
+  }> {
+    const history = await db.history.where('problemId').equals(problemId).toArray();
+    const totalAnswered = history.length;
+    const totalCorrect = history.filter(entry => entry.isCorrect).length;
+    const incorrectCount = totalAnswered - totalCorrect;
+    const accuracy = totalAnswered > 0 ? (totalCorrect / totalAnswered * 100) : 0;
+
+    return {
+      totalAnswered,
+      totalCorrect,
+      incorrectCount,
+      accuracy
+    };
+  }
+};
+
+// 学習日記操作
+export const studyDiaryService = {
+  async create(entry: Omit<StudyDiaryEntry, 'id' | 'createdAt'>): Promise<number> {
+    const newEntry: StudyDiaryEntry = {
+      ...entry,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    return await db.studyDiary.add(newEntry);
+  },
+
+  async update(id: number, updates: Partial<StudyDiaryEntry>): Promise<void> {
+    await db.studyDiary.update(id, {
+      ...updates,
+      updatedAt: new Date()
+    });
+  },
+
+  async delete(id: number): Promise<void> {
+    await db.studyDiary.delete(id);
+  },
+
+  async getAll(): Promise<StudyDiaryEntry[]> {
+    return await db.studyDiary.orderBy('date').reverse().toArray();
+  },
+
+  async getById(id: number): Promise<StudyDiaryEntry | undefined> {
+    return await db.studyDiary.get(id);
+  },
+
+  async getByDate(date: string): Promise<StudyDiaryEntry | undefined> {
+    return await db.studyDiary.where('date').equals(date).first();
+  },
+
+  async getByDateRange(startDate: string, endDate: string): Promise<StudyDiaryEntry[]> {
+    return await db.studyDiary
+      .where('date')
+      .between(startDate, endDate, true, true)
+      .reverse()
+      .sortBy('date');
+  },
+
+  async getRecentEntries(limit: number = 10): Promise<StudyDiaryEntry[]> {
+    return await db.studyDiary
+      .orderBy('createdAt')
+      .reverse()
+      .limit(limit)
+      .toArray();
+  }
+};
+
+// 学習目標操作
+export const studyGoalsService = {
+  async create(goal: Omit<StudyGoal, 'id' | 'createdAt'>): Promise<number> {
+    const newGoal: StudyGoal = {
+      ...goal,
+      createdAt: new Date()
+    };
+    return await db.studyGoals.add(newGoal);
+  },
+
+  async update(id: number, updates: Partial<StudyGoal>): Promise<void> {
+    await db.studyGoals.update(id, updates);
+  },
+
+  async delete(id: number): Promise<void> {
+    await db.studyGoals.delete(id);
+  },
+
+  async getAll(): Promise<StudyGoal[]> {
+    return await db.studyGoals.orderBy('createdAt').reverse().toArray();
+  },
+
+  async getActive(): Promise<StudyGoal[]> {
+    return await db.studyGoals.where('isCompleted').equals(0 as any).toArray();
+  },
+
+  async getCompleted(): Promise<StudyGoal[]> {
+    return await db.studyGoals.where('isCompleted').equals(1 as any).toArray();
+  },
+
+  async markCompleted(id: number): Promise<void> {
+    await db.studyGoals.update(id, {
+      isCompleted: true,
+      completedAt: new Date()
+    });
+  }
+};
+
+// 学習分析サービス
+export const learningAnalyticsService = {
+  // 解答分析データの保存
+  async recordAnswerAnalytics(data: Omit<AnswerAnalytics, 'id' | 'createdAt'>): Promise<number> {
+    const analyticsData: AnswerAnalytics = {
+      ...data,
+      createdAt: new Date()
+    };
+    return await db.answerAnalytics.add(analyticsData);
+  },
+
+  // セッション分析データの保存
+  async recordSessionAnalytics(data: Omit<SessionAnalytics, 'id' | 'createdAt'>): Promise<number> {
+    const sessionData: SessionAnalytics = {
+      ...data,
+      createdAt: new Date()
+    };
+    return await db.sessionAnalytics.add(sessionData);
+  },
+
+  // 学習パターンの更新/作成
+  async updateLearningPattern(userId: string, pattern: Omit<LearningPattern, 'id' | 'userId' | 'lastUpdated'>): Promise<void> {
+    const existing = await db.learningPatterns.where('userId').equals(userId).first();
+    const patternData: LearningPattern = {
+      ...pattern,
+      userId,
+      lastUpdated: new Date()
+    };
+
+    if (existing && existing.id) {
+      await db.learningPatterns.update(existing.id, { ...patternData, id: existing.id });
+    } else {
+      await db.learningPatterns.add(patternData);
+    }
+  },
+
+  // 信頼性評価の保存
+  async recordReliabilityAssessment(assessment: Omit<ReliabilityAssessment, 'id' | 'createdAt'>): Promise<number> {
+    const assessmentData: ReliabilityAssessment = {
+      ...assessment,
+      createdAt: new Date()
+    };
+    return await db.reliabilityAssessments.add(assessmentData);
+  },
+
+  // セッションの解答分析データ取得
+  async getSessionAnswerAnalytics(sessionId: string): Promise<AnswerAnalytics[]> {
+    return await db.answerAnalytics.where('sessionId').equals(sessionId).toArray();
+  },
+
+  // 学習パターン取得
+  async getLearningPattern(userId: string): Promise<LearningPattern | undefined> {
+    return await db.learningPatterns.where('userId').equals(userId).first();
+  },
+
+  // 最近の解答データ取得（適当回答検出用）
+  async getRecentAnswerAnalytics(limit: number = 100): Promise<AnswerAnalytics[]> {
+    return await db.answerAnalytics
+      .orderBy('createdAt')
+      .reverse()
+      .limit(limit)
+      .toArray();
+  },
+
+  // 信頼性の高いデータのみ取得（重み付け統計用）
+  async getReliableAnswerData(sessionId: string, minReliability: number = 0.7): Promise<{
+    analytics: AnswerAnalytics;
+    assessment: ReliabilityAssessment;
+  }[]> {
+    const analytics = await this.getSessionAnswerAnalytics(sessionId);
+    const results = [];
+
+    for (const analytic of analytics) {
+      const assessment = await db.reliabilityAssessments
+        .where('answerAnalyticsId')
+        .equals(analytic.id!)
+        .first();
+
+      if (assessment && assessment.reliabilityScore >= minReliability) {
+        results.push({ analytics: analytic, assessment });
+      }
+    }
+
+    return results;
   }
 };
 

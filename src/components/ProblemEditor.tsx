@@ -37,6 +37,7 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
   // インポート・エクスポート状態
   const [csvText, setCsvText] = useState('');
   const [showCsvFormat, setShowCsvFormat] = useState(false);
+  const [showPrompts, setShowPrompts] = useState(false);
   
   // 問題集作成オプション
   const [createQuizSet, setCreateQuizSet] = useState(false);
@@ -87,7 +88,9 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
         edit: '編集',
         import: 'テキストをインポート',
         export: 'CSV形式でエクスポート',
-        generateCsv: 'テキストからCSV生成'
+        generateCsv: 'テキストからCSV生成',
+        showPrompts: 'AIツール用プロンプト表示',
+        copyPrompt: 'プロンプトをコピー'
       },
       sections: {
         categoryManagement: '📂 カテゴリー管理',
@@ -181,7 +184,9 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
         edit: 'Edit',
         import: 'Import Text',
         export: 'Export as CSV',
-        generateCsv: 'Generate CSV from Text'
+        generateCsv: 'Generate CSV from Text',
+        showPrompts: 'Show AI Tool Prompts',
+        copyPrompt: 'Copy Prompt'
       },
       sections: {
         categoryManagement: '📂 Category Management',
@@ -540,6 +545,9 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
   };
 
   const handleCsvTextImport = async () => {
+    alert('handleCsvTextImport関数が実行されました');
+    console.log('handleCsvTextImport開始');
+    
     if (!csvText.trim()) {
       alert(t[currentLang].messages.csvDataRequired);
       return;
@@ -552,7 +560,100 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
     }
 
     try {
-      const addedCount = await parseCsvAndImport(csvText, createQuizSet, quizSetName);
+      let addedCount = 0;
+      
+      console.log('インポート開始 - テキスト長:', csvText.length);
+      console.log('最初の200文字:', csvText.substring(0, 200));
+      
+      // CSVフォーマットかチェック（ヘッダー行があるか）
+      if (csvText.includes('category,question,answer,explanation')) {
+        console.log('CSVフォーマットとして処理');
+        // すでにCSVフォーマットの場合
+        addedCount = await parseCsvAndImport(csvText, createQuizSet, quizSetName);
+      } else {
+        console.log('テキストフォーマットとして処理');
+        // テキストフォーマットの場合、まず解析してからインポート
+        const quizData = parseTextToQuizData(csvText);
+        
+        console.log('解析結果:', quizData.length, '個の問題');
+        console.log('解析されたデータ:', quizData);
+        
+        if (quizData.length === 0) {
+          alert('有効な問題データが見つかりませんでした。フォーマットを確認してください。\n\nコンソールでデバッグ情報を確認してください。');
+          return;
+        }
+
+        // 問題集を作成（必要な場合）
+        let quizSetId: number | undefined;
+        if (createQuizSet && quizSetName.trim()) {
+          try {
+            quizSetId = await quizSetService.save({
+              name: quizSetName.trim(),
+              description: `${quizData.length}個の問題を含む問題集`,
+              problemIds: [],
+              createdAt: new Date(),
+              updatedAt: new Date()
+            });
+          } catch (error) {
+            console.error('問題集作成エラー:', error);
+          }
+        }
+
+        // 各問題をデータベースに追加
+        console.log('データベース追加開始');
+        for (let i = 0; i < quizData.length; i++) {
+          const quiz = quizData[i];
+          console.log(`問題 ${i + 1}/${quizData.length} を処理中:`, quiz);
+          
+          // カテゴリーを自動追加
+          try {
+            console.log('カテゴリー追加:', quiz.category);
+            await categoryService.add(quiz.category);
+          } catch (error) {
+            console.log('カテゴリー追加エラー（既存の可能性）:', error);
+          }
+
+          // 多択問題かどうかを判定
+          const isMultipleChoice = quiz.option1 || quiz.option2 || quiz.option3 || quiz.option4;
+          
+          const problemData: Omit<Problem, 'id'> = {
+            category: quiz.category,
+            question: quiz.question,
+            type: isMultipleChoice ? 'multiple-choice' : 'true-false',
+            answer: isMultipleChoice ? false : (quiz.answer === 'TRUE'),
+            explanation: quiz.explanation,
+            ...(isMultipleChoice && {
+              options: [quiz.option1, quiz.option2, quiz.option3, quiz.option4].filter(opt => opt),
+              correctAnswer: parseInt(quiz.answer) || 0
+            })
+          };
+
+          console.log('問題データ:', problemData);
+
+          try {
+            const problemId = await problemService.add(problemData);
+            console.log('問題追加成功 ID:', problemId);
+            
+            // 問題集に問題を追加
+            if (quizSetId && problemId) {
+              console.log('問題集に追加:', quizSetId, problemId);
+              // 問題集の問題IDリストを更新
+              const quizSet = await quizSetService.getById(quizSetId);
+              if (quizSet) {
+                quizSet.problemIds.push(problemId);
+                await quizSetService.save(quizSet);
+              }
+            }
+            
+            addedCount++;
+          } catch (error) {
+            console.error('問題追加エラー:', error);
+            console.error('エラーの詳細:', error);
+          }
+        }
+        console.log('データベース追加完了, 追加数:', addedCount);
+      }
+      
       await loadData();
       setCsvText('');
       
@@ -566,7 +667,7 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
       setCreateQuizSet(false);
       setQuizSetName('');
     } catch (error) {
-      console.error('CSVインポートエラー:', error);
+      console.error('インポートエラー:', error);
       alert(t[currentLang].messages.csvImportFailed);
     }
   };
@@ -609,13 +710,240 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
     }
   };
 
+  const parseTextToQuizData = (text: string) => {
+    const lines = text.split('\n').map(line => line.trim()).filter(line => line);
+    const quizData: Array<{
+      category: string;
+      question: string;
+      answer: string;
+      explanation: string;
+      option1: string;
+      option2: string;
+      option3: string;
+      option4: string;
+    }> = [];
+
+    let currentCategory = '';
+    let currentQuestion = '';
+    let currentAnswer = '';
+    let currentExplanation = '';
+    let currentOptions: string[] = [];
+    let inQuestion = false;
+    let afterSeparator = false; // 区切り線直後かどうかのフラグ
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
+      // 区切り線を検出（次の行がカテゴリーの可能性）
+      if (line.match(/^_{10,}/) || line.match(/^-{10,}/) || line.match(/^={10,}/)) {
+        // 前の問題を保存（区切り線前に）
+        if (currentQuestion && currentAnswer !== '' && currentExplanation) {
+          const options = ['', '', '', ''];
+          for (let j = 0; j < Math.min(currentOptions.length, 4); j++) {
+            options[j] = currentOptions[j];
+          }
+          
+          quizData.push({
+            category: currentCategory || 'その他',
+            question: currentQuestion,
+            answer: currentAnswer,
+            explanation: currentExplanation,
+            option1: options[0],
+            option2: options[1],
+            option3: options[2],
+            option4: options[3]
+          });
+          
+          // 問題データをリセット
+          currentQuestion = '';
+          currentAnswer = '';
+          currentExplanation = '';
+          currentOptions = [];
+          inQuestion = false;
+        }
+        afterSeparator = true; // 区切り線直後フラグを設定
+        continue;
+      }
+      
+      // カテゴリー検出（区切り線直後 または 行頭の明確なパターン）
+      const isClearCategoryPattern = line.match(/^第\d+章\s+.+/) || 
+                                    line.match(/^Chapter\s+\d+/) || 
+                                    line.match(/^[#]+\s*.+/) ||
+                                    line.match(/^小テスト\d*[：:]\s*.+/) ||
+                                    line.match(/^テスト\d*[：:]\s*.+/) ||
+                                    line.match(/^Quiz\s*\d*[：:]\s*.+/) ||
+                                    (line.match(/^\d+\.\s*.+/) && afterSeparator);
+                                    
+      if (isClearCategoryPattern && (afterSeparator || i === 0 || lines[i-1].trim() === '')) {
+        // 前の問題を保存（カテゴリー変更前に）
+        if (currentQuestion && currentAnswer !== '' && currentExplanation) {
+          const options = ['', '', '', ''];
+          for (let j = 0; j < Math.min(currentOptions.length, 4); j++) {
+            options[j] = currentOptions[j];
+          }
+          
+          quizData.push({
+            category: currentCategory || 'その他',
+            question: currentQuestion,
+            answer: currentAnswer,
+            explanation: currentExplanation,
+            option1: options[0],
+            option2: options[1],
+            option3: options[2],
+            option4: options[3]
+          });
+        }
+        
+        // 新しいカテゴリーを設定
+        currentCategory = line.replace(/^[#]+\s*/, '')
+                             .replace(/^第\d+章\s+/, '')
+                             .replace(/^Chapter\s+\d+\s*/, '')
+                             .replace(/^小テスト\d*[：:]\s*/, '')
+                             .replace(/^テスト\d*[：:]\s*/, '')
+                             .replace(/^Quiz\s*\d*[：:]\s*/, '')
+                             .replace(/^\d+\.\s*/, '');
+        
+        // 問題データをリセット
+        currentQuestion = '';
+        currentAnswer = '';
+        currentExplanation = '';
+        currentOptions = [];
+        inQuestion = false;
+        afterSeparator = false; // フラグをリセット
+        continue;
+      }
+      
+      // 区切り線直後でない場合はフラグをリセット
+      if (afterSeparator && line.trim() !== '') {
+        afterSeparator = false;
+      }
+      
+      // 問題番号検出
+      if (line.match(/^問題\d+/) || line.match(/^Question\s*\d+/) || line.match(/^\d+\)/)) {
+        if (currentQuestion && currentAnswer !== '' && currentExplanation) {
+          // 前の問題を保存
+          const options = ['', '', '', ''];
+          for (let j = 0; j < Math.min(currentOptions.length, 4); j++) {
+            options[j] = currentOptions[j];
+          }
+          
+          quizData.push({
+            category: currentCategory || 'その他',
+            question: currentQuestion,
+            answer: currentAnswer,
+            explanation: currentExplanation,
+            option1: options[0],
+            option2: options[1],
+            option3: options[2],
+            option4: options[3]
+          });
+        }
+        // 新しい問題の開始
+        currentQuestion = '';
+        currentAnswer = '';
+        currentExplanation = '';
+        currentOptions = [];
+        inQuestion = true;
+        continue;
+      }
+      
+      // 選択肢検出
+      if (line.match(/^[1-5]\.\s+.+/) || line.match(/^[ABCDE]\.\s+.+/) || line.match(/^[（(][1-5][）)]\s+.+/)) {
+        const optionText = line.replace(/^[1-5ABCDE（(][1-5）)]*\.\s*/, '').replace(/^[（(][1-5][）)]\s*/, '').trim();
+        currentOptions.push(optionText);
+        inQuestion = false;
+        continue;
+      }
+
+      // 正解検出
+      if (line.startsWith('正解：') || line.startsWith('Answer:') || line.startsWith('答え：')) {
+        const answerText = line.replace(/^(正解：|Answer:|答え：)/, '').trim();
+        if (answerText === '○' || answerText.toLowerCase() === 'true' || answerText === 'T') {
+          currentAnswer = 'TRUE';
+        } else if (answerText === '×' || answerText.toLowerCase() === 'false' || answerText === 'F') {
+          currentAnswer = 'FALSE';
+        } else {
+          // 数字の場合（多択問題）
+          const numAnswer = parseInt(answerText);
+          if (!isNaN(numAnswer) && numAnswer >= 1 && numAnswer <= 5) {
+            currentAnswer = (numAnswer - 1).toString(); // 0-indexedに変換
+          } else {
+            currentAnswer = answerText;
+          }
+        }
+        inQuestion = false;
+        continue;
+      }
+      
+      // 解説検出
+      if (line.startsWith('解説：') || line.startsWith('Explanation:') || line.startsWith('説明：')) {
+        currentExplanation = line.replace(/^(解説：|Explanation:|説明：)/, '').trim();
+        continue;
+      }
+      
+      // 問題文の続き
+      if (inQuestion) {
+        currentQuestion += (currentQuestion ? ' ' : '') + line;
+      }
+      // 解説の続き（問題番号やカテゴリーでなければ解説の続き）
+      else if (currentExplanation && !line.startsWith('問題') && !line.startsWith('Question') && !line.match(/^\d+\)/) && !isClearCategoryPattern) {
+        currentExplanation += ' ' + line;
+      }
+    }
+    
+    // 最後の問題を保存
+    if (currentQuestion && currentAnswer !== '' && currentExplanation) {
+      const options = ['', '', '', ''];
+      for (let j = 0; j < Math.min(currentOptions.length, 4); j++) {
+        options[j] = currentOptions[j];
+      }
+      
+      quizData.push({
+        category: currentCategory || 'その他',
+        question: currentQuestion,
+        answer: currentAnswer,
+        explanation: currentExplanation,
+        option1: options[0],
+        option2: options[1],
+        option3: options[2],
+        option4: options[3]
+      });
+    }
+    
+    return quizData;
+  };
+
   const generateCsvFromText = () => {
     if (!csvText.trim()) {
       alert(t[currentLang].messages.csvDataRequired);
       return;
     }
 
-    const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
+    // テキストを解析してクイズデータに変換
+    const quizData = parseTextToQuizData(csvText);
+    
+    if (quizData.length === 0) {
+      alert('有効な問題データが見つかりませんでした。フォーマットを確認してください。');
+      return;
+    }
+
+    // CSVフォーマットに変換
+    const csvHeader = 'category,question,answer,explanation,option1,option2,option3,option4\n';
+    const csvRows = quizData.map(quiz => {
+      const category = `"${quiz.category.replace(/"/g, '""')}"`;
+      const question = `"${quiz.question.replace(/"/g, '""')}"`;
+      const answer = quiz.answer;
+      const explanation = `"${quiz.explanation.replace(/"/g, '""')}"`;
+      const option1 = `"${quiz.option1.replace(/"/g, '""')}"`;
+      const option2 = `"${quiz.option2.replace(/"/g, '""')}"`;
+      const option3 = `"${quiz.option3.replace(/"/g, '""')}"`;
+      const option4 = `"${quiz.option4.replace(/"/g, '""')}"`;
+      
+      return `${category},${question},${answer},${explanation},${option1},${option2},${option3},${option4}`;
+    });
+
+    const csvContent = csvHeader + csvRows.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     
     if (link.download !== undefined) {
@@ -627,7 +955,99 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
       link.click();
       document.body.removeChild(link);
     }
+    
+    alert(`${quizData.length}個の問題をCSVファイルに変換しました。`);
   };
+
+  const copyToClipboard = (text: string, type: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      alert(`${type}プロンプトをクリップボードにコピーしました。`);
+    }).catch(() => {
+      alert('コピーに失敗しました。手動でコピーしてください。');
+    });
+  };
+
+  const trueFalsePrompt = `以下のテキストを、クイズアプリで読み込める標準フォーマットに変換してください。
+
+**重要な変換ルール:**
+1. 各問題の最後に必ず区切り線（アンダースコア40個）を追加
+2. 章タイトルの前に区切り線は不要
+3. 問題番号は必ず単独行に
+4. 正解は「正解：○」または「正解：×」の形式
+5. 解説は「解説： 」で始める（コロンの後にスペース1個）
+6. 不完全な問題や解説は修正・補完する
+
+**出力フォーマット例:**
+\`\`\`
+第1章 骨格筋の筋収縮と運動能力
+問題1
+骨格筋は自分で動かすことができる随意筋で、運動神経によって支配されている。
+正解：○
+解説： 骨格筋は意識的に動かすことができる随意筋で、運動神経によって支配されています。これに対し、心筋と平滑筋は不随意筋で自律神経によって支配されます。
+________________________________________
+問題2
+心筋と平滑筋は両方とも不随意筋で、自律神経によって支配されている。
+正解：○
+解説： 心筋と平滑筋は意識的にコントロールできない不随意筋です。心筋は心臓の拍動を、平滑筋は内臓の動きなどを制御し、どちらも自律神経によって支配されています。
+________________________________________
+第2章 エネルギー代謝
+問題21
+植物のデンプンと動物のグリコーゲンは、どちらも糖質の貯蔵形態である。
+正解：○
+解説： 植物はデンプンの形で、動物（人間含む）はグリコーゲンの形で糖質を貯蔵しています。どちらもグルコースが多数結合した多糖類です。
+________________________________________
+\`\`\`
+
+**修正が必要な場合の対応:**
+- 途中で切れた解説は適切に補完
+- 問題文が不完全な場合は文脈から推測して完成
+- 正解や解説が欠けている場合は追加
+- 問題番号の連番を調整
+
+提供されたテキストをこの形式で変換してください。区切り線を忘れずに各問題の最後に追加することが重要です。`;
+
+  const multipleChoicePrompt = `以下のテキストを、クイズアプリで読み込める多択問題の標準フォーマットに変換してください。
+
+**重要な変換ルール:**
+1. 各問題の最後に必ず区切り線（アンダースコア40個）を追加
+2. 問題番号は必ず単独行に
+3. 正解は選択肢番号（1、2、3、4、5）で表記
+4. 選択肢は「1. 」「2. 」「3. 」「4. 」「5. 」で始める
+5. 解説は「解説： 」で始める（コロンの後にスペース1個）
+6. 不完全な問題や解説は修正・補完する
+
+**出力フォーマット例:**
+\`\`\`
+第1章 循環器疾患
+問題1
+心筋梗塞の主な原因はどれか。
+1. 心房細動
+2. 冠動脈の閉塞
+3. 心室中隔欠損
+4. 僧帽弁狭窄症
+5. 大動脈弁閉鎖不全症
+正解：2
+解説： 心筋梗塞は冠動脈が血栓などで閉塞し、心筋への血流が遮断されることで起こります。冠動脈の閉塞が主な原因です。
+________________________________________
+問題2
+高血圧の診断基準（成人）として正しいのはどれか。
+1. 収縮期血圧130mmHg以上
+2. 拡張期血圧80mmHg以上
+3. 収縮期血圧140mmHg以上または拡張期血圧90mmHg以上
+4. 収縮期血圧150mmHg以上
+5. 拡張期血圧100mmHg以上
+正解：3
+解説： 成人の高血圧診断基準は、収縮期血圧140mmHg以上または拡張期血圧90mmHg以上です。これは日本高血圧学会のガイドラインに基づいています。
+________________________________________
+\`\`\`
+
+**修正が必要な場合の対応:**
+- 選択肢が不足している場合は適切に補完（最低4択、最大5択）
+- 正解番号が不明な場合は内容から判断して設定
+- 途中で切れた解説は適切に補完
+- 問題文が不完全な場合は文脈から推測して完成
+
+提供されたテキストをこの形式で変換してください。区切り線を忘れずに各問題の最後に追加することが重要です。`;
 
   if (isLoading) {
     return (
@@ -918,6 +1338,10 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
               <textarea
                 value={csvText}
                 onChange={(e) => setCsvText(e.target.value)}
+                onPaste={(e) => {
+                  // ペースト操作を許可
+                  e.stopPropagation();
+                }}
                 rows={8}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
                 placeholder={t[currentLang].importExport.csvDataPlaceholder}
@@ -925,7 +1349,13 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
               
               <div className="flex space-x-2">
                 <button
-                  onClick={handleCsvTextImport}
+                  onClick={() => {
+                    console.log('インポートボタンクリック');
+                    console.log('createQuizSet:', createQuizSet);
+                    console.log('quizSetName:', quizSetName);
+                    console.log('csvText length:', csvText.length);
+                    handleCsvTextImport();
+                  }}
                   disabled={createQuizSet && !quizSetName.trim()}
                   className="quiz-action-button flex-1 px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm disabled:bg-gray-400 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
                   title={createQuizSet && !quizSetName.trim() ? t[currentLang].messages.quizSetNameRequired : ""}
@@ -939,6 +1369,52 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
                   {t[currentLang].buttons.generateCsv}
                 </button>
               </div>
+
+              {/* AIツール用プロンプト表示 */}
+              <div className="mt-4">
+                <button
+                  onClick={() => setShowPrompts(!showPrompts)}
+                  className="quiz-action-button w-full px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm"
+                >
+                  {t[currentLang].buttons.showPrompts}
+                </button>
+              </div>
+
+              {showPrompts && (
+                <div className="mt-4 space-y-4">
+                  {/* ○×問題用プロンプト */}
+                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                    <div className="flex justify-between items-center mb-2">
+                      <h4 className="text-md font-medium text-blue-900 dark:text-blue-100">○×問題用プロンプト</h4>
+                      <button
+                        onClick={() => copyToClipboard(trueFalsePrompt, '○×問題用')}
+                        className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
+                      >
+                        {t[currentLang].buttons.copyPrompt}
+                      </button>
+                    </div>
+                    <pre className="text-xs text-blue-800 dark:text-blue-200 whitespace-pre-wrap bg-white dark:bg-gray-800 p-3 rounded border max-h-40 overflow-y-auto">
+                      {trueFalsePrompt}
+                    </pre>
+                  </div>
+
+                  {/* 多択問題用プロンプト */}
+                  <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+                    <div className="flex justify-between items-center mb-2">
+                      <h4 className="text-md font-medium text-green-900 dark:text-green-100">多択問題用プロンプト</h4>
+                      <button
+                        onClick={() => copyToClipboard(multipleChoicePrompt, '多択問題用')}
+                        className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
+                      >
+                        {t[currentLang].buttons.copyPrompt}
+                      </button>
+                    </div>
+                    <pre className="text-xs text-green-800 dark:text-green-200 whitespace-pre-wrap bg-white dark:bg-gray-800 p-3 rounded border max-h-40 overflow-y-auto">
+                      {multipleChoicePrompt}
+                    </pre>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

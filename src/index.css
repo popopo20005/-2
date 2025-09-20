@@ -5,10 +5,14 @@
 body {
   margin: 0;
   min-height: 100vh;
+  min-height: 100dvh; /* モバイルブラウザ対応 */
   background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 25%, #bae6fd 50%, #f8fafc 75%, #f0f9ff 100%);
   background-size: 400% 400%;
   animation: gradientShift 15s ease infinite;
   position: relative;
+  /* モバイルでのスクロール問題を防ぐ */
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* テクスチャー用の疑似要素 */
@@ -463,6 +467,53 @@ main, .main-menu, [role="main"] {
 /* スムーズなトランジション */
 * {
   transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease, transform 0.2s ease;
+}
+
+/* ルート要素の高さを確実に設定 */
+#root {
+  min-height: 100vh;
+  min-height: 100dvh;
+  width: 100%;
+}
+
+html {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* モバイル特有の問題を修正 */
+@media screen and (max-width: 768px) {
+  body {
+    -webkit-text-size-adjust: 100%;
+    -ms-text-size-adjust: 100%;
+    font-size: 16px; /* iOS Safariのズーム防止 */
+  }
+  
+  /* タッチデバイスでのスクロールを改善 */
+  * {
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  /* モバイルでのボタンタップ時のハイライト除去 */
+  button, a, input, textarea, select {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* 非常に小さい画面での対応 */
+@media screen and (max-width: 480px) {
+  .main-menu-button {
+    min-height: 100px !important;
+    padding: 12px !important;
+  }
+  
+  .main-menu-button h3 {
+    font-size: 0.75rem !important;
+  }
+  
+  .main-menu-button p {
+    font-size: 0.7rem !important;
+  }
 }
 
 /* カードのシャドウを強化 */

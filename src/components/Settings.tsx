@@ -1,18 +1,24 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { resetDatabase } from '../lib/database';
+import { demonstrateLearningStateEstimation } from '../lib/learningStateDemo';
 
 interface SettingsProps {
   onBack: () => void;
   onToggleDarkMode: () => void;
   isDarkMode: boolean;
+  language?: 'ja' | 'en';
 }
 
-export function Settings({ onBack, onToggleDarkMode, isDarkMode }: SettingsProps) {
-  const [language, setLanguage] = useState(localStorage.getItem('language') || 'ja');
+export function Settings({ onBack, onToggleDarkMode, isDarkMode, language: propsLanguage }: SettingsProps) {
+  const [language, setLanguage] = useState(propsLanguage || localStorage.getItem('language') || 'ja');
   const [showHelp, setShowHelp] = useState(false);
   const [showUsage, setShowUsage] = useState(false);
   const [showNotice, setShowNotice] = useState(false);
+  const [subjectiveFeedbackEnabled, setSubjectiveFeedbackEnabled] = useState(() => {
+    const saved = localStorage.getItem('subjective-feedback-enabled');
+    return saved === null ? true : saved === 'true'; // デフォルトで有効
+  });
 
 
   // 翻訳テキスト
@@ -25,7 +31,13 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode }: SettingsProps
       darkModeDesc: 'アプリの外観を変更します',
       language: '言語設定',
       languageDesc: 'アプリの表示言語を選択してください',
+      subjectiveFeedback: '学習効果測定',
+      subjectiveFeedbackDesc: '問題回答後に理解度を記録します（オン/オフ切り替え可能）',
       helpSupport: '📚 ヘルプ・サポート',
+      homepage: {
+        title: '🏠 公式ホームページ',
+        desc: '詳しい使い方や質問の回答をチェック'
+      },
       usage: {
         title: '📖 使い方説明',
         desc: 'アプリの基本的な使い方を確認'
@@ -49,11 +61,19 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode }: SettingsProps
       resetDbDesc: '問題が表示されない場合やデータベースに問題がある場合に使用してください。',
       resetDbButton: '🗑️ データベースをリセット',
       languageChanged: '言語設定を変更しました。ページを再読み込みして反映してください。',
+      on: 'オン',
+      off: 'オフ',
       resetConfirm: '⚠️ データベースをリセットしますか？\n\nすべての問題、カテゴリ、履歴、問題集、セッションが削除されます。\nこの操作は元に戻せません。',
       resetSuccess: '✅ データベースをリセットしました。ページを再読み込みしてください。',
       resetError: '❌ データベースのリセットに失敗しました。',
       close: '閉じる',
       understand: '了解しました',
+      learningStateEstimation: {
+        title: '🔬 学習状態推定システム（新機能）',
+        description: '理解度と正解/不正解の組み合わせから、確信度・適当回答・体感難易度を自動推定します',
+        testButton: '📊 推定システムをテスト',
+        testComplete: 'コンソールで推定結果を確認してください！'
+      },
       modals: {
         usage: {
           title: '📖 Minguella の使い方',
@@ -160,7 +180,13 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode }: SettingsProps
       darkModeDesc: 'Change the app appearance',
       language: 'Language Settings',
       languageDesc: 'Select the display language for the app',
+      subjectiveFeedback: 'Learning Assessment',
+      subjectiveFeedbackDesc: 'Record understanding level after answering (ON/OFF toggle)',
       helpSupport: '📚 Help & Support',
+      homepage: {
+        title: '🏠 Official Homepage',
+        desc: 'Check detailed usage guides and FAQ'
+      },
       usage: {
         title: '📖 How to Use',
         desc: 'Learn the basic usage of the app'
@@ -184,11 +210,19 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode }: SettingsProps
       resetDbDesc: 'Use this if problems are not displayed or there are database issues.',
       resetDbButton: '🗑️ Reset Database',
       languageChanged: 'Language setting has been changed. Please reload the page to apply changes.',
+      on: 'ON',
+      off: 'OFF',
       resetConfirm: '⚠️ Are you sure you want to reset the database?\n\nAll problems, categories, history, quiz sets, and sessions will be deleted.\nThis operation cannot be undone.',
       resetSuccess: '✅ Database has been reset. Please reload the page.',
       resetError: '❌ Failed to reset the database.',
       close: 'Close',
       understand: 'Understood',
+      learningStateEstimation: {
+        title: '🔬 Learning State Estimation System (New Feature)',
+        description: 'Automatically estimates confidence, casual answers, and perceived difficulty from understanding and correct/incorrect combinations',
+        testButton: '📊 Test Estimation System',
+        testComplete: 'Check the estimation results in the console!'
+      },
       modals: {
         usage: {
           title: '📖 How to Use Minguella',
@@ -310,6 +344,21 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode }: SettingsProps
     alert(t[newLanguage as keyof typeof t].languageChanged);
   };
 
+  const handleSubjectiveFeedbackToggle = () => {
+    const newValue = !subjectiveFeedbackEnabled;
+    console.log('Toggling subjective feedback:', {
+      currentValue: subjectiveFeedbackEnabled,
+      newValue,
+      localStorage_before: localStorage.getItem('subjective-feedback-enabled')
+    });
+    setSubjectiveFeedbackEnabled(newValue);
+    localStorage.setItem('subjective-feedback-enabled', newValue.toString());
+    console.log('After toggle:', {
+      localStorage_after: localStorage.getItem('subjective-feedback-enabled')
+    });
+  };
+
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-teal-50 to-cyan-50 dark:from-gray-900 dark:to-gray-800 p-8">
       <div className="max-w-6xl mx-auto">
@@ -353,7 +402,82 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode }: SettingsProps
                   />
                 </button>
               </div>
-              
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="text-sm font-medium text-gray-900 dark:text-white">
+                    {t[currentLang].subjectiveFeedback}
+                  </label>
+                  <p className="text-sm text-gray-500 dark:text-gray-200">
+                    {t[currentLang].subjectiveFeedbackDesc}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  {/* 大きなクリックエリア */}
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      console.log('Toggle button clicked!', {
+                        current: subjectiveFeedbackEnabled,
+                        new: !subjectiveFeedbackEnabled
+                      });
+                      handleSubjectiveFeedbackToggle();
+                    }}
+                    className={`px-4 py-2 rounded-lg border-2 transition-all cursor-pointer ${
+                      subjectiveFeedbackEnabled
+                        ? 'bg-blue-100 border-blue-500 text-blue-700'
+                        : 'bg-gray-100 border-gray-300 text-gray-700'
+                    } hover:shadow-md`}
+                    style={{
+                      minWidth: '80px',
+                      textAlign: 'center'
+                    }}
+                  >
+                    {subjectiveFeedbackEnabled ? `✅ ${t[currentLang].on}` : `❌ ${t[currentLang].off}`}
+                  </button>
+
+                  {/* 従来のトグルボタンも残す */}
+                  <div
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${
+                      subjectiveFeedbackEnabled ? 'bg-blue-600' : 'bg-gray-200'
+                    }`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      console.log('Small toggle clicked!');
+                      handleSubjectiveFeedbackToggle();
+                    }}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        subjectiveFeedbackEnabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 学習状態推定システムのデモ */}
+              <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                <h4 className="text-sm font-medium text-blue-900 dark:text-blue-100 mb-2">
+                  {t[currentLang].learningStateEstimation.title}
+                </h4>
+                <p className="text-xs text-blue-700 dark:text-blue-300 mb-3">
+                  {t[currentLang].learningStateEstimation.description}
+                </p>
+                <button
+                  onClick={() => {
+                    const result = demonstrateLearningStateEstimation();
+                    console.log('推定システムデモ実行完了:', result);
+                    alert(t[currentLang].learningStateEstimation.testComplete);
+                  }}
+                  className="px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition"
+                >
+                  {t[currentLang].learningStateEstimation.testButton}
+                </button>
+              </div>
+
               <hr className="border-gray-200 dark:border-gray-700" />
               
               <div>
@@ -396,6 +520,22 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode }: SettingsProps
             </h2>
             
             <div className="space-y-4">
+              <button
+                onClick={() => window.open('https://minguella-website.netlify.app/', '_blank')}
+                className="quiz-action-button w-full p-4 text-left"
+              >
+                <div className="flex items-center">
+                  <span className="text-2xl mr-3">🏠</span>
+                  <div>
+                    <div className="font-medium">{t[currentLang].homepage.title}</div>
+                    <div className="text-sm opacity-90">{t[currentLang].homepage.desc}</div>
+                  </div>
+                  <div className="ml-auto text-gray-400 dark:text-gray-500">
+                    <span className="text-sm">↗</span>
+                  </div>
+                </div>
+              </button>
+              
               <button
                 onClick={() => setShowUsage(true)}
                 className="quiz-action-button w-full p-4 text-left"
@@ -520,56 +660,56 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode }: SettingsProps
               <div className="p-6 overflow-y-auto max-h-[calc(90vh-200px)] bg-white dark:bg-gray-800">
                 <div className="space-y-4">
                   <div className="bg-white dark:bg-gray-700 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-600">
-                    <h4 className="font-semibold mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2" style={{ color: isDarkMode ? '#ffffff' : '#ffffff' }}>{t[currentLang].modals.usage.quiz.title}</h4>
-                    <ul className="text-sm space-y-2">
+                    <h4 className="font-semibold text-gray-900 dark:text-white mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2">{t[currentLang].modals.usage.quiz.title}</h4>
+                    <ul className="text-sm text-gray-700 dark:text-gray-200 space-y-2">
                       {t[currentLang].modals.usage.quiz.items.map((item, index) => (
                         <li key={index} className="flex items-start bg-green-50 dark:bg-green-900/20 p-2 rounded border-l-4 border-green-400">
                           <span className="text-green-600 mr-2">•</span>
-                          <span style={{ color: isDarkMode ? '#e5e7eb' : '#ffffff' }}>{item}</span>
+                          <span>{item}</span>
                         </li>
                       ))}
                     </ul>
                   </div>
                   <div className="bg-white dark:bg-gray-700 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-600">
-                    <h4 className="font-semibold mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2" style={{ color: isDarkMode ? '#ffffff' : '#ffffff' }}>{t[currentLang].modals.usage.editor.title}</h4>
-                    <ul className="text-sm space-y-2">
+                    <h4 className="font-semibold text-gray-900 dark:text-white mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2">{t[currentLang].modals.usage.editor.title}</h4>
+                    <ul className="text-sm text-gray-700 dark:text-gray-200 space-y-2">
                       {t[currentLang].modals.usage.editor.items.map((item, index) => (
                         <li key={index} className="flex items-start bg-yellow-50 dark:bg-yellow-900/20 p-2 rounded border-l-4 border-yellow-400">
                           <span className="text-yellow-600 mr-2">•</span>
-                          <span style={{ color: isDarkMode ? '#e5e7eb' : '#ffffff' }}>{item}</span>
+                          <span>{item}</span>
                         </li>
                       ))}
                     </ul>
                   </div>
                   <div className="bg-white dark:bg-gray-700 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-600">
-                    <h4 className="font-semibold mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2" style={{ color: isDarkMode ? '#ffffff' : '#ffffff' }}>{t[currentLang].modals.usage.quizSets.title}</h4>
-                    <ul className="text-sm space-y-2">
+                    <h4 className="font-semibold text-gray-900 dark:text-white mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2">{t[currentLang].modals.usage.quizSets.title}</h4>
+                    <ul className="text-sm text-gray-700 dark:text-gray-200 space-y-2">
                       {t[currentLang].modals.usage.quizSets.items.map((item, index) => (
                         <li key={index} className="flex items-start bg-purple-50 dark:bg-purple-900/20 p-2 rounded border-l-4 border-purple-400">
                           <span className="text-purple-600 mr-2">•</span>
-                          <span style={{ color: isDarkMode ? '#e5e7eb' : '#ffffff' }}>{item}</span>
+                          <span>{item}</span>
                         </li>
                       ))}
                     </ul>
                   </div>
                   <div className="bg-white dark:bg-gray-700 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-600">
-                    <h4 className="font-semibold mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2" style={{ color: isDarkMode ? '#ffffff' : '#ffffff' }}>{t[currentLang].modals.usage.stats.title}</h4>
-                    <ul className="text-sm space-y-2">
+                    <h4 className="font-semibold text-gray-900 dark:text-white mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2">{t[currentLang].modals.usage.stats.title}</h4>
+                    <ul className="text-sm text-gray-700 dark:text-gray-200 space-y-2">
                       {t[currentLang].modals.usage.stats.items.map((item, index) => (
                         <li key={index} className="flex items-start bg-orange-50 dark:bg-orange-900/20 p-2 rounded border-l-4 border-orange-400">
                           <span className="text-orange-600 mr-2">•</span>
-                          <span style={{ color: isDarkMode ? '#e5e7eb' : '#ffffff' }}>{item}</span>
+                          <span>{item}</span>
                         </li>
                       ))}
                     </ul>
                   </div>
                   <div className="bg-white dark:bg-gray-700 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-600">
-                    <h4 className="font-semibold mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2" style={{ color: isDarkMode ? '#ffffff' : '#ffffff' }}>{t[currentLang].modals.usage.backup.title}</h4>
-                    <ul className="text-sm space-y-2">
+                    <h4 className="font-semibold text-gray-900 dark:text-white mb-3 text-base border-b border-gray-200 dark:border-gray-600 pb-2">{t[currentLang].modals.usage.backup.title}</h4>
+                    <ul className="text-sm text-gray-700 dark:text-gray-200 space-y-2">
                       {t[currentLang].modals.usage.backup.items.map((item, index) => (
                         <li key={index} className="flex items-start bg-cyan-50 dark:bg-cyan-900/20 p-2 rounded border-l-4 border-cyan-400">
                           <span className="text-cyan-600 mr-2">•</span>
-                          <span style={{ color: isDarkMode ? '#e5e7eb' : '#ffffff' }}>{item}</span>
+                          <span>{item}</span>
                         </li>
                       ))}
                     </ul>
@@ -624,8 +764,8 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode }: SettingsProps
                 <div className="space-y-4">
                   {t[currentLang].modals.faq.items.map((item, index) => (
                     <div key={index} className="bg-white dark:bg-gray-700 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-600">
-                      <h4 className="font-semibold mb-3 text-base" style={{ color: isDarkMode ? '#ffffff' : '#ffffff' }}>{item.q}</h4>
-                      <p className="text-sm leading-relaxed bg-blue-50 dark:bg-blue-900/20 p-3 rounded border-l-4 border-blue-400" style={{ color: isDarkMode ? '#e5e7eb' : '#ffffff' }}>{item.a}</p>
+                      <h4 className="font-semibold text-gray-900 dark:text-white mb-3 text-base">{item.q}</h4>
+                      <p className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed bg-blue-50 dark:bg-blue-900/20 p-3 rounded border-l-4 border-blue-400">{item.a}</p>
                     </div>
                   ))}
                 </div>
@@ -677,26 +817,26 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode }: SettingsProps
               <div className="p-6 overflow-y-auto max-h-[calc(90vh-200px)] bg-white dark:bg-gray-800">
                 <div className="space-y-4">
                   <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
-                    <h4 className="font-medium mb-2" style={{ color: isDarkMode ? '#fef3c7' : '#ffffff' }}>{t[currentLang].modals.notice.dataManagement.title}</h4>
-                    <ul className="text-sm space-y-1" style={{ color: isDarkMode ? '#fde68a' : '#ffffff' }}>
+                    <h4 className="font-medium text-yellow-900 dark:text-yellow-100 mb-2">{t[currentLang].modals.notice.dataManagement.title}</h4>
+                    <ul className="text-sm text-yellow-800 dark:text-yellow-200 space-y-1">
                       {t[currentLang].modals.notice.dataManagement.items.map((item, index) => (
-                        <li key={index} style={{ color: isDarkMode ? '#fde68a' : '#ffffff' }}>• {item}</li>
+                        <li key={index}>• {item}</li>
                       ))}
                     </ul>
                   </div>
                   <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                    <h4 className="font-medium mb-2" style={{ color: isDarkMode ? '#dbeafe' : '#ffffff' }}>{t[currentLang].modals.notice.network.title}</h4>
-                    <ul className="text-sm space-y-1" style={{ color: isDarkMode ? '#bfdbfe' : '#ffffff' }}>
+                    <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-2">{t[currentLang].modals.notice.network.title}</h4>
+                    <ul className="text-sm text-blue-800 dark:text-blue-200 space-y-1">
                       {t[currentLang].modals.notice.network.items.map((item, index) => (
-                        <li key={index} style={{ color: isDarkMode ? '#bfdbfe' : '#ffffff' }}>• {item}</li>
+                        <li key={index}>• {item}</li>
                       ))}
                     </ul>
                   </div>
                   <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-                    <h4 className="font-medium mb-2" style={{ color: isDarkMode ? '#fecaca' : '#ffffff' }}>{t[currentLang].modals.notice.privacy.title}</h4>
-                    <ul className="text-sm space-y-1" style={{ color: isDarkMode ? '#fca5a5' : '#ffffff' }}>
+                    <h4 className="font-medium text-red-900 dark:text-red-100 mb-2">{t[currentLang].modals.notice.privacy.title}</h4>
+                    <ul className="text-sm text-red-800 dark:text-red-200 space-y-1">
                       {t[currentLang].modals.notice.privacy.items.map((item, index) => (
-                        <li key={index} style={{ color: isDarkMode ? '#fca5a5' : '#ffffff' }}>• {item}</li>
+                        <li key={index}>• {item}</li>
                       ))}
                     </ul>
                   </div>
