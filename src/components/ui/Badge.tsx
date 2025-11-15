@@ -1,6 +1,6 @@
 import { forwardRef, type HTMLAttributes, type ReactNode } from 'react';
 
-export type BadgeVariant = 'default' | 'secondary' | 'success' | 'warning' | 'error' | 'outline';
+export type BadgeVariant = 'default' | 'secondary' | 'success' | 'warning' | 'error' | 'outline' | 'info';
 
 export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   variant?: BadgeVariant;
@@ -41,6 +41,10 @@ export const Badge = forwardRef<HTMLSpanElement, BadgeProps>(
       error: `
         bg-red-100 dark:bg-red-900/30
         text-red-700 dark:text-red-300
+      `,
+      info: `
+        bg-cyan-100 dark:bg-cyan-900/30
+        text-cyan-700 dark:text-cyan-300
       `,
       outline: `
         bg-transparent
