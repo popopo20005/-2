@@ -507,8 +507,8 @@ export function Dashboard({ onNavigate, language = 'ja', onToggleDarkMode, isDar
                     </div>
 
                     {/* プログレスバー */}
-                    <div className="flex-1 relative">
-                      <div className={`w-full rounded-full h-8 overflow-hidden ${isToday ? 'bg-purple-200 dark:bg-purple-900/50 ring-2 ring-purple-500 dark:ring-purple-400' : 'bg-gray-200 dark:bg-gray-700'}`}>
+                    <div className={`flex-1 relative ${isToday ? 'ring-2 ring-purple-500 dark:ring-purple-400 rounded-full' : ''}`}>
+                      <div className={`w-full rounded-full h-8 ${isToday ? 'bg-purple-200 dark:bg-purple-900/50' : 'bg-gray-200 dark:bg-gray-700'} overflow-hidden`}>
                         <div
                           className={`h-full bg-gradient-to-r ${isToday ? 'from-purple-500 to-pink-500' : 'from-purple-400 to-purple-300 dark:from-purple-600 dark:to-purple-500'} transition-all duration-500 rounded-full flex items-center justify-end pr-2`}
                           style={{ width: `${Math.max(percentage, minutes > 0 ? 5 : 0)}%` }}
