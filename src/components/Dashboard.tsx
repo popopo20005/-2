@@ -91,6 +91,8 @@ export function Dashboard({ onNavigate, language = 'ja', onToggleDarkMode, isDar
 
       // 週間学習時間の読み込み
       const weeklyData = await getWeeklyStudyTime();
+      console.log('週間学習時間データ:', weeklyData);
+      console.log('今日の曜日:', new Date().getDay());
       setWeeklyStudyTime(weeklyData);
 
       // 復習が必要なカードの数（間隔反復）
@@ -506,7 +508,7 @@ export function Dashboard({ onNavigate, language = 'ja', onToggleDarkMode, isDar
 
                     {/* プログレスバー */}
                     <div className="flex-1 relative">
-                      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-8 overflow-hidden">
+                      <div className={`w-full rounded-full h-8 overflow-hidden ${isToday ? 'bg-purple-200 dark:bg-purple-900/50 ring-2 ring-purple-500 dark:ring-purple-400' : 'bg-gray-200 dark:bg-gray-700'}`}>
                         <div
                           className={`h-full bg-gradient-to-r ${isToday ? 'from-purple-500 to-pink-500' : 'from-purple-400 to-purple-300 dark:from-purple-600 dark:to-purple-500'} transition-all duration-500 rounded-full flex items-center justify-end pr-2`}
                           style={{ width: `${Math.max(percentage, minutes > 0 ? 5 : 0)}%` }}
