@@ -3,6 +3,7 @@ import { categoryService, problemService, quizSetService, historyService, quizSe
 import { AnalyticsManager, AnalyticsTracker } from '../lib/analyticsTracker';
 import { SubjectiveFeedback } from './SubjectiveFeedback';
 import { LearningStateEstimator } from '../lib/learningStateEstimator';
+import { startSession, endSession } from '../lib/studyTimeService';
 import type { Problem, QuizSet, QuizSession, SubjectiveFeedbackData } from '../types';
 
 interface QuizParams {
@@ -61,6 +62,9 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
 
   // 学習分析トラッキング
   const [analyticsTracker, setAnalyticsTracker] = useState<AnalyticsTracker | null>(null);
+
+  // 学習時間トラッキング
+  const [studyTimeSessionId, setStudyTimeSessionId] = useState<number | null>(null);
   
   useEffect(() => {
     loadData();
@@ -557,6 +561,15 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
         tracker.startProblem(shuffledProblems[0].id);
       }
 
+      // 学習時間トラッキングセッションを開始
+      try {
+        const sessionType = type === 'incorrect' || type === 'quizSetIncorrect' ? 'review' : 'quiz';
+        const studySessionId = await startSession(sessionType, quizSetId, category);
+        setStudyTimeSessionId(studySessionId);
+      } catch (studyTimeError) {
+        console.warn('学習時間トラッキングの開始に失敗しましたが、クイズは続行します:', studyTimeError);
+      }
+
       // 自動保存タイマーを開始（30秒間隔）
       const interval = setInterval(async () => {
         if (currentSessionId) {
@@ -961,6 +974,21 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
             casualAnswerCount
           );
         }
+
+        // 学習時間トラッキングセッションを終了
+        if (studyTimeSessionId !== null) {
+          try {
+            const correctCount = userAnswers.filter((ans, idx) => {
+              const problem = currentProblems[idx];
+              return problem.type === 'true-false' ? ans === problem.answer : ans === problem.correctAnswer;
+            }).length;
+            await endSession(studyTimeSessionId, currentProblems.length, correctCount);
+            setStudyTimeSessionId(null);
+          } catch (studyTimeError) {
+            console.warn('学習時間トラッキングの終了に失敗:', studyTimeError);
+          }
+        }
+
         setMode('result');
       }
     }, 1500);
@@ -1025,6 +1053,21 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
             casualAnswerCount
           );
         }
+
+        // 学習時間トラッキングセッションを終了
+        if (studyTimeSessionId !== null) {
+          try {
+            const correctCount = userAnswers.filter((ans, idx) => {
+              const problem = currentProblems[idx];
+              return problem.type === 'true-false' ? ans === problem.answer : ans === problem.correctAnswer;
+            }).length;
+            await endSession(studyTimeSessionId, currentProblems.length, correctCount);
+            setStudyTimeSessionId(null);
+          } catch (studyTimeError) {
+            console.warn('学習時間トラッキングの終了に失敗:', studyTimeError);
+          }
+        }
+
         setMode('result');
       }
     }, 1500);
@@ -1086,7 +1129,21 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
         clearInterval(autoSaveInterval);
         setAutoSaveInterval(null);
       }
-      
+
+      // 学習時間トラッキングセッションを終了
+      if (studyTimeSessionId !== null) {
+        try {
+          const correctCount = userAnswers.filter((ans, idx) => {
+            const problem = currentProblems[idx];
+            return problem.type === 'true-false' ? ans === problem.answer : ans === problem.correctAnswer;
+          }).length;
+          await endSession(studyTimeSessionId, currentProblems.length, correctCount);
+          setStudyTimeSessionId(null);
+        } catch (studyTimeError) {
+          console.warn('学習時間トラッキングの終了に失敗:', studyTimeError);
+        }
+      }
+
       setMode('result');
     }
   };
