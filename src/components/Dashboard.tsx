@@ -45,7 +45,8 @@ export function Dashboard({ onNavigate, language = 'ja', onToggleDarkMode, isDar
   const [streakDays, setStreakDays] = useState(0);
   const [todayQuestions, setTodayQuestions] = useState(0);
   const [todayAccuracy, setTodayAccuracy] = useState(0);
-  const [learningTime, setLearningTime] = useState(0);
+  const [learningTime, setLearningTime] = useState(0); // 分
+  const [learningTimeSeconds, setLearningTimeSeconds] = useState(0); // 秒
   const [reviewNeeded, setReviewNeeded] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [showNameSettings, setShowNameSettings] = useState(false);
@@ -88,6 +89,7 @@ export function Dashboard({ onNavigate, language = 'ja', onToggleDarkMode, isDar
       const todayStudySeconds = await getTodayStudyTime();
       const todayStudyMinutes = Math.floor(todayStudySeconds / 60);
       setLearningTime(todayStudyMinutes);
+      setLearningTimeSeconds(todayStudySeconds);
 
       // 週間学習時間の読み込み
       const weeklyData = await getWeeklyStudyTime();
@@ -470,7 +472,7 @@ export function Dashboard({ onNavigate, language = 'ja', onToggleDarkMode, isDar
           <StatCard
             theme="focus"
             icon={Clock}
-            value={learningTime}
+            value={learningTime >= 1 ? `${learningTime}${language === 'ja' ? '分' : 'min'}` : `${learningTimeSeconds}${language === 'ja' ? '秒' : 's'}`}
             goal={`60${language === 'ja' ? '分' : 'min'}`}
             label={translations.learningTime}
             showProgress
@@ -507,15 +509,15 @@ export function Dashboard({ onNavigate, language = 'ja', onToggleDarkMode, isDar
                     </div>
 
                     {/* プログレスバー */}
-                    <div className={`flex-1 relative ${isToday ? 'ring-2 ring-purple-500 dark:ring-purple-400 rounded-full' : ''}`}>
-                      <div className={`w-full rounded-full h-8 ${isToday ? 'bg-purple-200 dark:bg-purple-900/50' : 'bg-gray-200 dark:bg-gray-700'} overflow-hidden`}>
+                    <div className={`flex-1 relative ${isToday ? 'ring-4 ring-purple-500 dark:ring-purple-400 rounded-full shadow-lg shadow-purple-500/50 dark:shadow-purple-400/50' : ''}`}>
+                      <div className={`w-full rounded-full h-8 ${isToday ? 'bg-purple-300 dark:bg-purple-800' : 'bg-gray-200 dark:bg-gray-700'} overflow-hidden`}>
                         <div
                           className={`h-full bg-gradient-to-r ${isToday ? 'from-purple-500 to-pink-500' : 'from-purple-400 to-purple-300 dark:from-purple-600 dark:to-purple-500'} transition-all duration-500 rounded-full flex items-center justify-end pr-2`}
-                          style={{ width: `${Math.max(percentage, minutes > 0 ? 5 : 0)}%` }}
+                          style={{ width: `${Math.max(percentage, minutes > 0 ? 5 : day.duration > 0 ? 10 : 0)}%` }}
                         >
-                          {minutes > 0 && (
+                          {(minutes > 0 || (day.duration > 0 && day.duration < 60)) && (
                             <span className="text-xs font-medium text-white">
-                              {minutes}{language === 'ja' ? '分' : 'min'}
+                              {minutes >= 1 ? `${minutes}${language === 'ja' ? '分' : 'min'}` : `${day.duration}${language === 'ja' ? '秒' : 's'}`}
                             </span>
                           )}
                         </div>
