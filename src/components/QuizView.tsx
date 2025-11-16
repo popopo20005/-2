@@ -565,9 +565,10 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
       try {
         const sessionType = type === 'incorrect' || type === 'quizSetIncorrect' ? 'review' : 'quiz';
         const studySessionId = await startSession(sessionType, quizSetId, category);
+        console.log('✅ 学習時間トラッキング開始:', { studySessionId, sessionType, quizSetId, category });
         setStudyTimeSessionId(studySessionId);
       } catch (studyTimeError) {
-        console.warn('学習時間トラッキングの開始に失敗しましたが、クイズは続行します:', studyTimeError);
+        console.error('❌ 学習時間トラッキングの開始に失敗:', studyTimeError);
       }
 
       // 自動保存タイマーを開始（30秒間隔）
@@ -982,10 +983,11 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
               const problem = currentProblems[idx];
               return problem.type === 'true-false' ? ans === problem.answer : ans === problem.correctAnswer;
             }).length;
+            console.log('✅ 学習時間トラッキング終了:', { studyTimeSessionId, problemCount: currentProblems.length, correctCount });
             await endSession(studyTimeSessionId, currentProblems.length, correctCount);
             setStudyTimeSessionId(null);
           } catch (studyTimeError) {
-            console.warn('学習時間トラッキングの終了に失敗:', studyTimeError);
+            console.error('❌ 学習時間トラッキングの終了に失敗:', studyTimeError);
           }
         }
 
@@ -1061,10 +1063,11 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
               const problem = currentProblems[idx];
               return problem.type === 'true-false' ? ans === problem.answer : ans === problem.correctAnswer;
             }).length;
+            console.log('✅ 学習時間トラッキング終了:', { studyTimeSessionId, problemCount: currentProblems.length, correctCount });
             await endSession(studyTimeSessionId, currentProblems.length, correctCount);
             setStudyTimeSessionId(null);
           } catch (studyTimeError) {
-            console.warn('学習時間トラッキングの終了に失敗:', studyTimeError);
+            console.error('❌ 学習時間トラッキングの終了に失敗:', studyTimeError);
           }
         }
 

@@ -509,8 +509,8 @@ export function Dashboard({ onNavigate, language = 'ja', onToggleDarkMode, isDar
                     </div>
 
                     {/* プログレスバー */}
-                    <div className={`flex-1 relative ${isToday ? 'ring-4 ring-purple-500 dark:ring-purple-400 rounded-full shadow-lg shadow-purple-500/50 dark:shadow-purple-400/50' : ''}`}>
-                      <div className={`w-full rounded-full h-8 ${isToday ? 'bg-purple-300 dark:bg-purple-800' : 'bg-gray-200 dark:bg-gray-700'} overflow-hidden`}>
+                    <div className={`flex-1 relative ${isToday ? 'p-1 bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500 rounded-full shadow-xl shadow-purple-500/60 dark:shadow-purple-400/60' : ''}`}>
+                      <div className={`w-full rounded-full h-8 ${isToday ? 'bg-purple-300 dark:bg-purple-800' : 'bg-gray-200 dark:bg-gray-700'} ${isToday ? '' : 'overflow-hidden'}`}>
                         <div
                           className={`h-full bg-gradient-to-r ${isToday ? 'from-purple-500 to-pink-500' : 'from-purple-400 to-purple-300 dark:from-purple-600 dark:to-purple-500'} transition-all duration-500 rounded-full flex items-center justify-end pr-2`}
                           style={{ width: `${Math.max(percentage, minutes > 0 ? 5 : day.duration > 0 ? 10 : 0)}%` }}
