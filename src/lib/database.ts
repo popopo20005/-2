@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { Category, Problem, HistoryEntry, QuizSet, BackupData, QuizSession, StudyDiaryEntry, StudyGoal, AnswerAnalytics, SessionAnalytics, LearningPattern, ReliabilityAssessment } from '../types';
+import type { Category, Problem, HistoryEntry, QuizSet, BackupData, QuizSession, StudyDiaryEntry, StudyGoal, AnswerAnalytics, SessionAnalytics, LearningPattern, ReliabilityAssessment, SpacedRepetitionCard, ReviewSession, QuizSetGroupName, StudyTimeSession } from '../types';
 
 export class QuizAppDatabase extends Dexie {
   categories!: Table<Category>;
@@ -15,6 +15,12 @@ export class QuizAppDatabase extends Dexie {
   sessionAnalytics!: Table<SessionAnalytics>;
   learningPatterns!: Table<LearningPattern>;
   reliabilityAssessments!: Table<ReliabilityAssessment>;
+  // SM-2間隔反復テーブル
+  spacedRepetitionCards!: Table<SpacedRepetitionCard>;
+  reviewSessions!: Table<ReviewSession>;
+  quizSetGroupNames!: Table<QuizSetGroupName>;
+  // 学習時間トラッキング
+  studyTimeSessions!: Table<StudyTimeSession>;
 
   constructor() {
     super('QuizAppDB');
@@ -69,6 +75,99 @@ export class QuizAppDatabase extends Dexie {
       sessionAnalytics: '++id, &sessionId, sessionStartTime, createdAt',
       learningPatterns: '++id, userId, lastUpdated',
       reliabilityAssessments: '++id, answerAnalyticsId, reliabilityScore, createdAt'
+    });
+
+    // SM-2間隔反復機能追加
+    this.version(6).stores({
+      categories: 'name',
+      problems: '++id, category, question, type',
+      history: '++id, problemId, category, isCorrect, timestamp',
+      quizSets: '++id, name, createdAt',
+      backups: '++id, timestamp, type',
+      quizSessions: '&id, quizSetId, category, isCompleted, isPaused',
+      studyDiary: '++id, date, createdAt',
+      studyGoals: '++id, isCompleted, createdAt, targetDate',
+      answerAnalytics: '++id, sessionId, problemId, answerStartTime, createdAt',
+      sessionAnalytics: '++id, &sessionId, sessionStartTime, createdAt',
+      learningPatterns: '++id, userId, lastUpdated',
+      reliabilityAssessments: '++id, answerAnalyticsId, reliabilityScore, createdAt',
+      spacedRepetitionCards: '++id, problemId, nextReviewDate, isDue, isNew, category',
+      reviewSessions: '++id, &sessionId, startTime, createdAt'
+    });
+
+    // quizSetIdインデックス追加
+    this.version(7).stores({
+      categories: 'name',
+      problems: '++id, category, question, type',
+      history: '++id, problemId, category, isCorrect, timestamp',
+      quizSets: '++id, name, createdAt',
+      backups: '++id, timestamp, type',
+      quizSessions: '&id, quizSetId, category, isCompleted, isPaused',
+      studyDiary: '++id, date, createdAt',
+      studyGoals: '++id, isCompleted, createdAt, targetDate',
+      answerAnalytics: '++id, sessionId, problemId, answerStartTime, createdAt',
+      sessionAnalytics: '++id, &sessionId, sessionStartTime, createdAt',
+      learningPatterns: '++id, userId, lastUpdated',
+      reliabilityAssessments: '++id, answerAnalyticsId, reliabilityScore, createdAt',
+      spacedRepetitionCards: '++id, problemId, quizSetId, nextReviewDate, isDue, isNew, category',
+      reviewSessions: '++id, &sessionId, startTime, createdAt'
+    });
+
+    // Version 8: Add name field to spacedRepetitionCards
+    this.version(8).stores({
+      categories: 'name',
+      problems: '++id, category, question, type',
+      history: '++id, problemId, category, isCorrect, timestamp',
+      quizSets: '++id, name, createdAt',
+      backups: '++id, timestamp, type',
+      quizSessions: '&id, quizSetId, category, isCompleted, isPaused',
+      studyDiary: '++id, date, createdAt',
+      studyGoals: '++id, isCompleted, createdAt, targetDate',
+      answerAnalytics: '++id, sessionId, problemId, answerStartTime, createdAt',
+      sessionAnalytics: '++id, &sessionId, sessionStartTime, createdAt',
+      learningPatterns: '++id, userId, lastUpdated',
+      reliabilityAssessments: '++id, answerAnalyticsId, reliabilityScore, createdAt',
+      spacedRepetitionCards: '++id, problemId, quizSetId, nextReviewDate, isDue, isNew, category, name',
+      reviewSessions: '++id, &sessionId, startTime, createdAt'
+    });
+
+    // Version 9: Add quizSetGroupNames table for custom group names
+    this.version(9).stores({
+      categories: 'name',
+      problems: '++id, category, question, type',
+      history: '++id, problemId, category, isCorrect, timestamp',
+      quizSets: '++id, name, createdAt',
+      backups: '++id, timestamp, type',
+      quizSessions: '&id, quizSetId, category, isCompleted, isPaused',
+      studyDiary: '++id, date, createdAt',
+      studyGoals: '++id, isCompleted, createdAt, targetDate',
+      answerAnalytics: '++id, sessionId, problemId, answerStartTime, createdAt',
+      sessionAnalytics: '++id, &sessionId, sessionStartTime, createdAt',
+      learningPatterns: '++id, userId, lastUpdated',
+      reliabilityAssessments: '++id, answerAnalyticsId, reliabilityScore, createdAt',
+      spacedRepetitionCards: '++id, problemId, quizSetId, nextReviewDate, isDue, isNew, category, name',
+      reviewSessions: '++id, &sessionId, startTime, createdAt',
+      quizSetGroupNames: '++id, &quizSetId, createdAt'
+    });
+
+    // Version 10: Add studyTimeSessions table for learning time tracking
+    this.version(10).stores({
+      categories: 'name',
+      problems: '++id, category, question, type',
+      history: '++id, problemId, category, isCorrect, timestamp',
+      quizSets: '++id, name, createdAt',
+      backups: '++id, timestamp, type',
+      quizSessions: '&id, quizSetId, category, isCompleted, isPaused',
+      studyDiary: '++id, date, createdAt',
+      studyGoals: '++id, isCompleted, createdAt, targetDate',
+      answerAnalytics: '++id, sessionId, problemId, answerStartTime, createdAt',
+      sessionAnalytics: '++id, &sessionId, sessionStartTime, createdAt',
+      learningPatterns: '++id, userId, lastUpdated',
+      reliabilityAssessments: '++id, answerAnalyticsId, reliabilityScore, createdAt',
+      spacedRepetitionCards: '++id, problemId, quizSetId, nextReviewDate, isDue, isNew, category, name',
+      reviewSessions: '++id, &sessionId, startTime, createdAt',
+      quizSetGroupNames: '++id, &quizSetId, createdAt',
+      studyTimeSessions: '++id, startTime, sessionType, quizSetId, category, createdAt'
     });
   }
 }
@@ -1143,6 +1242,331 @@ export const learningAnalyticsService = {
     }
 
     return results;
+  }
+};
+
+// SM-2間隔反復サービス
+export const spacedRepetitionService = {
+  // カードの作成
+  async createCard(card: Omit<SpacedRepetitionCard, 'id'>): Promise<number> {
+    return await db.spacedRepetitionCards.add(card);
+  },
+
+  // 問題IDでカードを取得
+  async getCardByProblemId(problemId: number): Promise<SpacedRepetitionCard | undefined> {
+    return await db.spacedRepetitionCards.where('problemId').equals(problemId).first();
+  },
+
+  // 問題ID + quizSetIdでカードを取得（コンテキスト別管理用）
+  async getCardByProblemAndQuizSet(
+    problemId: number,
+    quizSetId?: number
+  ): Promise<SpacedRepetitionCard | undefined> {
+    const cards = await db.spacedRepetitionCards.where('problemId').equals(problemId).toArray();
+    return cards.find(card => card.quizSetId === quizSetId);
+  },
+
+  // カードの更新
+  async updateCard(card: SpacedRepetitionCard): Promise<void> {
+    if (!card.id) {
+      throw new Error('Card ID is required for update');
+    }
+    await db.spacedRepetitionCards.put(card);
+  },
+
+  // 今日復習すべきカードを取得
+  async getDueCards(category?: string): Promise<SpacedRepetitionCard[]> {
+    const now = new Date();
+    now.setHours(23, 59, 59, 999); // End of today
+
+    let query = db.spacedRepetitionCards.where('nextReviewDate').belowOrEqual(now);
+
+    const cards = await query.toArray();
+
+    if (category) {
+      return cards.filter(card => card.category === category);
+    }
+
+    return cards;
+  },
+
+  // 新しいカードを取得
+  async getNewCards(limit: number = 20, category?: string): Promise<SpacedRepetitionCard[]> {
+    let query = db.spacedRepetitionCards.where('isNew').equals(1 as any);
+
+    const cards = await query.limit(limit).toArray();
+
+    if (category) {
+      return cards.filter(card => card.category === category).slice(0, limit);
+    }
+
+    return cards;
+  },
+
+  // 学習中のカードを取得
+  async getLearningCards(category?: string): Promise<SpacedRepetitionCard[]> {
+    let query = db.spacedRepetitionCards.where('isLearning').equals(1 as any);
+
+    const cards = await query.toArray();
+
+    if (category) {
+      return cards.filter(card => card.category === category);
+    }
+
+    return cards;
+  },
+
+  // すべてのカードを取得
+  async getAllCards(): Promise<SpacedRepetitionCard[]> {
+    return await db.spacedRepetitionCards.toArray();
+  },
+
+  // カテゴリ別のカードを取得
+  async getCardsByCategory(category: string): Promise<SpacedRepetitionCard[]> {
+    return await db.spacedRepetitionCards.where('category').equals(category).toArray();
+  },
+
+  // カードの統計を取得
+  async getCardStats(): Promise<{
+    total: number;
+    new: number;
+    learning: number;
+    due: number;
+    averageRetention: number;
+  }> {
+    const allCards = await db.spacedRepetitionCards.toArray();
+    const total = allCards.length;
+    const newCards = allCards.filter(c => c.isNew).length;
+    const learning = allCards.filter(c => c.isLearning).length;
+
+    const now = new Date();
+    now.setHours(23, 59, 59, 999);
+    const due = allCards.filter(c => c.nextReviewDate <= now).length;
+
+    const cardsWithReviews = allCards.filter(c => c.totalReviews > 0);
+    const averageRetention = cardsWithReviews.length > 0
+      ? cardsWithReviews.reduce((sum, card) => sum + card.accuracy, 0) / cardsWithReviews.length
+      : 0;
+
+    return {
+      total,
+      new: newCards,
+      learning,
+      due,
+      averageRetention
+    };
+  },
+
+  // 問題集別の統計を取得
+  async getQuizSetStats(): Promise<Array<{
+    quizSetId: number | null;
+    quizSetName: string;
+    total: number;
+    new: number;
+    learning: number;
+    due: number;
+    averageRetention: number;
+  }>> {
+    const allCards = await db.spacedRepetitionCards.toArray();
+    const quizSetIds = new Set(allCards.map(c => c.quizSetId));
+    const stats = [];
+
+    const now = new Date();
+    now.setHours(23, 59, 59, 999);
+
+    for (const quizSetId of quizSetIds) {
+      const cards = allCards.filter(c => c.quizSetId === quizSetId);
+
+      let quizSetName = '全般カード';
+      if (quizSetId !== null && quizSetId !== undefined) {
+        // Check if it's a combined quiz set (e.g., "1-3")
+        const quizSetIdStr = String(quizSetId);
+        if (quizSetIdStr.includes('-')) {
+          // First check if there's a custom group name
+          const customName = await quizSetGroupNameService.getGroupName(quizSetIdStr);
+          if (customName) {
+            quizSetName = customName;
+          } else {
+            // Fall back to individual quiz set names
+            const quizSetIdArray = quizSetIdStr.split('-').map((id: string) => parseInt(id, 10));
+            const quizSetNames: string[] = [];
+            for (const id of quizSetIdArray) {
+              const qs = await quizSetService.getById(id);
+              if (qs) {
+                quizSetNames.push(qs.name);
+              }
+            }
+            quizSetName = quizSetNames.length > 0 ? quizSetNames.join(' + ') : `問題集 #${quizSetId}`;
+          }
+        } else {
+          const quizSet = await quizSetService.getById(quizSetId);
+          quizSetName = quizSet?.name || `問題集 #${quizSetId}`;
+        }
+      }
+
+      const total = cards.length;
+      const newCards = cards.filter(c => c.isNew).length;
+      const learning = cards.filter(c => c.isLearning).length;
+      const due = cards.filter(c => c.nextReviewDate <= now).length;
+
+      const cardsWithReviews = cards.filter(c => c.totalReviews > 0);
+      const averageRetention = cardsWithReviews.length > 0
+        ? cardsWithReviews.reduce((sum, card) => sum + card.accuracy, 0) / cardsWithReviews.length
+        : 0;
+
+      stats.push({
+        quizSetId: quizSetId || null,
+        quizSetName,
+        total,
+        new: newCards,
+        learning,
+        due,
+        averageRetention
+      });
+    }
+
+    return stats.sort((a, b) => {
+      // 全般カードを最初に表示
+      if (a.quizSetId === null) return -1;
+      if (b.quizSetId === null) return 1;
+      return (a.quizSetId || 0) - (b.quizSetId || 0);
+    });
+  },
+
+  // カードを削除
+  async deleteCard(id: number): Promise<void> {
+    await db.spacedRepetitionCards.delete(id);
+  },
+
+  // 問題IDでカードを削除
+  async deleteCardByProblemId(problemId: number): Promise<void> {
+    await db.spacedRepetitionCards.where('problemId').equals(problemId).delete();
+  },
+
+  // quizSetIdでカードを一括削除
+  async deleteCardsByQuizSetId(quizSetId: number | string | null): Promise<number> {
+    const allCards = await db.spacedRepetitionCards.toArray();
+    const cardsToDelete = allCards.filter(card => {
+      if (quizSetId === null) {
+        return card.quizSetId === null || card.quizSetId === undefined;
+      }
+      return String(card.quizSetId) === String(quizSetId);
+    });
+
+    for (const card of cardsToDelete) {
+      if (card.id) {
+        await db.spacedRepetitionCards.delete(card.id);
+      }
+    }
+
+    return cardsToDelete.length;
+  },
+
+  // すべてのカードをリセット
+  async resetAllCards(): Promise<void> {
+    await db.spacedRepetitionCards.clear();
+  }
+};
+
+// 復習セッションサービス
+export const reviewSessionService = {
+  // セッションの作成
+  async createSession(session: Omit<ReviewSession, 'id'>): Promise<number> {
+    return await db.reviewSessions.add(session);
+  },
+
+  // セッションの更新
+  async updateSession(session: ReviewSession): Promise<void> {
+    if (!session.id) {
+      throw new Error('Session ID is required for update');
+    }
+    await db.reviewSessions.put(session);
+  },
+
+  // セッションIDで取得
+  async getSessionById(sessionId: string): Promise<ReviewSession | undefined> {
+    return await db.reviewSessions.where('sessionId').equals(sessionId).first();
+  },
+
+  // すべてのセッションを取得
+  async getAllSessions(): Promise<ReviewSession[]> {
+    return await db.reviewSessions.orderBy('startTime').reverse().toArray();
+  },
+
+  // 最近のセッションを取得
+  async getRecentSessions(limit: number = 10): Promise<ReviewSession[]> {
+    return await db.reviewSessions.orderBy('startTime').reverse().limit(limit).toArray();
+  },
+
+  // セッションの統計を取得
+  async getSessionStats(): Promise<{
+    totalSessions: number;
+    totalCardsReviewed: number;
+    averageAccuracy: number;
+    totalStudyTime: number; // minutes
+  }> {
+    const sessions = await db.reviewSessions.toArray();
+    const completedSessions = sessions.filter(s => s.endTime);
+
+    const totalSessions = completedSessions.length;
+    const totalCardsReviewed = completedSessions.reduce((sum, s) => sum + s.reviewedCards, 0);
+    const totalCorrect = completedSessions.reduce((sum, s) => sum + s.correctCount, 0);
+    const averageAccuracy = totalCardsReviewed > 0 ? (totalCorrect / totalCardsReviewed * 100) : 0;
+
+    const totalStudyTime = completedSessions.reduce((sum, s) => {
+      if (s.startTime && s.endTime) {
+        return sum + (s.endTime.getTime() - s.startTime.getTime()) / (1000 * 60);
+      }
+      return sum;
+    }, 0);
+
+    return {
+      totalSessions,
+      totalCardsReviewed,
+      averageAccuracy,
+      totalStudyTime
+    };
+  },
+
+  // セッション生成用のユニークID
+  generateSessionId(): string {
+    return `review_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+};
+
+// 問題集グループ名サービス
+export const quizSetGroupNameService = {
+  // グループ名を保存または更新
+  async saveGroupName(quizSetId: string, name: string): Promise<void> {
+    const existing = await db.quizSetGroupNames.get({ quizSetId });
+    if (existing) {
+      await db.quizSetGroupNames.update(existing.id!, { name });
+    } else {
+      await db.quizSetGroupNames.add({
+        quizSetId,
+        name,
+        createdAt: new Date()
+      });
+    }
+  },
+
+  // グループ名を取得
+  async getGroupName(quizSetId: string): Promise<string | null> {
+    const group = await db.quizSetGroupNames.get({ quizSetId });
+    return group?.name || null;
+  },
+
+  // すべてのグループ名を取得
+  async getAllGroupNames(): Promise<QuizSetGroupName[]> {
+    return await db.quizSetGroupNames.toArray();
+  },
+
+  // グループ名を削除
+  async deleteGroupName(quizSetId: string): Promise<void> {
+    const group = await db.quizSetGroupNames.get({ quizSetId });
+    if (group?.id) {
+      await db.quizSetGroupNames.delete(group.id);
+    }
   }
 };
 
