@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import type { View } from '../App';
 import { historyService, spacedRepetitionService, quizSetService, problemService } from '../lib/database';
+import { getTodayStudyTime, getWeeklyStudyTime } from '../lib/studyTimeService';
 import type { QuizSet } from '../types';
 import { UserNameSettings } from './UserNameSettings';
 
@@ -49,6 +50,7 @@ export function Dashboard({ onNavigate, language = 'ja', onToggleDarkMode, isDar
   const [isLoading, setIsLoading] = useState(true);
   const [showNameSettings, setShowNameSettings] = useState(false);
   const [recommendedQuizSet, setRecommendedQuizSet] = useState<QuizSet | null>(null);
+  const [weeklyStudyTime, setWeeklyStudyTime] = useState<{ dayOfWeek: number; date: Date; duration: number }[]>([]);
 
   useEffect(() => {
     loadDashboardData();
@@ -83,9 +85,13 @@ export function Dashboard({ onNavigate, language = 'ja', onToggleDarkMode, isDar
       }
 
       // 学習時間の計算（今日のセッション）
-      // TODO: StudyTimeSession実装後に実際のデータを使用
-      const estimatedTime = todayHistory.length * 2; // 1問あたり平均2分と仮定
-      setLearningTime(estimatedTime);
+      const todayStudySeconds = await getTodayStudyTime();
+      const todayStudyMinutes = Math.floor(todayStudySeconds / 60);
+      setLearningTime(todayStudyMinutes);
+
+      // 週間学習時間の読み込み
+      const weeklyData = await getWeeklyStudyTime();
+      setWeeklyStudyTime(weeklyData);
 
       // 復習が必要なカードの数（間隔反復）
       const allCards = await spacedRepetitionService.getAllCards();
@@ -469,6 +475,69 @@ export function Dashboard({ onNavigate, language = 'ja', onToggleDarkMode, isDar
             progress={(learningTime / 60) * 100}
           />
         </div>
+      </div>
+
+      {/* 週間学習時間グラフ */}
+      <div>
+        <SectionHeader
+          icon={BarChart3}
+          iconColor="text-purple-500"
+          title={language === 'ja' ? '週間学習時間' : 'Weekly Study Time'}
+          size="lg"
+        />
+        <Card>
+          <CardContent className="p-6">
+            <div className="space-y-4">
+              {weeklyStudyTime.map((day) => {
+                const dayNames = language === 'ja'
+                  ? ['日', '月', '火', '水', '木', '金', '土']
+                  : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                const minutes = Math.floor(day.duration / 60);
+                const maxMinutes = Math.max(...weeklyStudyTime.map(d => Math.floor(d.duration / 60)), 60);
+                const percentage = maxMinutes > 0 ? (minutes / maxMinutes) * 100 : 0;
+                const isToday = day.dayOfWeek === new Date().getDay();
+
+                return (
+                  <div key={day.dayOfWeek} className="flex items-center gap-3">
+                    {/* 曜日ラベル */}
+                    <div className={`w-10 text-sm font-medium text-center ${isToday ? 'text-purple-600 dark:text-purple-400 font-bold' : 'text-gray-600 dark:text-gray-400'}`}>
+                      {dayNames[day.dayOfWeek]}
+                    </div>
+
+                    {/* プログレスバー */}
+                    <div className="flex-1 relative">
+                      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-8 overflow-hidden">
+                        <div
+                          className={`h-full bg-gradient-to-r ${isToday ? 'from-purple-500 to-pink-500' : 'from-purple-400 to-purple-300 dark:from-purple-600 dark:to-purple-500'} transition-all duration-500 rounded-full flex items-center justify-end pr-2`}
+                          style={{ width: `${Math.max(percentage, minutes > 0 ? 5 : 0)}%` }}
+                        >
+                          {minutes > 0 && (
+                            <span className="text-xs font-medium text-white">
+                              {minutes}{language === 'ja' ? '分' : 'min'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* 週間合計 */}
+            <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {language === 'ja' ? '週間合計' : 'Weekly Total'}
+                </span>
+                <span className="text-lg font-bold text-purple-600 dark:text-purple-400">
+                  {Math.floor(weeklyStudyTime.reduce((sum, day) => sum + day.duration, 0) / 60)}
+                  {language === 'ja' ? '分' : ' min'}
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* おすすめアクション */}
