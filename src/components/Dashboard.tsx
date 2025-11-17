@@ -88,13 +88,14 @@ export function Dashboard({ onNavigate, language = 'ja', onToggleDarkMode, isDar
       // 学習時間の計算（今日のセッション）
       const todayStudySeconds = await getTodayStudyTime();
       const todayStudyMinutes = Math.floor(todayStudySeconds / 60);
+      console.log('📊 今日の学習時間:', { todayStudySeconds, todayStudyMinutes });
       setLearningTime(todayStudyMinutes);
       setLearningTimeSeconds(todayStudySeconds);
 
       // 週間学習時間の読み込み
       const weeklyData = await getWeeklyStudyTime();
-      console.log('週間学習時間データ:', weeklyData);
-      console.log('今日の曜日:', new Date().getDay());
+      console.log('📊 週間学習時間データ:', weeklyData);
+      console.log('📅 今日の曜日:', new Date().getDay(), new Date().toLocaleDateString('ja-JP', { weekday: 'long' }));
       setWeeklyStudyTime(weeklyData);
 
       // 復習が必要なカードの数（間隔反復）
