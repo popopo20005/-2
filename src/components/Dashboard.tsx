@@ -511,16 +511,35 @@ export function Dashboard({ onNavigate, language = 'ja', onToggleDarkMode, isDar
 
                     {/* プログレスバー */}
                     <div className="flex-1 relative">
-                      {isToday && (
-                        <div className="absolute inset-0 bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500 rounded-full shadow-xl shadow-purple-500/60 dark:shadow-purple-400/60 animate-pulse"></div>
-                      )}
-                      <div className={`relative w-full rounded-full h-8 ${isToday ? 'bg-purple-300 dark:bg-purple-800 m-1' : 'bg-gray-200 dark:bg-gray-700'} overflow-hidden`}>
+                      <div
+                        className={`relative w-full rounded-full h-8 ${isToday ? 'bg-purple-300 dark:bg-purple-800' : 'bg-gray-200 dark:bg-gray-700'} overflow-hidden`}
+                        style={isToday ? {
+                          boxShadow: '0 0 0 2px rgb(168 85 247), 0 0 20px 4px rgba(168, 85, 247, 0.8), 0 0 40px 8px rgba(168, 85, 247, 0.4)'
+                        } : {}}
+                      >
+                        {/* 背景レイヤー（アニメーション） */}
+                        {isToday && (
+                          <div
+                            className="absolute inset-0 h-full rounded-full transition-all duration-500"
+                            style={{
+                              width: `${Math.max(percentage, minutes > 0 ? 5 : day.duration > 0 ? 10 : 0)}%`,
+                              background: 'linear-gradient(to right, rgb(168 85 247), rgb(236 72 153))',
+                              animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
+                            }}
+                          />
+                        )}
+
+                        {/* コンテンツレイヤー（静止） */}
                         <div
-                          className={`h-full bg-gradient-to-r ${isToday ? 'from-purple-500 to-pink-500' : 'from-purple-400 to-purple-300 dark:from-purple-600 dark:to-purple-500'} transition-all duration-500 rounded-full flex items-center justify-end pr-2`}
-                          style={{ width: `${Math.max(percentage, minutes > 0 ? 5 : day.duration > 0 ? 10 : 0)}%` }}
+                          className={`relative h-full ${isToday ? '' : 'bg-gradient-to-r from-purple-400 to-purple-300 dark:from-purple-600 dark:to-purple-500'} transition-all duration-500 rounded-full flex items-center justify-end pr-2`}
+                          style={isToday ? {
+                            width: `${Math.max(percentage, minutes > 0 ? 5 : day.duration > 0 ? 10 : 0)}%`
+                          } : {
+                            width: `${Math.max(percentage, minutes > 0 ? 5 : day.duration > 0 ? 10 : 0)}%`
+                          }}
                         >
                           {(minutes > 0 || (day.duration > 0 && day.duration < 60)) && (
-                            <span className="text-xs font-medium text-white">
+                            <span className="text-xs font-medium text-white relative z-10">
                               {minutes >= 1 ? `${minutes}${language === 'ja' ? '分' : 'min'}` : `${day.duration}${language === 'ja' ? '秒' : 's'}`}
                             </span>
                           )}

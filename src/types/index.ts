@@ -219,6 +219,109 @@ export interface ReliabilityAssessment {
   createdAt: Date;
 }
 
+// SM-2 Spaced Repetition Types
+export interface SpacedRepetitionCard {
+  id?: number;
+  problemId: number;
+  // Context tracking - allows same problem to be reviewed in different contexts
+  quizSetId?: number; // Quiz set this card belongs to (null for general cards)
+  name?: string; // Custom name for the card (e.g., "基本問題", "重要問題")
+  // SM-2 algorithm parameters
+  easinessFactor: number; // E-Factor (default: 2.5, range: 1.3+)
+  repetitions: number; // Number of consecutive correct repetitions
+  interval: number; // Days until next review
+  // Review scheduling
+  nextReviewDate: Date; // Next scheduled review date
+  lastReviewDate?: Date; // Last review date
+  // Performance tracking
+  totalReviews: number; // Total number of reviews
+  correctReviews: number; // Number of correct reviews
+  accuracy: number; // Overall accuracy percentage
+  // Card state
+  isNew: boolean; // Whether this is a new card
+  isDue: boolean; // Whether the card is due for review
+  isLearning: boolean; // Whether card is in learning phase (repetitions < 2)
+  // Metadata
+  createdAt: Date;
+  updatedAt: Date;
+  category?: string; // Problem category for filtering
+}
+
+export interface ReviewSession {
+  id?: number;
+  sessionId: string;
+  // Session info
+  startTime: Date;
+  endTime?: Date;
+  totalCards: number;
+  reviewedCards: number;
+  // Performance
+  correctCount: number;
+  incorrectCount: number;
+  averageQuality: number; // Average quality score 0-5
+  // Review stats
+  newCards: number;
+  learningCards: number;
+  dueCards: number;
+  createdAt: Date;
+}
+
+export interface ReviewResult {
+  quality: number; // 0-5 quality score (0: total blackout, 5: perfect response)
+  responseTime: number; // milliseconds
+  wasCorrect: boolean;
+}
+
+// Quiz Set Group Name Mapping
+export interface QuizSetGroupName {
+  id?: number;
+  quizSetId: string; // e.g., "1-3" for combined quiz sets
+  name: string; // Custom name for this group
+  createdAt: Date;
+}
+
+// Card List for Sharing (problem IDs only - for QR code)
+export interface SharedCardList {
+  name: string; // Name of the card list
+  description?: string; // Optional description
+  problemIds: number[]; // Only problem IDs (receiver must have same problems in DB)
+  // Optional: include learning progress data
+  progressData?: Array<{
+    problemId: number;
+    totalReviews: number;
+    accuracy: number;
+  }>;
+  createdAt: Date;
+}
+
+// Card List for File Sharing (full data including problems)
+export interface SharedCardListFull {
+  name: string; // Name of the card list
+  description?: string; // Optional description
+  cards: Array<{
+    problem: Problem; // Full problem data
+    totalReviews?: number;
+    accuracy?: number;
+  }>;
+  createdAt: Date;
+}
+
+// Study Time Session Tracking
+export interface StudyTimeSession {
+  id?: number;
+  startTime: Date;
+  endTime?: Date;
+  duration: number; // 秒
+  problemCount: number;
+  correctCount: number;
+  quizSetId?: number;
+  category?: string;
+  sessionType: 'quiz' | 'review' | 'spacedRepetition' | 'practice';
+  isPaused: boolean;
+  pausedDuration?: number; // 一時停止時間（秒）
+  createdAt: Date;
+}
+
 // API response types
 export interface ApiResponse<T> {
   success: boolean;
