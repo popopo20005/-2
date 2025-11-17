@@ -41,7 +41,34 @@ quiz-app-deploy/
 
 ## 🎯 Recent Work & Context
 
-### Latest Achievement: Week 1 - Design System Foundation (2025-11-15)
+### Latest Achievement: Week 2 - Learning Time Tracking Complete (2025-11-18)
+Successfully completed Week 2 of 8-week development plan - implemented comprehensive learning time tracking system:
+
+#### **Week 2 Day 1-2: Learning Time Tracking Infrastructure** ✅
+   - File: [src/lib/studyTimeService.ts](src/lib/studyTimeService.ts)
+   - Features: Session management (start/pause/resume/end), in-memory cache, IndexedDB persistence
+   - DB: Extended IndexedDB to version 10 with studyTimeSessions table
+   - Commit: `3f4e337`
+
+#### **Week 2 Day 3: Dashboard Integration** ✅
+   - File: [src/components/Dashboard.tsx](src/components/Dashboard.tsx)
+   - Features: Today's study time display (sub-minute support), weekly study time graph (7 days)
+   - UI: Purple gradient highlight for today's bar with glow effect and pulse animation
+   - Commit: `3f4e337`
+
+#### **Week 2 Day 4-5: Quiz Auto-tracking** ✅
+   - File: [src/components/QuizView.tsx](src/components/QuizView.tsx)
+   - Features: Auto-start session on quiz begin, auto-end on quiz complete (3 exit points)
+   - Debug: Added comprehensive logging for tracking verification
+   - Commit: `3f4e337`
+
+#### **Week 2 UI/UX Polish** ✅
+   - Today's bar highlight: 2-layer structure (animated background + static content)
+   - Glow effect: 3-layer box-shadow (2px border + 20px inner + 40px outer)
+   - Animation: Background gradient pulses, text remains static
+   - Result: Clean, professional appearance with subtle motion
+
+### Previous Achievement: Week 1 - Design System Foundation (2025-11-15)
 Successfully completed Week 1 of 8-week development plan - established comprehensive design system foundation:
 
 #### 1. **Design Tokens Enhancement** ✅
@@ -264,11 +291,100 @@ When starting a new session, review these files:
 
 ---
 
-**Last Updated**: 2025-11-15
-**Current Phase**: Week 1 Complete - Design System Foundation
-**Status**: Ready for Week 2 (Learning Time Tracking)
+## 🎯 Week 3 Preparation
+
+### Week 3 Overview: Engagement Enhancement (Week 3-4 in Plan)
+**Duration**: 2 weeks
+**Focus**: Progress display enhancement + Micro-interactions
+
+#### Phase 2 UI/UX Improvements:
+
+**6. Progress Display Enhancement** (2 days)
+- File: [src/components/QuizView.tsx](src/components/QuizView.tsx)
+- Features:
+  - Progress bar (completion percentage)
+  - Current question number / total questions
+  - Elapsed time display
+  - Real-time accuracy rate
+  - Milestone notifications (every 5 questions)
+- Design:
+  ```
+  ┌─────────────────────────────────────┐
+  │ ━━━━━━━━━━━━━━━━━━━━━━━━━━ 60%  │
+  │ 問題 12/20  ⏱️ 03:45  💯 85%      │
+  └─────────────────────────────────────┘
+  ```
+
+**7. Skeleton Loaders** (1 day)
+- Library: `react-loading-skeleton`
+- Target files:
+  - [src/components/QuizSetManager.tsx](src/components/QuizSetManager.tsx)
+  - [src/components/Statistics.tsx](src/components/Statistics.tsx)
+  - Chart components
+- Features:
+  - Card list skeletons
+  - Statistics screen skeletons
+  - Chart skeletons
+  - Pulse animation
+  - Smooth transitions
+
+**8. Micro-interactions** (2 days)
+- Libraries: `framer-motion`, `react-hot-toast`, `canvas-confetti`
+- Implementations:
+  - Button hover scale effect
+  - Correct answer ✅ animation + confetti
+  - Incorrect answer ❌ animation + shake
+  - Card swipe animation
+  - Level-up celebration modal
+  - Streak achievement fire effect
+  - Toast notifications
+
+#### Phase 2 Feature Improvements:
+
+**9. Learning Calendar Heatmap** (2 days)
+- Library: `react-calendar-heatmap`
+- File: [src/components/StudyDiary.tsx](src/components/StudyDiary.tsx) (new)
+- Features:
+  - 365-day learning activity calendar
+  - Color intensity based on daily study amount
+  - Hover for detailed information
+  - Consecutive learning days highlight
+  - Utilize existing History data
+
+**10. Pomodoro Timer** (2 days)
+- Files:
+  - [src/components/PomodoroTimer.tsx](src/components/PomodoroTimer.tsx) (new)
+  - [src/components/QuizView.tsx](src/components/QuizView.tsx) (integration)
+- Features:
+  - Customizable intervals (default 25min/5min)
+  - Audio/visual alerts
+  - Focus session count tracking
+  - Quiz screen integration
+  - Time adjustment in settings
+- Technical:
+  - Web Audio API for notification sounds
+  - LocalStorage for settings
+  - Background timer (Service Worker)
+
+### Required Libraries for Week 3:
+```bash
+npm install react-loading-skeleton framer-motion react-hot-toast canvas-confetti react-calendar-heatmap
+```
+
+### Week 3 Success Criteria:
+- ✅ Quiz screen dramatically improved
+- ✅ Learning calendar operational
+- ✅ Smooth animations throughout
+- ✅ Pomodoro timer usable (Week 4)
+
+---
+
+**Last Updated**: 2025-11-18
+**Current Phase**: Week 2 Complete - Learning Time Tracking
+**Status**: Ready for Week 3 (Engagement Enhancement)
 **Recent Commits**:
+- `3f4e337` - Fix Week 2: Today highlight bar visibility with absolute positioning
+- `2902940` - Add debug logs for learning time tracking diagnosis
 - `15fe2d4` - Enhance design tokens
 - `cd1727e` - Add EmptyState and Skeleton components
-- `84af951` - Optimize Badge component
-**8-Week Plan Progress**: Week 1/8 ✅ (12.5% complete)
+**8-Week Plan Progress**: Week 2/8 ✅ (25% complete)
