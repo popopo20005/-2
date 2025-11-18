@@ -5,6 +5,7 @@ import { OverallStatsChart } from './charts/OverallStatsChart';
 import { CategoryStatsChart } from './charts/CategoryStatsChart';
 import { TrendChart } from './charts/TrendChart';
 import { QuizSetStatsChart } from './charts/QuizSetStatsChart';
+import { SkeletonStatGrid, SkeletonChart, Skeleton } from './ui/Skeleton';
 
 interface StatisticsProps {
   onBack: () => void;
@@ -535,10 +536,28 @@ export function Statistics({ onBack, onStartQuizSetWorstProblems, onOpenQuizSetS
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-300">{t[currentLang].loading}</p>
+      <div className="min-h-screen bg-gradient-to-br from-orange-50 to-red-50 dark:from-orange-900/20 dark:to-red-900/20 p-8">
+        <div className="max-w-7xl mx-auto">
+          {/* ヘッダー部分のスケルトン */}
+          <header className="mb-8">
+            <div className="flex justify-between items-start mb-4">
+              <Skeleton width="w-48" height="h-10" />
+              <Skeleton width="w-48" height="h-10" />
+            </div>
+            <Skeleton width="w-64" height="h-9" />
+          </header>
+
+          {/* 統計カードグリッドのスケルトン */}
+          <div className="mb-8">
+            <SkeletonStatGrid count={4} columns={4} />
+          </div>
+
+          {/* チャートのスケルトン */}
+          <div className="space-y-8">
+            <SkeletonChart height="h-64" />
+            <SkeletonChart height="h-80" />
+            <SkeletonChart height="h-64" />
+          </div>
         </div>
       </div>
     );

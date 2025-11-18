@@ -4,6 +4,7 @@ import { Button } from './ui/Button';
 import { StatCard } from './ui/StatCard';
 import { SectionHeader } from './ui/SectionHeader';
 import { InfoCard } from './ui/InfoCard';
+import { SkeletonStatGrid, SkeletonChart, Skeleton } from './ui/Skeleton';
 import {
   Flame,
   BookOpen,
@@ -319,15 +320,28 @@ export function Dashboard({ onNavigate, language = 'ja', onToggleDarkMode, isDar
   if (isLoading) {
     return (
       <div className="max-w-4xl mx-auto space-y-6 p-4 animate-fade-in">
+        {/* ヘッダーカードのスケルトン */}
         <Card>
           <CardContent className="p-6">
-            <div className="animate-pulse space-y-4">
-              <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div>
-              <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
-              <div className="h-12 bg-gray-200 dark:bg-gray-700 rounded"></div>
+            <div className="space-y-3">
+              <Skeleton width="w-64" height="h-8" />
+              <Skeleton width="w-48" height="h-4" />
             </div>
           </CardContent>
         </Card>
+
+        {/* 統計カードグリッドのスケルトン */}
+        <SkeletonStatGrid count={4} columns={2} />
+
+        {/* 学習時間チャートのスケルトン */}
+        <SkeletonChart height="h-64" />
+
+        {/* アクションボタンのスケルトン */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Skeleton width="w-full" height="h-24" />
+          <Skeleton width="w-full" height="h-24" />
+          <Skeleton width="w-full" height="h-24" />
+        </div>
       </div>
     );
   }

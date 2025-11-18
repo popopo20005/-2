@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { quizSetService, problemService, categoryService } from '../lib/database';
 import type { QuizSet, Problem } from '../types';
+import { SkeletonList, Skeleton } from './ui/Skeleton';
 
 interface QuizSetManagerProps {
   onBack: () => void;
@@ -608,10 +609,29 @@ export function QuizSetManager({ onBack, onStartQuiz: _onStartQuiz, onStartCateg
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-300">{t[currentLang].loading}</p>
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-gray-900 dark:to-gray-800 p-8">
+        <div className="max-w-7xl mx-auto">
+          {/* ヘッダー部分のスケルトン */}
+          <header className="mb-8">
+            <Skeleton width="w-48" height="h-10" className="mb-4" />
+            <Skeleton width="w-64" height="h-9" />
+          </header>
+
+          {/* コントロールパネルのスケルトン */}
+          <div className="mb-8 bg-white/50 dark:bg-gray-800/50 rounded-lg shadow-md p-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <Skeleton width="w-full" height="h-10" />
+              <Skeleton width="w-full" height="h-10" />
+              <Skeleton width="w-full" height="h-10" />
+            </div>
+            <div className="flex gap-4">
+              <Skeleton width="w-32" height="h-10" />
+              <Skeleton width="w-32" height="h-10" />
+            </div>
+          </div>
+
+          {/* 問題集リストのスケルトン */}
+          <SkeletonList count={5} showAvatar={false} asCard={true} />
         </div>
       </div>
     );
