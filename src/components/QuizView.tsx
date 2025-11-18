@@ -1017,46 +1017,7 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
       );
     }
 
-    // 1.5秒後に次の問題へ自動進行
-    setTimeout(async () => {
-      setShowFeedback(false);
-      if (currentIndex < currentProblems.length - 1) {
-        const nextIndex = currentIndex + 1;
-        setCurrentIndex(nextIndex);
-
-        // 次の問題のトラッキングを開始
-        if (analyticsTracker && currentProblems[nextIndex]?.id) {
-          analyticsTracker.startProblem(currentProblems[nextIndex].id);
-        }
-      } else {
-        // クイズ完了
-        if (analyticsTracker) {
-          const casualAnswerCount = 0;
-          await analyticsTracker.recordSessionComplete(
-            currentProblems.length,
-            currentIndex + 1,
-            casualAnswerCount
-          );
-        }
-
-        // 学習時間トラッキングセッションを終了
-        if (studyTimeSessionId !== null) {
-          try {
-            const correctCount = userAnswers.filter((ans, idx) => {
-              const problem = currentProblems[idx];
-              return problem.type === 'true-false' ? ans === problem.answer : ans === problem.correctAnswer;
-            }).length;
-            console.log('✅ 学習時間トラッキング終了:', { studyTimeSessionId, problemCount: currentProblems.length, correctCount });
-            await endSession(studyTimeSessionId, currentProblems.length, correctCount);
-            setStudyTimeSessionId(null);
-          } catch (studyTimeError) {
-            console.error('❌ 学習時間トラッキングの終了に失敗:', studyTimeError);
-          }
-        }
-
-        setMode('result');
-      }
-    }, 1500);
+    // 自動進行を削除 - ユーザーが「次へ」ボタンをクリックするまで待機
   };
 
   const processAnswerDirect = async (answer: boolean | number, isCorrect: boolean) => {
@@ -1126,46 +1087,7 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
       );
     }
 
-    // 1.5秒後に次の問題へ自動進行
-    setTimeout(async () => {
-      setShowFeedback(false);
-      if (currentIndex < currentProblems.length - 1) {
-        const nextIndex = currentIndex + 1;
-        setCurrentIndex(nextIndex);
-
-        // 次の問題のトラッキングを開始
-        if (analyticsTracker && currentProblems[nextIndex]?.id) {
-          analyticsTracker.startProblem(currentProblems[nextIndex].id);
-        }
-      } else {
-        // クイズ完了
-        if (analyticsTracker) {
-          const casualAnswerCount = 0;
-          await analyticsTracker.recordSessionComplete(
-            currentProblems.length,
-            currentIndex + 1,
-            casualAnswerCount
-          );
-        }
-
-        // 学習時間トラッキングセッションを終了
-        if (studyTimeSessionId !== null) {
-          try {
-            const correctCount = userAnswers.filter((ans, idx) => {
-              const problem = currentProblems[idx];
-              return problem.type === 'true-false' ? ans === problem.answer : ans === problem.correctAnswer;
-            }).length;
-            console.log('✅ 学習時間トラッキング終了:', { studyTimeSessionId, problemCount: currentProblems.length, correctCount });
-            await endSession(studyTimeSessionId, currentProblems.length, correctCount);
-            setStudyTimeSessionId(null);
-          } catch (studyTimeError) {
-            console.error('❌ 学習時間トラッキングの終了に失敗:', studyTimeError);
-          }
-        }
-
-        setMode('result');
-      }
-    }, 1500);
+    // 自動進行を削除 - ユーザーが「次へ」ボタンをクリックするまで待機
   };
 
   // 選択肢クリック時に分析トラッカーに記録
