@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { categoryService, problemService, quizSetService, historyService, quizSessionService, statisticsService } from '../lib/database';
 import { AnalyticsManager, AnalyticsTracker } from '../lib/analyticsTracker';
 import { SubjectiveFeedback } from './SubjectiveFeedback';
@@ -985,6 +986,27 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
 
     setShowFeedback(true);
 
+    // マイルストーン通知（5問ごと）
+    const answeredCount = currentIndex + 1;
+    if (answeredCount % 5 === 0 && answeredCount < currentProblems.length) {
+      const remaining = currentProblems.length - answeredCount;
+      const currentLang = language as keyof typeof t;
+      toast.success(
+        currentLang === 'ja'
+          ? `🎉 ${answeredCount}問完了！あと${remaining}問！`
+          : `🎉 ${answeredCount} questions done! ${remaining} to go!`,
+        {
+          icon: '🎯',
+          duration: 2000,
+          style: {
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            color: '#fff',
+            fontWeight: 'bold',
+          }
+        }
+      );
+    }
+
     // 1.5秒後に次の問題へ自動進行
     setTimeout(async () => {
       setShowFeedback(false);
@@ -1064,6 +1086,27 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
     }
 
     setShowFeedback(true);
+
+    // マイルストーン通知（5問ごと）
+    const answeredCount = currentIndex + 1;
+    if (answeredCount % 5 === 0 && answeredCount < currentProblems.length) {
+      const remaining = currentProblems.length - answeredCount;
+      const currentLang = language as keyof typeof t;
+      toast.success(
+        currentLang === 'ja'
+          ? `🎉 ${answeredCount}問完了！あと${remaining}問！`
+          : `🎉 ${answeredCount} questions done! ${remaining} to go!`,
+        {
+          icon: '🎯',
+          duration: 2000,
+          style: {
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            color: '#fff',
+            fontWeight: 'bold',
+          }
+        }
+      );
+    }
 
     // 1.5秒後に次の問題へ自動進行
     setTimeout(async () => {
