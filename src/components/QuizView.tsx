@@ -65,10 +65,41 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
 
   // 学習時間トラッキング
   const [studyTimeSessionId, setStudyTimeSessionId] = useState<number | null>(null);
-  
+
+  // Week 3: プログレス表示用の状態
+  const [elapsedTime, setElapsedTime] = useState(0); // 秒単位
+
   useEffect(() => {
     loadData();
   }, []);
+
+  // Week 3: 経過時間トラッカー
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout | null = null;
+
+    if (mode === 'playing' && startTime) {
+      // 初期経過時間を計算
+      const initialElapsed = Math.floor((Date.now() - startTime.getTime()) / 1000);
+      setElapsedTime(initialElapsed);
+
+      // 1秒ごとに更新
+      intervalId = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTime.getTime()) / 1000);
+        setElapsedTime(elapsed);
+      }, 1000);
+
+      console.log('⏱️ 経過時間トラッカー開始');
+    } else {
+      setElapsedTime(0);
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        console.log('⏱️ 経過時間トラッカー停止');
+      }
+    };
+  }, [mode, startTime]);
 
   // Language change detection
   useEffect(() => {
@@ -1488,21 +1519,67 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
               )}
             </div>
             
-            <div className="flex justify-between items-center">
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{t[currentLang].pageTitle.playing}</h1>
-              <div className="text-right">
-                <p className="text-sm text-gray-600 dark:text-gray-300">
-                  {t[currentLang].labels.questionNumber} {currentIndex + 1} / {currentProblems.length}
-                </p>
-                <p className="text-sm text-gray-600 dark:text-gray-300">
-                  {t[currentLang].labels.correctCount} {score} / {currentIndex + (showFeedback ? 1 : 0)}
-                </p>
-                {lastSaved && (
-                  <p className="text-xs text-green-600 dark:text-green-400">
-                    {t[currentLang].labels.lastSaved} {lastSaved.toLocaleTimeString(currentLang === 'ja' ? 'ja-JP' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
-                  </p>
-                )}
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">{t[currentLang].pageTitle.playing}</h1>
+
+            {/* プログレスバー */}
+            <div className="mb-6">
+              <div
+                className="relative w-full rounded-full overflow-hidden"
+                style={{
+                  height: '12px',
+                  background: 'rgba(156, 163, 175, 0.3)',
+                  boxShadow: 'inset 0 2px 4px rgba(0, 0, 0, 0.1)'
+                }}
+              >
+                <div
+                  style={{
+                    width: `${((currentIndex + (showFeedback ? 1 : 0)) / currentProblems.length) * 100}%`,
+                    background: 'linear-gradient(to right, rgb(168 85 247), rgb(236 72 153))',
+                    transition: 'width 0.5s ease',
+                    height: '100%',
+                    boxShadow: '0 0 10px rgba(168, 85, 247, 0.5)'
+                  }}
+                  className="rounded-full"
+                />
               </div>
+              {/* パーセント表示 */}
+              <div className="text-right mt-1">
+                <span className="text-xs font-medium text-purple-600 dark:text-purple-400">
+                  {Math.round(((currentIndex + (showFeedback ? 1 : 0)) / currentProblems.length) * 100)}%
+                </span>
+              </div>
+            </div>
+
+            {/* 統計情報 */}
+            <div className="flex items-center justify-between text-sm mb-2 flex-wrap gap-2">
+              <div className="flex items-center gap-4 flex-wrap">
+                <span className="font-medium text-gray-700 dark:text-gray-300">
+                  📝 {t[currentLang].labels.questionNumber} {currentIndex + 1} / {currentProblems.length}
+                </span>
+                <span className="text-gray-600 dark:text-gray-400">
+                  ⏱️ {Math.floor(elapsedTime / 60)}:{(elapsedTime % 60).toString().padStart(2, '0')}
+                </span>
+                <span
+                  className="font-medium"
+                  style={{
+                    color: (() => {
+                      const answeredCount = currentIndex + (showFeedback ? 1 : 0);
+                      if (answeredCount === 0) return 'rgb(107 114 128)'; // gray
+                      const accuracy = (score / answeredCount) * 100;
+                      if (accuracy >= 80) return 'rgb(34 197 94)'; // green
+                      if (accuracy >= 60) return 'rgb(234 179 8)'; // yellow
+                      return 'rgb(239 68 68)'; // red
+                    })()
+                  }}
+                >
+                  💯 {currentIndex + (showFeedback ? 1 : 0) > 0 ? Math.round((score / (currentIndex + (showFeedback ? 1 : 0))) * 100) : 0}%
+                </span>
+              </div>
+              {lastSaved && (
+                <span className="text-xs text-green-600 dark:text-green-400">
+                  {t[currentLang].labels.lastSaved} {lastSaved.toLocaleTimeString(currentLang === 'ja' ? 'ja-JP' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              )}
             </div>
           </header>
 
