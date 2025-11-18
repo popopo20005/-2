@@ -1566,7 +1566,14 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
             </div>
           </header>
 
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-8">
+          <motion.div
+            key={currentIndex}
+            initial={{ opacity: 0, x: 50 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -50 }}
+            transition={{ duration: 0.3, ease: 'easeInOut' }}
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-8"
+          >
             <div className="mb-6">
               <span className="inline-block px-3 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded-full text-sm mb-4">
                 {currentProblem.category}
@@ -1669,7 +1676,7 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
                 </button>
               </div>
             )}
-          </div>
+          </motion.div>
         </div>
 
         {/* 主観的フィードバックモーダル */}
