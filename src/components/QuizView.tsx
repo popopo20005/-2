@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
+import { motion } from 'framer-motion';
+import confetti from 'canvas-confetti';
 import { categoryService, problemService, quizSetService, historyService, quizSessionService, statisticsService } from '../lib/database';
 import { AnalyticsManager, AnalyticsTracker } from '../lib/analyticsTracker';
 import { SubjectiveFeedback } from './SubjectiveFeedback';
@@ -982,6 +984,14 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
 
     if (isCorrect) {
       setScore(score + 1);
+
+      // 🎉 正解時のconfetti演出
+      confetti({
+        particleCount: 100,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: ['#10b981', '#34d399', '#6ee7b7'] // green shades
+      });
     }
 
     setShowFeedback(true);
@@ -1066,6 +1076,14 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
 
     if (isCorrect) {
       setScore(score + 1);
+
+      // 🎉 正解時のconfetti演出
+      confetti({
+        particleCount: 100,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: ['#10b981', '#34d399', '#6ee7b7'] // green shades
+      });
     }
 
     const newAnswers = [...userAnswers];
@@ -1673,13 +1691,23 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
               </div>
             ) : (
               <div className="space-y-6">
-                <div className={`p-4 rounded-lg ${
-                  (currentProblem.type === 'multiple-choice' 
-                    ? userAnswers[currentIndex] === currentProblem.correctAnswer
-                    : userAnswers[currentIndex] === currentProblem.answer)
-                    ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
-                    : 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200'
-                }`}>
+                <motion.div
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={
+                    (currentProblem.type === 'multiple-choice'
+                      ? userAnswers[currentIndex] === currentProblem.correctAnswer
+                      : userAnswers[currentIndex] === currentProblem.answer)
+                      ? { scale: 1, opacity: 1, transition: { type: 'spring', stiffness: 300, damping: 20 } }
+                      : { scale: 1, opacity: 1, x: [-10, 10, -10, 10, 0], transition: { duration: 0.5 } }
+                  }
+                  className={`p-4 rounded-lg ${
+                    (currentProblem.type === 'multiple-choice'
+                      ? userAnswers[currentIndex] === currentProblem.correctAnswer
+                      : userAnswers[currentIndex] === currentProblem.answer)
+                      ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
+                      : 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200'
+                  }`}
+                >
                   <h3 className="font-semibold text-lg mb-2">
                     {(currentProblem.type === 'multiple-choice' 
                       ? userAnswers[currentIndex] === currentProblem.correctAnswer
@@ -1704,8 +1732,8 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
                       }
                     </p>
                   )}
-                </div>
-                
+                </motion.div>
+
                 <div className="bg-blue-50 dark:bg-blue-900 p-4 rounded-lg">
                   <h4 className="font-semibold text-blue-800 dark:text-blue-200 mb-2">{t[currentLang].labels.explanation}</h4>
                   <p className="text-blue-700 dark:text-blue-300">{currentProblem.explanation}</p>
