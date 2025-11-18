@@ -1,4 +1,5 @@
 import { forwardRef, useState, useEffect, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { motion } from 'framer-motion';
 import { touchTarget } from '../../styles/designSystem';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'ghost' | 'outline';
@@ -18,22 +19,21 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
  * 共通Buttonコンポーネント
  * デザインシステムに基づいた統一されたボタン
  */
-export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  (
-    {
-      variant = 'primary',
-      size = 'md',
-      fullWidth = false,
-      isLoading = false,
-      leftIcon,
-      rightIcon,
-      disabled,
-      className = '',
-      children,
-      ...props
-    },
-    ref
-  ) => {
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  {
+    variant = 'primary',
+    size = 'md',
+    fullWidth = false,
+    isLoading = false,
+    leftIcon,
+    rightIcon,
+    disabled,
+    className = '',
+    children,
+    ...props
+  },
+  ref
+) {
     // ダークモード判定
     const [isDark, setIsDark] = useState(
       typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
@@ -132,18 +132,25 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       `,
     };
 
-    // ホバーエフェクト（マイクロインタラクション）
-    const hoverEffect = variant !== 'ghost' && variant !== 'outline'
-      ? 'hover:scale-105 active:scale-95'
-      : 'active:scale-98';
-
+    // ホバーエフェクトはframer-motionで実装するため、Tailwindクラスから削除
     const combinedStyles = `
       ${baseStyles}
       ${sizeStyles[size]}
       ${variantStyles[variant]}
-      ${hoverEffect}
       ${className}
     `.replace(/\s+/g, ' ').trim();
+
+    // framer-motion アニメーション設定
+    const animationVariants = {
+      hover: {
+        scale: variant !== 'ghost' && variant !== 'outline' ? 1.05 : 1.02,
+        transition: { duration: 0.2, ease: 'easeOut' }
+      },
+      tap: {
+        scale: variant !== 'ghost' && variant !== 'outline' ? 0.95 : 0.98,
+        transition: { duration: 0.1, ease: 'easeIn' }
+      }
+    };
 
     // outline variantの場合、inlineスタイルでテキストカラーを強制
     const inlineStyles = variant === 'outline' ? {
@@ -152,11 +159,13 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     } : {};
 
     return (
-      <button
+      <motion.button
         ref={ref}
         disabled={disabled || isLoading}
         className={combinedStyles}
         style={inlineStyles}
+        whileHover={!disabled && !isLoading ? animationVariants.hover : undefined}
+        whileTap={!disabled && !isLoading ? animationVariants.tap : undefined}
         {...props}
       >
         {isLoading && (
@@ -191,9 +200,6 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         {!isLoading && rightIcon && (
           <span className="inline-flex items-center">{rightIcon}</span>
         )}
-      </button>
+      </motion.button>
     );
-  }
-);
-
-Button.displayName = 'Button';
+});
