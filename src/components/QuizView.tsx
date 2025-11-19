@@ -5,6 +5,7 @@ import confetti from 'canvas-confetti';
 import { categoryService, problemService, quizSetService, historyService, quizSessionService, statisticsService } from '../lib/database';
 import { AnalyticsManager, AnalyticsTracker } from '../lib/analyticsTracker';
 import { SubjectiveFeedback } from './SubjectiveFeedback';
+import { LevelUpModal } from './LevelUpModal';
 import { LearningStateEstimator } from '../lib/learningStateEstimator';
 import { startSession, endSession } from '../lib/studyTimeService';
 import type { Problem, QuizSet, QuizSession, SubjectiveFeedbackData } from '../types';
@@ -49,6 +50,9 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
   const [userAnswers, setUserAnswers] = useState<(boolean | number)[]>([]);
   const [showFeedback, setShowFeedback] = useState(false);
   const [startTime, setStartTime] = useState<Date | null>(null);
+
+  // レベルアップモーダル関連
+  const [showLevelUpModal, setShowLevelUpModal] = useState(false);
 
   // 主観的フィードバック関連
   const [showSubjectiveFeedback, setShowSubjectiveFeedback] = useState(false);
@@ -125,6 +129,13 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
       clearInterval(interval);
     };
   }, [language]);
+
+  // result画面に遷移したときにレベルアップモーダルを表示
+  useEffect(() => {
+    if (mode === 'result') {
+      setShowLevelUpModal(true);
+    }
+  }, [mode]);
 
   // Translation objects
   const t = {
@@ -1748,6 +1759,15 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
           </div>
         </div>
       </div>
+
+      {/* レベルアップモーダル */}
+      <LevelUpModal
+        isOpen={showLevelUpModal}
+        onClose={() => setShowLevelUpModal(false)}
+        score={score}
+        totalQuestions={currentProblems.length}
+        language={language as 'ja' | 'en'}
+      />
 
       {/* 主観的フィードバックモーダル */}
       {console.log('Rendering SubjectiveFeedback with state:', { showSubjectiveFeedback })}

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import { Card, CardContent } from './ui/Card';
 import { Button } from './ui/Button';
 import { StatCard } from './ui/StatCard';
@@ -410,7 +411,20 @@ export function Dashboard({ onNavigate, language = 'ja', onToggleDarkMode, isDar
                     </div>
                     <div>
                       <div className="flex items-center gap-2 mb-1">
-                        <Flame className="size-5 text-orange-500" />
+                        {/* 🔥 ストリークアクティブ時に炎が揺れるアニメーション */}
+                        <motion.div
+                          animate={streakDays > 0 ? {
+                            rotate: [0, -5, 5, -5, 5, 0],
+                            scale: [1, 1.1, 1, 1.1, 1],
+                          } : {}}
+                          transition={{
+                            duration: 2,
+                            repeat: Infinity,
+                            ease: 'easeInOut'
+                          }}
+                        >
+                          <Flame className="size-5 text-orange-500" />
+                        </motion.div>
                         <h3 className="font-bold text-gray-900 dark:text-gray-100">
                           {translations.streakLabel}
                         </h3>
