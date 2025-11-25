@@ -1,103 +1,134 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { initializeDatabase } from './lib/database';
 import { forceQuizActionButtonStyles } from './forceButtonStyles';
+import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
+import { AdProvider, useAd } from './contexts/AdContext';
+import { AdFreeProvider } from './contexts/AdFreeContext';
+import { PomodoroProvider } from './contexts/PomodoroContext';
 import { MainMenu } from './components/MainMenu';
+import { DashboardV2 } from './components/DashboardV2';
 import { QuizView } from './components/QuizView';
-import { ProblemEditor } from './components/ProblemEditor';
-import { QuizSetManager } from './components/QuizSetManager';
-import { Statistics } from './components/Statistics';
-import { History } from './components/History';
-import { Settings } from './components/Settings';
-import { DataMigration } from './components/DataMigration';
-import { BackupManager } from './components/BackupManager';
 import { PWAInstallPrompt } from './components/PWAInstallPrompt';
-import { ShareCenter } from './components/ShareCenter';
-import { FloatingParticles } from './components/FloatingParticles';
-import { QuizSetCategorySelector } from './components/QuizSetCategorySelector';
-import { ProblemEditManager } from './components/ProblemEditManager';
-import { QuizSetDetailStats } from './components/QuizSetDetailStats';
-import { StudyDiary } from './components/StudyDiary';
-import { LearningInsights } from './components/LearningInsights';
-import { RecommendationDashboard } from './components/RecommendationDashboard';
-import { SessionSettings } from './components/SessionSettings';
-import { LearningReminder } from './components/LearningReminder';
-import { DifficultyAdjustment } from './components/DifficultyAdjustment';
+import { AdMobInitializer } from './components/AdMobInitializer';
+import { AdMobBanner } from './components/AdMobBanner';
+import { Onboarding } from './components/onboarding/Onboarding';
+import { AppShell } from './components/layout/AppShell';
 
-export type View = 'menu' | 'quiz' | 'editor' | 'quizSets' | 'stats' | 'history' | 'settings' | 'migration' | 'backup' | 'share' | 'categoryQuiz' | 'problemEdit' | 'quizSetStats' | 'diary' | 'insights' | 'recommendations' | 'sessionSettings' | 'reminderSettings' | 'difficultySettings';
+// コード分割: 頻繁に使用されないコンポーネントを遅延ロード
+const ProblemEditor = lazy(() => import('./components/ProblemEditor').then(m => ({ default: m.ProblemEditor })));
+const QuizSetManager = lazy(() => import('./components/QuizSetManager').then(m => ({ default: m.QuizSetManager })));
+const Statistics = lazy(() => import('./components/Statistics'));
+import type { View, QuizParams } from './types';
+const History = lazy(() => import('./components/History').then(m => ({ default: m.History })));
+const Settings = lazy(() => import('./components/Settings').then(m => ({ default: m.Settings })));
+const DataMigration = lazy(() => import('./components/DataMigration').then(m => ({ default: m.DataMigration })));
+const BackupManager = lazy(() => import('./components/BackupManager').then(m => ({ default: m.BackupManager })));
+const ShareCenter = lazy(() => import('./components/ShareCenter').then(m => ({ default: m.ShareCenter })));
+const LearningGroup = lazy(() => import('./components/LearningGroup').then(m => ({ default: m.LearningGroup })));
+const ExamView = lazy(() => import('./components/ExamView').then(m => ({ default: m.ExamView })));
+const QuizSetCategorySelector = lazy(() => import('./components/QuizSetCategorySelector').then(m => ({ default: m.QuizSetCategorySelector })));
+const ProblemEditManager = lazy(() => import('./components/ProblemEditManager').then(m => ({ default: m.ProblemEditManager })));
+const QuizSetDetailStats = lazy(() => import('./components/QuizSetDetailStats').then(m => ({ default: m.QuizSetDetailStats })));
+const StudyDiary = lazy(() => import('./components/StudyDiary').then(m => ({ default: m.StudyDiary })));
+const LearningInsights = lazy(() => import('./components/LearningInsights').then(m => ({ default: m.LearningInsights })));
+const RecommendationDashboard = lazy(() => import('./components/RecommendationDashboard').then(m => ({ default: m.RecommendationDashboard })));
+const SessionSettings = lazy(() => import('./components/SessionSettings').then(m => ({ default: m.SessionSettings })));
+const LearningReminder = lazy(() => import('./components/LearningReminder').then(m => ({ default: m.LearningReminder })));
+const DifficultyAdjustment = lazy(() => import('./components/DifficultyAdjustment').then(m => ({ default: m.DifficultyAdjustment })));
+// const SpacedRepetitionDashboard = lazy(() => import('./components/SpacedRepetitionDashboard').then(m => ({ default: m.SpacedRepetitionDashboard })));
+const Guide = lazy(() => import('./components/Guide').then(m => ({ default: m.Guide })));
+const PomodoroTimer = lazy(() => import('./components/PomodoroTimer').then(m => ({ default: m.PomodoroTimer })));
+const WeaknessAnalysis = lazy(() => import('./components/WeaknessAnalysis').then(m => ({ default: m.WeaknessAnalysis })));
+const GoalManager = lazy(() => import('./components/GoalManager').then(m => ({ default: m.GoalManager })));
+const NoteManager = lazy(() => import('./components/NoteManager').then(m => ({ default: m.NoteManager })));
 
-interface QuizParams {
-  quizSetId?: number;
-  useLatestOnly?: boolean;
-  mode?: 'quizSetWorstProblems' | 'categoryQuiz' | 'review';
-  category?: string;
-  problemIds?: number[];
-}
 
-function App() {
+
+function AppContent() {
+  const { language } = useLanguage();
+  const { setCurrentView: setAdView } = useAd();
   const [currentView, setCurrentView] = useState<View>('menu');
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  // ビューが変更されたら広告表示状態を更新
+  const handleViewChange = (view: View) => {
+    setCurrentView(view);
+    setAdView(view);
+    // 統計画面に遷移する際は最新データを読み込むためにキーを更新
+    if (view === 'stats') {
+      setStatsRefreshKey(prev => prev + 1);
+    }
+  };
+  const [isDarkMode, setIsDarkMode] = useState(true); // 常にダークモードを有効化
   const [isLoading, setIsLoading] = useState(true);
   const [, setShowMigration] = useState(false);
   const [quizParams, setQuizParams] = useState<QuizParams | null>(null);
   const [selectedQuizSetId, setSelectedQuizSetId] = useState<number | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
-  const [language, setLanguage] = useState(localStorage.getItem('language') || 'ja');
+  const [statsRefreshKey, setStatsRefreshKey] = useState(0);
 
 
   useEffect(() => {
+    // 初期画面の広告表示状態を設定
+    setAdView('menu');
+
     const initApp = async () => {
       try {
         console.log('アプリケーションを初期化中...');
         console.log('ユーザーエージェント:', navigator.userAgent);
         console.log('画面サイズ:', window.innerWidth, 'x', window.innerHeight);
-        
+
         // データベース初期化
         await initializeDatabase();
         console.log('データベースの初期化完了');
-        
-        // ダークモード設定読み込み
-        const savedDarkMode = localStorage.getItem('darkMode') === 'true';
-        setIsDarkMode(savedDarkMode);
-        
-        // documentElementに初期ダークモードクラスを適用
-        if (savedDarkMode) {
-          document.documentElement.classList.add('dark');
-        } else {
-          document.documentElement.classList.remove('dark');
-        }
-        console.log('初期ダークモード設定:', { 
-          savedDarkMode, 
-          documentClasses: document.documentElement.className 
+
+        // 常にダークモードを有効化
+        document.documentElement.classList.add('dark');
+        setIsDarkMode(true);
+        localStorage.setItem('darkMode', 'true');
+        console.log('ダークモード常時有効化:', {
+          isDarkMode: true,
+          documentClasses: document.documentElement.className
         });
-        
+
         // 既存データの確認（旧IndexedDBデータがあるかチェック）
         const hasLegacyData = await checkForLegacyData();
         console.log('レガシーデータの確認:', hasLegacyData);
         if (hasLegacyData) {
           setShowMigration(true);
-          setCurrentView('migration');
+          handleViewChange('migration');
         }
-        
+
         console.log('アプリケーションの初期化完了');
-        
+
         // ボタンスタイルを強制適用
         forceQuizActionButtonStyles();
-        
+
+        // オンボーディング完了チェック
+        const onboardingCompleted = localStorage.getItem('onboardingCompleted');
+        console.log('オンボーディング完了状態:', onboardingCompleted);
+        if (!onboardingCompleted) {
+          console.log('オンボーディングを表示します');
+          setShowOnboarding(true);
+        } else {
+          console.log('オンボーディングはスキップされました');
+        }
+
         setIsLoading(false);
       } catch (error) {
         console.error('アプリケーションの初期化に失敗:', error);
         console.error('エラーの詳細:', error);
         console.error('エラースタック:', (error as Error).stack);
-        
+
         // エラーメッセージを保存
         setInitError(`初期化エラー: ${(error as Error).message || 'Unknown error'}`);
-        
+
         // エラーが発生してもアプリを表示する
         try {
           // ダークモード設定だけは読み込む
           const savedDarkMode = localStorage.getItem('darkMode') === 'true';
           setIsDarkMode(savedDarkMode);
-          
+
           if (savedDarkMode) {
             document.documentElement.classList.add('dark');
           } else {
@@ -106,35 +137,13 @@ function App() {
         } catch (e) {
           console.error('ダークモード設定の読み込みに失敗:', e);
         }
-        
+
         setIsLoading(false);
       }
     };
 
     initApp();
-  }, []);
-
-  // Language change listener
-  useEffect(() => {
-    const handleStorageChange = () => {
-      setLanguage(localStorage.getItem('language') || 'ja');
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-
-    // Periodic check for language changes
-    const interval = setInterval(() => {
-      const currentLang = localStorage.getItem('language') || 'ja';
-      if (currentLang !== language) {
-        setLanguage(currentLang);
-      }
-    }, 1000);
-
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      clearInterval(interval);
-    };
-  }, [language]);
+  }, [setAdView]);
 
   const checkForLegacyData = async (): Promise<boolean> => {
     try {
@@ -164,36 +173,15 @@ function App() {
 
   const toggleDarkMode = () => {
     const newDarkMode = !isDarkMode;
-    console.log('ダークモード切り替え:', { 現在: isDarkMode, 新しい値: newDarkMode });
     setIsDarkMode(newDarkMode);
     localStorage.setItem('darkMode', newDarkMode.toString());
-    
-    // 複数箇所でdarkクラスを適用/削除（確実性のため）
-    const elementsToToggle = [document.documentElement, document.body];
-    
-    elementsToToggle.forEach(element => {
-      if (newDarkMode) {
-        element.classList.add('dark');
-      } else {
-        element.classList.remove('dark');
-      }
-    });
-    
-    // 強制的にスタイルを適用
+
+    // Tailwind CSS dark mode: documentElementにdarkクラスを適用
     if (newDarkMode) {
-      document.body.style.backgroundColor = '#111827'; // ダークグレー
-      document.body.style.color = '#f9fafb'; // 明るいテキスト
+      document.documentElement.classList.add('dark');
     } else {
-      document.body.style.backgroundColor = '#f8fafc'; // ライトモード
-      document.body.style.color = '#111827'; // 暗いテキスト
+      document.documentElement.classList.remove('dark');
     }
-    
-    console.log('ダークモード設定完了:', { 
-      localStorage: localStorage.getItem('darkMode'),
-      documentClasses: document.documentElement.className,
-      bodyClasses: document.body.className,
-      bodyStyle: document.body.style.backgroundColor
-    });
   };
 
   const startQuizSetWorstProblems = (quizSetId: number, useLatestOnly: boolean) => {
@@ -202,7 +190,7 @@ function App() {
       useLatestOnly,
       mode: 'quizSetWorstProblems'
     });
-    setCurrentView('quiz');
+    handleViewChange('quiz');
   };
 
 
@@ -211,7 +199,7 @@ function App() {
       quizSetId,
       mode: undefined
     });
-    setCurrentView('quiz');
+    handleViewChange('quiz');
   };
 
   const startQuizSetCategoryQuiz = (quizSetId: number, category: string) => {
@@ -220,12 +208,12 @@ function App() {
       category,
       mode: 'categoryQuiz'
     });
-    setCurrentView('quiz');
+    handleViewChange('quiz');
   };
 
   const openQuizSetStats = (quizSetId: number) => {
     setSelectedQuizSetId(quizSetId);
-    setCurrentView('quizSetStats');
+    handleViewChange('quizSetStats');
   };
 
 
@@ -243,98 +231,173 @@ function App() {
   const renderCurrentView = () => {
     switch (currentView) {
       case 'menu':
-        return <MainMenu onNavigate={setCurrentView} onToggleDarkMode={toggleDarkMode} isDarkMode={isDarkMode} />;
+        return (
+          <DashboardV2
+            onNavigate={handleViewChange}
+            language={language as 'ja' | 'en'}
+          />
+        );
       case 'quiz':
-        return <QuizView 
+        return <QuizView
           onBack={() => {
-            setCurrentView('menu');
+            handleViewChange('menu');
             setQuizParams(null);
-          }} 
+          }}
           initialParams={quizParams}
         />;
       case 'editor':
-        return <ProblemEditor onBack={() => setCurrentView('menu')} />;
+        return <ProblemEditor onBack={() => handleViewChange('menu')} />;
       case 'quizSets':
-        return <QuizSetManager 
-          onBack={() => setCurrentView('menu')} 
+        return <QuizSetManager
+          onBack={() => handleViewChange('menu')}
           onStartQuiz={startQuizSetQuiz}
           onStartCategoryQuiz={startQuizSetCategoryQuiz}
         />;
       case 'stats':
         return <Statistics
-          onBack={() => setCurrentView('menu')}
+          key={statsRefreshKey}
+          onBack={() => handleViewChange('menu')}
           onStartQuizSetWorstProblems={startQuizSetWorstProblems}
           onOpenQuizSetStats={openQuizSetStats}
           isDarkMode={isDarkMode}
           language={language as 'ja' | 'en'}
         />;
       case 'history':
-        return <History onBack={() => setCurrentView('menu')} />;
+        return <History onBack={() => handleViewChange('menu')} />;
       case 'settings':
-        return <Settings onBack={() => setCurrentView('menu')} onToggleDarkMode={toggleDarkMode} isDarkMode={isDarkMode} language={language as 'ja' | 'en'} />;
+        return <Settings onBack={() => handleViewChange('menu')} onToggleDarkMode={toggleDarkMode} isDarkMode={isDarkMode} language={language as 'ja' | 'en'} />;
       case 'migration':
         return (
-          <DataMigration 
+          <DataMigration
             onComplete={() => {
               setShowMigration(false);
-              setCurrentView('menu');
+              handleViewChange('menu');
             }}
             onSkip={() => {
               setShowMigration(false);
-              setCurrentView('menu');
+              handleViewChange('menu');
             }}
           />
         );
       case 'backup':
-        return <BackupManager onBack={() => setCurrentView('menu')} />;
+        return <BackupManager onBack={() => handleViewChange('menu')} />;
       case 'share':
-        return <ShareCenter onBack={() => setCurrentView('menu')} />;
+        return <LearningGroup onBack={() => handleViewChange('menu')} />;
+      case 'qrShare':
+        return <ShareCenter onBack={() => handleViewChange('menu')} />;
+      case 'exam':
+        return <ExamView onBack={() => handleViewChange('menu')} />;
       case 'categoryQuiz':
-        return <QuizSetCategorySelector 
-          onBack={() => setCurrentView('menu')} 
+        return <QuizSetCategorySelector
+          onBack={() => handleViewChange('menu')}
           onStartQuiz={startQuizSetCategoryQuiz}
         />;
       case 'problemEdit':
-        return <ProblemEditManager onBack={() => setCurrentView('menu')} />;
+        return <ProblemEditManager onBack={() => handleViewChange('menu')} />;
       case 'quizSetStats':
         return selectedQuizSetId ? (
           <QuizSetDetailStats
             quizSetId={selectedQuizSetId}
             onBack={() => {
-              setCurrentView('stats');
+              handleViewChange('stats');
               setSelectedQuizSetId(null);
             }}
             isDarkMode={isDarkMode}
             language={language as 'ja' | 'en'}
           />
         ) : (
-          <MainMenu onNavigate={setCurrentView} onToggleDarkMode={toggleDarkMode} isDarkMode={isDarkMode} />
+          <MainMenu onNavigate={handleViewChange} onToggleDarkMode={toggleDarkMode} isDarkMode={isDarkMode} />
         );
       case 'diary':
-        return <StudyDiary onBack={() => setCurrentView('menu')} isDarkMode={isDarkMode} language={language as 'ja' | 'en'} />;
+        return <StudyDiary onBack={() => handleViewChange('menu')} isDarkMode={isDarkMode} language={language as 'ja' | 'en'} />;
       case 'insights':
-        return <LearningInsights onBack={() => setCurrentView('menu')} isDarkMode={isDarkMode} language={language as 'ja' | 'en'} />;
+        return <LearningInsights onBack={() => handleViewChange('menu')} isDarkMode={isDarkMode} language={language as 'ja' | 'en'} />;
+      // case 'spacedRepetition':
+      //   return <SpacedRepetitionDashboard onBack={() => handleViewChange('menu')} language={language as 'ja' | 'en'} />;
       case 'recommendations':
         return <RecommendationDashboard
-          onBack={() => setCurrentView('menu')}
+          onBack={() => handleViewChange('menu')}
           onStartQuiz={(params) => {
             setQuizParams(params);
-            setCurrentView('quiz');
+            handleViewChange('quiz');
           }}
-          onNavigateToSettings={(view: View) => setCurrentView(view)}
+          onNavigateToSettings={(view: View) => handleViewChange(view)}
           isDarkMode={isDarkMode}
           language={language as 'ja' | 'en'}
         />;
       case 'sessionSettings':
-        return <SessionSettings onBack={() => setCurrentView('menu')} language={language as 'ja' | 'en'} />;
+        return <SessionSettings onBack={() => handleViewChange('menu')} language={language as 'ja' | 'en'} />;
       case 'reminderSettings':
-        return <LearningReminder onBack={() => setCurrentView('menu')} language={language as 'ja' | 'en'} />;
+        return <LearningReminder onBack={() => handleViewChange('menu')} language={language as 'ja' | 'en'} />;
       case 'difficultySettings':
-        return <DifficultyAdjustment onBack={() => setCurrentView('menu')} language={language as 'ja' | 'en'} />;
+        return <DifficultyAdjustment onBack={() => handleViewChange('menu')} language={language as 'ja' | 'en'} />;
+      case 'guide':
+        return <Guide onNavigate={handleViewChange} language={language as 'ja' | 'en'} />;
+      case 'pomodoro':
+        return (
+          <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-4">
+            <div className="max-w-2xl mx-auto">
+              <PomodoroTimer />
+              <div className="mt-6">
+                <button
+                  onClick={() => handleViewChange('menu')}
+                  className="w-full px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                >
+                  ← {language === 'ja' ? 'メニューに戻る' : 'Back to Menu'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      case 'weaknessAnalysis':
+        return (
+          <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-4">
+            <div className="max-w-6xl mx-auto">
+              <div className="mb-6">
+                <button
+                  onClick={() => handleViewChange('menu')}
+                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                >
+                  ← {language === 'ja' ? 'メニューに戻る' : 'Back to Menu'}
+                </button>
+              </div>
+              <WeaknessAnalysis
+                onStartRecommendedQuiz={(problemIds) => {
+                  setQuizParams({
+                    problemIds,
+                    mode: 'review',
+                  });
+                  handleViewChange('quiz');
+                }}
+                language={language as 'ja' | 'en'}
+              />
+            </div>
+          </div>
+        );
+      case 'goalManager':
+        return <GoalManager onBack={() => handleViewChange('menu')} language={language as 'ja' | 'en'} />;
+      case 'noteManager':
+        return <NoteManager onBack={() => handleViewChange('menu')} />;
       default:
-        return <MainMenu onNavigate={setCurrentView} onToggleDarkMode={toggleDarkMode} isDarkMode={isDarkMode} />;
+        return <MainMenu onNavigate={handleViewChange} onToggleDarkMode={toggleDarkMode} isDarkMode={isDarkMode} />;
     }
   };
+
+  // オンボーディング表示
+  console.log('レンダリング時のshowOnboarding:', showOnboarding);
+  if (showOnboarding) {
+    console.log('オンボーディングコンポーネントをレンダリングします');
+    return (
+      <Onboarding
+        onComplete={() => {
+          console.log('オンボーディング完了');
+          localStorage.setItem('onboardingCompleted', 'true');
+          setShowOnboarding(false);
+        }}
+        language={language as 'ja' | 'en'}
+      />
+    );
+  }
 
   // エラーが発生した場合の緊急フォールバック表示
   if (initError) {
@@ -350,8 +413,8 @@ function App() {
               {initError}
             </p>
           </div>
-          <button 
-            onClick={() => window.location.reload()} 
+          <button
+            onClick={() => window.location.reload()}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
             style={{ backgroundColor: '#2563eb', color: 'white' }}
           >
@@ -367,28 +430,62 @@ function App() {
     );
   }
 
-  return (
-    <div 
-      className={`min-h-screen transition-colors duration-200 ${isDarkMode ? 'dark' : ''}`}
-      style={{ 
-        minHeight: '100vh', 
-        backgroundColor: isDarkMode ? '#111827' : '#f9fafb',
-        color: isDarkMode ? '#f9fafb' : '#111827'
-      }}
-    >
-      <FloatingParticles />
-      <div 
-        className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-        style={{ 
-          minHeight: '100vh', 
-          backgroundColor: isDarkMode ? '#111827' : '#f9fafb',
-          color: isDarkMode ? '#f9fafb' : '#111827'
-        }}
-      >
-        {renderCurrentView()}
+  // DashboardV2 (menu view) は AppShell をバイパスして独自のレイアウトを使用
+  if (currentView === 'menu') {
+    return (
+      <>
+        <AdMobInitializer />
+        <Suspense fallback={
+          <div className="min-h-screen flex items-center justify-center">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <p className="text-gray-600">{language === 'ja' ? '読み込み中...' : 'Loading...'}</p>
+            </div>
+          </div>
+        }>
+          {renderCurrentView()}
+        </Suspense>
         <PWAInstallPrompt />
-      </div>
-    </div>
+        <AdMobBanner />
+      </>
+    );
+  }
+
+  return (
+    <AppShell currentView={currentView} onNavigate={handleViewChange} isDarkMode={isDarkMode}>
+      {/* AdMob初期化（ネイティブプラットフォームのみ） */}
+      <AdMobInitializer />
+
+      <Suspense fallback={
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-text-secondary">{language === 'ja' ? '読み込み中...' : 'Loading...'}</p>
+          </div>
+        </div>
+      }>
+        {renderCurrentView()}
+      </Suspense>
+      <PWAInstallPrompt />
+
+      {/* バナー広告（ネイティブプラットフォームのみ） */}
+      <AdMobBanner />
+    </AppShell>
+  );
+}
+
+// LanguageProvider、AdFreeProvider、AdProviderでラップしたApp関数
+function App() {
+  return (
+    <LanguageProvider>
+      <AdFreeProvider>
+        <AdProvider>
+          <PomodoroProvider>
+            <AppContent />
+          </PomodoroProvider>
+        </AdProvider>
+      </AdFreeProvider>
+    </LanguageProvider>
   );
 }
 

@@ -380,28 +380,7 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode, language: props
             </h2>
             
             <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <label className="text-sm font-medium text-gray-900 dark:text-white">
-                    {t[currentLang].darkMode}
-                  </label>
-                  <p className="text-sm text-gray-500 dark:text-gray-200">
-                    {t[currentLang].darkModeDesc}
-                  </p>
-                </div>
-                <button
-                  onClick={onToggleDarkMode}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    isDarkMode ? 'bg-blue-600' : 'bg-gray-200'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      isDarkMode ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </div>
+              {/* ダークモード切り替えは常時有効化のため削除 */}
 
               <div className="flex items-center justify-between">
                 <div>
