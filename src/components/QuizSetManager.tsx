@@ -7,6 +7,7 @@ interface QuizSetManagerProps {
   onBack: () => void;
   onStartQuiz?: (quizSetId: number) => void;
   onStartCategoryQuiz?: (quizSetId: number, category: string) => void;
+  onShare?: (quizSetId: number) => void;
 }
 
 interface ExtendedQuizSet extends QuizSet {
@@ -16,7 +17,7 @@ interface ExtendedQuizSet extends QuizSet {
   updatedDate: string;
 }
 
-export function QuizSetManager({ onBack, onStartQuiz: _onStartQuiz, onStartCategoryQuiz: _onStartCategoryQuiz }: QuizSetManagerProps) {
+export function QuizSetManager({ onBack, onStartQuiz: _onStartQuiz, onStartCategoryQuiz: _onStartCategoryQuiz, onShare }: QuizSetManagerProps) {
   const [language, setLanguage] = useState(localStorage.getItem('language') || 'ja');
   const [isLoading, setIsLoading] = useState(true);
   const [quizSets, setQuizSets] = useState<ExtendedQuizSet[]>([]);
@@ -795,6 +796,13 @@ export function QuizSetManager({ onBack, onStartQuiz: _onStartQuiz, onStartCateg
                         title="詳細表示"
                       >
                         📋
+                      </button>
+                      <button
+                        onClick={() => onShare && quizSet.id && onShare(quizSet.id)}
+                        className="quiz-action-button p-1 text-sm rounded hover:bg-blue-100 dark:hover:bg-blue-900 transition-colors"
+                        title={language === 'ja' ? '共有' : 'Share'}
+                      >
+                        🔗
                       </button>
                       <button
                         onClick={() => openEditModal(quizSet)}

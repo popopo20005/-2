@@ -25,27 +25,27 @@ console.log('React app loading...');
 createRoot(rootElement).render(
   // StrictMode disabled temporarily for CSV preview performance debugging
   // <StrictMode>
-    <>
-      <App />
-      <Toaster
-        position="top-center"
-        toastOptions={{
-          duration: 3000,
-          style: {
-            background: 'rgba(31, 41, 55, 0.95)',
-            color: '#fff',
-            padding: '16px',
-            borderRadius: '12px',
-            backdropFilter: 'blur(10px)',
+  <>
+    <App />
+    <Toaster
+      position="top-center"
+      toastOptions={{
+        duration: 3000,
+        style: {
+          background: 'rgba(31, 41, 55, 0.95)',
+          color: '#fff',
+          padding: '16px',
+          borderRadius: '12px',
+          backdropFilter: 'blur(10px)',
+        },
+        success: {
+          iconTheme: {
+            primary: '#10b981',
+            secondary: '#fff',
           },
-          success: {
-            iconTheme: {
-              primary: '#10b981',
-              secondary: '#fff',
-            },
-          },
-        }}
-      />
-    </>
+        },
+      }}
+    />
+  </>
   // </StrictMode>,
 )

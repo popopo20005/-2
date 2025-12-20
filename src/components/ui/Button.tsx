@@ -1,5 +1,4 @@
 import { forwardRef, useState, useEffect, type ButtonHTMLAttributes, type ReactNode } from 'react';
-import { motion } from 'framer-motion';
 import { touchTarget } from '../../styles/designSystem';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'ghost' | 'outline';
@@ -140,18 +139,6 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       ${className}
     `.replace(/\s+/g, ' ').trim();
 
-    // framer-motion アニメーション設定
-    const animationVariants = {
-      hover: {
-        scale: variant !== 'ghost' && variant !== 'outline' ? 1.05 : 1.02,
-        transition: { duration: 0.2, ease: 'easeOut' }
-      },
-      tap: {
-        scale: variant !== 'ghost' && variant !== 'outline' ? 0.95 : 0.98,
-        transition: { duration: 0.1, ease: 'easeIn' }
-      }
-    };
-
     // outline variantの場合、inlineスタイルでテキストカラーを強制
     const inlineStyles = variant === 'outline' ? {
       color: isDark ? 'rgb(255, 255, 255)' : 'rgb(55, 65, 81)', // white : gray-700
@@ -159,13 +146,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     } : {};
 
     return (
-      <motion.button
+      <button
         ref={ref}
         disabled={disabled || isLoading}
         className={combinedStyles}
         style={inlineStyles}
-        whileHover={!disabled && !isLoading ? animationVariants.hover : undefined}
-        whileTap={!disabled && !isLoading ? animationVariants.tap : undefined}
         {...props}
       >
         {isLoading && (
@@ -200,6 +185,6 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
         {!isLoading && rightIcon && (
           <span className="inline-flex items-center">{rightIcon}</span>
         )}
-      </motion.button>
+      </button>
     );
 });

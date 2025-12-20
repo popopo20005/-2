@@ -1,22 +1,24 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, memo } from 'react';
 import toast from 'react-hot-toast';
-import { motion } from 'framer-motion';
-import confetti from 'canvas-confetti';
-import { categoryService, problemService, quizSetService, historyService, quizSessionService, statisticsService } from '../lib/database';
+import { categoryService, problemService, quizSetService, historyService, quizSessionService, statisticsService, spacedRepetitionService } from '../lib/database';
 import { AnalyticsManager, AnalyticsTracker } from '../lib/analyticsTracker';
 import { SubjectiveFeedback } from './SubjectiveFeedback';
 import { LevelUpModal } from './LevelUpModal';
-import { LearningStateEstimator } from '../lib/learningStateEstimator';
 import { startSession, endSession } from '../lib/studyTimeService';
-import type { Problem, QuizSet, QuizSession, SubjectiveFeedbackData } from '../types';
-
-interface QuizParams {
-  quizSetId?: number;
-  useLatestOnly?: boolean;
-  mode?: 'quizSetWorstProblems' | 'categoryQuiz' | 'review';
-  category?: string;
-  problemIds?: number[];
-}
+import { updateCardAfterReview } from '../lib/sm2Algorithm';
+import { autoPersonalizeSettings } from '../services/responseTimeService';
+import { recordCompletion } from '../services/quizCompletionService';
+import { debugLog } from '../utils/debug';
+import type { ReviewResult } from '../types';
+import { QuizProgress } from './quiz/QuizProgress';
+import { QuizCard } from './quiz/QuizCard';
+import { AnswerButton } from './quiz/AnswerButton';
+import { NeumorphicButton } from './ui/NeumorphicButton';
+import { GlassCard } from './ui/GlassCard';
+import { RingChart } from './dashboard/RingChart';
+import { BookOpen, Layers, Target, Clock, Trash2, HelpCircle, Zap } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import type { Problem, QuizSet, QuizSession, SubjectiveFeedbackData, QuizParams } from '../types';
 
 interface QuizViewProps {
   onBack: () => void;
@@ -26,126 +28,166 @@ interface QuizViewProps {
 type QuizMode = 'selection' | 'playing' | 'result';
 type QuizType = 'all' | 'category' | 'quizSet' | 'incorrect' | 'quizSetIncorrect' | 'quizSetWorstProblems';
 
-export function QuizView({ onBack, initialParams }: QuizViewProps) {
+const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
   const [mode, setMode] = useState<QuizMode>('selection');
   const [isLoading, setIsLoading] = useState(true);
-  
-  // Language state management
   const [language, setLanguage] = useState(localStorage.getItem('language') || 'ja');
-  
-  // データ
+
+  // Data
   const [categories, setCategories] = useState<string[]>([]);
   const [quizSets, setQuizSets] = useState<QuizSet[]>([]);
   const [allProblems, setAllProblems] = useState<Problem[]>([]);
   const [savedSessions, setSavedSessions] = useState<QuizSession[]>([]);
-  
-  // クイズ選択
+
+  // Selection
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedQuizSet, setSelectedQuizSet] = useState<number | null>(null);
-  
-  // クイズプレイ状態
+
+  // Playing State
   const [currentProblems, setCurrentProblems] = useState<Problem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [score, setScore] = useState(0);
   const [userAnswers, setUserAnswers] = useState<(boolean | number)[]>([]);
   const [showFeedback, setShowFeedback] = useState(false);
   const [startTime, setStartTime] = useState<Date | null>(null);
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [questionStartTime, setQuestionStartTime] = useState<Date>(new Date()); // 各問題の開始時刻
 
-  // レベルアップモーダル関連
+  // Modals & Feedback
   const [showLevelUpModal, setShowLevelUpModal] = useState(false);
-
-  // 主観的フィードバック関連
   const [showSubjectiveFeedback, setShowSubjectiveFeedback] = useState(false);
   const [pendingSubjectiveFeedback, setPendingSubjectiveFeedback] = useState<{
     problemIndex: number;
     answer: boolean | number;
   } | null>(null);
-  
-  // セッション管理
+
+  // Session Management
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  const [isResuming, setIsResuming] = useState(false);
   const [autoSaveInterval, setAutoSaveInterval] = useState<NodeJS.Timeout | null>(null);
-  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  // const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
-  // 学習分析トラッキング
+
+
+  // Tracking
   const [analyticsTracker, setAnalyticsTracker] = useState<AnalyticsTracker | null>(null);
-
-  // 学習時間トラッキング
   const [studyTimeSessionId, setStudyTimeSessionId] = useState<number | null>(null);
 
-  // Week 3: プログレス表示用の状態
-  const [elapsedTime, setElapsedTime] = useState(0); // 秒単位
+  // Track if initialParams have been processed
+  const initialParamsProcessed = useRef(false);
 
   useEffect(() => {
     loadData();
   }, []);
 
-  // Week 3: 経過時間トラッカー
+  // Timer
   useEffect(() => {
     let intervalId: NodeJS.Timeout | null = null;
-
     if (mode === 'playing' && startTime) {
-      // 初期経過時間を計算
       const initialElapsed = Math.floor((Date.now() - startTime.getTime()) / 1000);
       setElapsedTime(initialElapsed);
-
-      // 1秒ごとに更新
       intervalId = setInterval(() => {
         const elapsed = Math.floor((Date.now() - startTime.getTime()) / 1000);
         setElapsedTime(elapsed);
       }, 1000);
-
-      console.log('⏱️ 経過時間トラッカー開始');
     } else {
       setElapsedTime(0);
     }
-
     return () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-        console.log('⏱️ 経過時間トラッカー停止');
-      }
+      if (intervalId) clearInterval(intervalId);
     };
   }, [mode, startTime]);
 
-  // Language change detection
+  // Language
   useEffect(() => {
-    const handleStorageChange = () => {
-      setLanguage(localStorage.getItem('language') || 'ja');
-    };
-
+    const handleStorageChange = () => setLanguage(localStorage.getItem('language') || 'ja');
     window.addEventListener('storage', handleStorageChange);
-    
-    // 定期的に言語設定をチェック
     const interval = setInterval(() => {
       const currentLang = localStorage.getItem('language') || 'ja';
-      if (currentLang !== language) {
-        setLanguage(currentLang);
-      }
+      if (currentLang !== language) setLanguage(currentLang);
     }, 1000);
-
     return () => {
       window.removeEventListener('storage', handleStorageChange);
       clearInterval(interval);
     };
   }, [language]);
 
-  // result画面に遷移したときにレベルアップモーダルを表示
+  // Result Modal
   useEffect(() => {
-    if (mode === 'result') {
-      setShowLevelUpModal(true);
-    }
+    if (mode === 'result') setShowLevelUpModal(true);
   }, [mode]);
 
-  // Translation objects
+  // Auto-save on unload
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (mode === 'playing' && currentSessionId) {
+        e.preventDefault();
+        e.returnValue = '';
+        saveSession();
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && mode === 'playing' && currentSessionId) {
+        saveSession();
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [mode, currentSessionId]);
+
+  // Initial Params
+  useEffect(() => {
+    debugLog('🎯 QuizView initialParams effect:', { initialParams, isLoading, processed: initialParamsProcessed.current });
+    debugLog('🔍 Detailed params check:', {
+      hasInitialParams: !!initialParams,
+      mode: initialParams?.mode,
+      problemIds: initialParams?.problemIds,
+      problemIdsLength: initialParams?.problemIds?.length,
+      quizSetId: initialParams?.quizSetId,
+    });
+
+    // Only process initialParams once
+    if (initialParams && !isLoading && !initialParamsProcessed.current) {
+      initialParamsProcessed.current = true;
+      debugLog('✅ Processing initialParams (first time only)');
+
+      if (initialParams.mode === 'resume' && initialParams.sessionId) {
+        debugLog('📝 Resuming session:', initialParams.sessionId);
+        resumeSession(initialParams.sessionId);
+      } else if (initialParams.mode === 'quizSetWorstProblems' && initialParams.quizSetId) {
+        debugLog('📝 Starting quizSetWorstProblems mode');
+        debugLog('📊 Problem count:', initialParams.problemCount);
+        setSelectedQuizSet(initialParams.quizSetId);
+        if (initialParams.category) {
+          setSelectedCategory(initialParams.category);
+          startQuizSetCategoryWorstProblems(initialParams.quizSetId, initialParams.category, initialParams.useLatestOnly || true);
+        } else {
+          startQuizWithParams('quizSetWorstProblems', undefined, initialParams.quizSetId, initialParams.useLatestOnly || true, initialParams.problemCount);
+        }
+      } else if (initialParams.mode === 'categoryQuiz' && initialParams.category) {
+        debugLog('📝 Starting categoryQuiz mode');
+        setSelectedCategory(initialParams.category);
+        if (initialParams.quizSetId) setSelectedQuizSet(initialParams.quizSetId);
+        startQuizWithParams('category', initialParams.category, initialParams.quizSetId);
+      } else if (initialParams.mode === 'review' && initialParams.problemIds && initialParams.problemIds.length > 0) {
+        debugLog('📝 Starting review mode with problemIds:', initialParams.problemIds.length);
+        startReviewQuiz(initialParams.problemIds);
+      } else if (initialParams.quizSetId && !initialParams.mode) {
+        debugLog('📝 Starting quizSet mode with ID:', initialParams.quizSetId);
+        setSelectedQuizSet(initialParams.quizSetId);
+        // selectedQuizSetが更新されるまで待つために、直接IDを渡す
+        startQuizWithParams('quizSet', undefined, initialParams.quizSetId);
+      }
+    }
+  }, [initialParams, isLoading]);
+
   const t = {
     ja: {
       loading: 'データを読み込み中...',
-      pageTitle: {
-        selection: 'クイズ開始',
-        playing: 'クイズプレイ',
-        result: 'クイズ結果'
-      },
+      pageTitle: { selection: 'クイズ開始', playing: 'クイズプレイ', result: 'クイズ結果' },
       buttons: {
         backToMenu: '← メインメニューに戻る',
         endQuiz: '← クイズを終了',
@@ -186,30 +228,11 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
         totalQuestions: '総問題数'
       },
       sections: {
-        categoryQuiz: {
-          title: '📚 カテゴリー別クイズ'
-        },
-        quizSetQuiz: {
-          title: '📖 問題集クイズ'
-        },
-        otherQuiz: {
-          title: '🎯 その他のクイズ'
-        },
-        statistics: {
-          title: '📊 統計情報',
-          totalProblems: '総問題数:',
-          totalCategories: 'カテゴリー数:',
-          totalQuizSets: '問題集数:'
-        },
-        savedSessions: {
-          title: '💾 保存されたクイズセッション',
-          count: '件',
-          progress: '進捗:',
-          correct: '正解:',
-          timeElapsed: '分経過',
-          paused: '⏸️ 一時停止中',
-          accuracyRate: '正答率:'
-        }
+        categoryQuiz: { title: '📚 カテゴリー別クイズ' },
+        quizSetQuiz: { title: '📖 問題集クイズ' },
+        otherQuiz: { title: '🎯 その他のクイズ' },
+        statistics: { title: '📊 統計情報', totalProblems: '総問題数:', totalCategories: 'カテゴリー数:', totalQuizSets: '問題集数:' },
+        savedSessions: { title: '💾 保存されたクイズセッション', count: '件', progress: '進捗:', correct: '正解:', timeElapsed: '分経過', paused: '⏸️ 一時停止中', accuracyRate: '正答率:' }
       },
       messages: {
         noProblemsFound: '出題する問題がありません',
@@ -226,19 +249,11 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
         confirmResumeSession: 'セッションを再開しますか？',
         quizInProgress: 'クイズが進行中です。ページを移動すると進捗が保存されます。',
         resumedSession: '🔄 再開されたセッション'
-      },
-      feedback: {
-        correct: '✅ 正解！',
-        incorrect: '❌ 不正解'
       }
     },
     en: {
       loading: 'Loading data...',
-      pageTitle: {
-        selection: 'Start Quiz',
-        playing: 'Quiz Play',
-        result: 'Quiz Result'
-      },
+      pageTitle: { selection: 'Start Quiz', playing: 'Quiz Play', result: 'Quiz Result' },
       buttons: {
         backToMenu: '← Back to Main Menu',
         endQuiz: '← End Quiz',
@@ -279,30 +294,11 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
         totalQuestions: 'Total Questions'
       },
       sections: {
-        categoryQuiz: {
-          title: '📚 Category Quiz'
-        },
-        quizSetQuiz: {
-          title: '📖 Quiz Set Quiz'
-        },
-        otherQuiz: {
-          title: '🎯 Other Quiz'
-        },
-        statistics: {
-          title: '📊 Statistics',
-          totalProblems: 'Total Problems:',
-          totalCategories: 'Categories:',
-          totalQuizSets: 'Quiz Sets:'
-        },
-        savedSessions: {
-          title: '💾 Saved Quiz Sessions',
-          count: 'sessions',
-          progress: 'Progress:',
-          correct: 'Correct:',
-          timeElapsed: 'min elapsed',
-          paused: '⏸️ Paused',
-          accuracyRate: 'Accuracy:'
-        }
+        categoryQuiz: { title: '📚 Category Quiz' },
+        quizSetQuiz: { title: '📖 Quiz Set Quiz' },
+        otherQuiz: { title: '🎯 Other Quiz' },
+        statistics: { title: '📊 Statistics', totalProblems: 'Total Problems:', totalCategories: 'Categories:', totalQuizSets: 'Quiz Sets:' },
+        savedSessions: { title: '💾 Saved Quiz Sessions', count: 'sessions', progress: 'Progress:', correct: 'Correct:', timeElapsed: 'min elapsed', paused: '⏸️ Paused', accuracyRate: 'Accuracy:' }
       },
       messages: {
         noProblemsFound: 'No problems found to quiz',
@@ -319,74 +315,11 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
         confirmResumeSession: 'Resume session?',
         quizInProgress: 'Quiz in progress. Progress will be saved when leaving the page.',
         resumedSession: '🔄 Resumed Session'
-      },
-      feedback: {
-        correct: '✅ Correct!',
-        incorrect: '❌ Incorrect'
       }
     }
   };
 
   const currentLang = language as keyof typeof t;
-
-  // ページ移動時の警告処理
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (mode === 'playing' && currentSessionId) {
-        e.preventDefault();
-        e.returnValue = t[currentLang].messages.quizInProgress;
-        // 緊急保存を実行
-        saveSession();
-      }
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden' && mode === 'playing' && currentSessionId) {
-        // フォーカスが外れた時に保存
-        saveSession();
-      }
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [mode, currentSessionId]);
-
-  useEffect(() => {
-    if (initialParams && !isLoading) {
-      if (initialParams.mode === 'quizSetWorstProblems' && initialParams.quizSetId) {
-        // 統計画面からの苦手問題プレイ開始または問題集カテゴリー別間違い問題プレイ
-        setSelectedQuizSet(initialParams.quizSetId);
-        if (initialParams.category) {
-          // カテゴリー別間違い問題
-          setSelectedCategory(initialParams.category);
-          startQuizSetCategoryWorstProblems(initialParams.quizSetId, initialParams.category, initialParams.useLatestOnly || true);
-        } else {
-          // 問題集全体の間違い問題
-          startQuiz('quizSetWorstProblems', initialParams.useLatestOnly || true);
-        }
-      } else if (initialParams.mode === 'categoryQuiz' && initialParams.category) {
-        // カテゴリー別クイズ開始
-        setSelectedCategory(initialParams.category);
-        if (initialParams.quizSetId) {
-          setSelectedQuizSet(initialParams.quizSetId);
-        }
-        startQuizWithParams('category', initialParams.category, initialParams.quizSetId);
-      } else if (initialParams.mode === 'review' && initialParams.problemIds) {
-        // 復習問題クイズ開始
-        console.log('復習問題クイズ開始:', initialParams.problemIds);
-        startReviewQuiz(initialParams.problemIds);
-      } else if (initialParams.quizSetId && !initialParams.mode) {
-        // 問題集クイズ開始
-        setSelectedQuizSet(initialParams.quizSetId);
-        startQuiz('quizSet');
-      }
-    }
-  }, [initialParams, isLoading]);
 
   const loadData = async () => {
     try {
@@ -395,27 +328,24 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
         quizSetService.getAll(),
         problemService.getAll()
       ]);
-      
-      console.log('読み込まれたデータ:', {
-        categories: categoriesData,
-        quizSets: quizSetsData,
-        problems: problemsData
-      });
-      
       setCategories(categoriesData);
       setQuizSets(quizSetsData);
       setAllProblems(problemsData);
-      
-      // セッションデータは後で読み込み（エラーを避けるため）
       try {
+        // 既存の重複セッションをクリーンアップ
+        const deletedCount = await quizSessionService.cleanupDuplicateSessions();
+        if (deletedCount > 0) {
+          debugLog(`🧹 Cleaned up ${deletedCount} duplicate sessions`);
+        }
+
         const sessionsData = await quizSessionService.getActiveSessions();
         setSavedSessions(sessionsData);
       } catch (sessionError) {
-        console.warn('Session data loading failed:', sessionError);
+        debugLog('Session data loading failed:', sessionError);
         setSavedSessions([]);
       }
     } catch (error) {
-      console.error('データ読み込みエラー:', error);
+      debugLog('データ読み込みエラー:', error);
     } finally {
       setIsLoading(false);
     }
@@ -424,89 +354,56 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
   const getIncorrectProblems = async (): Promise<Problem[]> => {
     const history = await historyService.getAll();
     const incorrectProblemIds = new Set<number>();
-    
-    // 各問題の最新の回答履歴をチェック
     const problemAnswers = new Map<number, boolean>();
-    
-    // 時系列順に履歴を処理して最新の結果を取得
     const sortedHistory = history.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-    
     for (const entry of sortedHistory) {
       if (!problemAnswers.has(entry.problemId)) {
         problemAnswers.set(entry.problemId, entry.isCorrect);
       }
     }
-    
-    // 最新で間違えた問題のIDを収集
     for (const [problemId, isCorrect] of problemAnswers) {
-      if (!isCorrect) {
-        incorrectProblemIds.add(problemId);
-      }
+      if (!isCorrect) incorrectProblemIds.add(problemId);
     }
-    
     return allProblems.filter(problem => problem.id && incorrectProblemIds.has(problem.id));
   };
 
   const getIncorrectProblemsForQuizSet = async (quizSetId: number, useLatestOnly: boolean = true): Promise<Problem[]> => {
     const quizSet = await quizSetService.getById(quizSetId);
     if (!quizSet) return [];
-
     const history = await historyService.getAll();
     const incorrectProblemIds = new Set<number>();
-    
     if (useLatestOnly) {
-      // 最新の回答履歴から間違えた問題を取得
       const problemAnswers = new Map<number, boolean>();
       const sortedHistory = history.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-      
       for (const entry of sortedHistory) {
         if (quizSet.problemIds.includes(entry.problemId) && !problemAnswers.has(entry.problemId)) {
           problemAnswers.set(entry.problemId, entry.isCorrect);
         }
       }
-      
       for (const [problemId, isCorrect] of problemAnswers) {
-        if (!isCorrect) {
-          incorrectProblemIds.add(problemId);
-        }
+        if (!isCorrect) incorrectProblemIds.add(problemId);
       }
     } else {
-      // 過去に一度でも間違えた問題を取得
-      const incorrectEntries = history.filter(entry => 
-        !entry.isCorrect && quizSet.problemIds.includes(entry.problemId)
-      );
+      const incorrectEntries = history.filter(entry => !entry.isCorrect && quizSet.problemIds.includes(entry.problemId));
       incorrectEntries.forEach(entry => incorrectProblemIds.add(entry.problemId));
     }
-    
-    return allProblems.filter(problem => 
-      problem.id && incorrectProblemIds.has(problem.id) && quizSet.problemIds.includes(problem.id)
-    );
+    return allProblems.filter(problem => problem.id && incorrectProblemIds.has(problem.id) && quizSet.problemIds.includes(problem.id));
   };
 
-  const startQuizWithParams = async (type: QuizType, category?: string, quizSetId?: number, useLatestOnly: boolean = true) => {
+  const startQuizWithParams = async (type: QuizType, category?: string, quizSetId?: number, useLatestOnly: boolean = true, problemCount?: number | 'all') => {
     let problems: Problem[] = [];
-    
     try {
       switch (type) {
-        case 'all':
-          problems = [...allProblems];
-          break;
+        case 'all': problems = [...allProblems]; break;
         case 'category':
           if (category) {
-            console.log('カテゴリークイズ開始:', { category, quizSetId });
             if (quizSetId) {
-              // 問題集内のカテゴリー別クイズ
-              console.log('問題集内カテゴリークイズ:', quizSetId);
               const quizSet = await quizSetService.getById(quizSetId);
-              console.log('取得した問題集:', quizSet);
               if (quizSet) {
                 const quizSetProblems = await problemService.getByIds(quizSet.problemIds);
-                console.log('問題集の全問題:', quizSetProblems);
                 problems = quizSetProblems.filter(p => p.category === category);
-                console.log('フィルタリング後の問題:', problems);
               }
             } else {
-              // 全問題からのカテゴリー別クイズ
               problems = allProblems.filter(p => p.category === category);
             }
           }
@@ -514,65 +411,63 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
         case 'quizSet':
           if (quizSetId) {
             const quizSet = await quizSetService.getById(quizSetId);
-            if (quizSet) {
-              problems = await problemService.getByIds(quizSet.problemIds);
-            }
+            if (quizSet) problems = await problemService.getByIds(quizSet.problemIds);
           }
           break;
         case 'quizSetIncorrect':
-          if (quizSetId) {
-            problems = await getIncorrectProblemsForQuizSet(quizSetId, useLatestOnly);
-          }
+          if (quizSetId) problems = await getIncorrectProblemsForQuizSet(quizSetId, useLatestOnly);
           break;
         case 'quizSetWorstProblems':
           if (quizSetId) {
             const allHistory = await historyService.getAll();
             const quizSet = await quizSetService.getById(quizSetId);
-            
             if (quizSet) {
               const quizSetProblems = await problemService.getByIds(quizSet.problemIds);
-              
               const problemStats = quizSetProblems.map(problem => {
                 const histories = allHistory.filter(h => h.problemId === problem.id);
-                
                 if (useLatestOnly && histories.length > 0) {
-                  const latestHistory = histories.reduce((latest, current) => 
-                    new Date(current.timestamp) > new Date(latest.timestamp) ? current : latest
-                  );
-                  const correctRate = latestHistory.isCorrect ? 1 : 0;
-                  return { problem, correctRate, historyCount: 1 };
+                  const latestHistory = histories.reduce((latest, current) => new Date(current.timestamp) > new Date(latest.timestamp) ? current : latest);
+                  return { problem, correctRate: latestHistory.isCorrect ? 1 : 0, historyCount: histories.length };
                 } else {
                   const correctCount = histories.filter(h => h.isCorrect).length;
                   const totalCount = histories.length;
-                  const correctRate = totalCount > 0 ? correctCount / totalCount : 0.5;
-                  return { problem, correctRate, historyCount: totalCount };
+                  return { problem, correctRate: totalCount > 0 ? correctCount / totalCount : 0.5, historyCount: totalCount };
                 }
               });
-              
               problemStats.sort((a, b) => a.correctRate - b.correctRate);
-              problems = problemStats.slice(0, 20).map(stat => stat.problem);
+
+              const extractCount = problemCount === 'all' ? problemStats.length : (problemCount || 20);
+              debugLog('🔥 苦手問題抽出結果（正答率が低い順）:');
+              debugLog(`📊 モード: ${useLatestOnly ? '最新版（最後の1回のみ）' : '全履歴（平均正答率）'}`);
+              debugLog(`📚 問題集: ${quizSet.name}`);
+              debugLog(`📝 全問題数: ${quizSetProblems.length}`);
+              debugLog(`🎯 抽出問題数: ${extractCount}問`);
+              console.table(problemStats.slice(0, extractCount).map((stat, index) => ({
+                順位: index + 1,
+                問題: stat.problem.question.substring(0, 30) + '...',
+                正答率: `${(stat.correctRate * 100).toFixed(0)}%`,
+                解答回数: stat.historyCount
+              })));
+
+              problems = problemStats.slice(0, extractCount).map(stat => stat.problem);
             }
           }
           break;
-        case 'incorrect':
-          problems = await getIncorrectProblems();
-          break;
+        case 'incorrect': problems = await getIncorrectProblems(); break;
       }
-      
+
       if (problems.length === 0) {
-        console.log('No problems found:', { type, category, quizSetId, allProblems: allProblems.length });
         alert(t[currentLang].messages.noProblemsFound);
         return;
       }
-      
-      // 問題をシャッフル
+
       const shuffledProblems = [...problems].sort(() => Math.random() - 0.5);
-      
-      // セッション管理
       const sessionId = Date.now().toString();
       try {
         const session = {
           id: sessionId,
+          quizSetId: quizSetId, // 問題集IDを保存
+          category: category, // カテゴリーを保存
           problems: shuffledProblems,
           currentIndex: 0,
           score: 0,
@@ -581,14 +476,14 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
           isCompleted: false,
           isPaused: false
         };
-        
         await quizSessionService.save(session);
         setCurrentSessionId(sessionId);
+        debugLog('✅ Session saved with quizSetId:', quizSetId, 'category:', category);
       } catch (sessionError) {
-        console.warn('セッション保存に失敗しましたが、クイズは続行します:', sessionError);
+        debugLog('Session save failed:', sessionError);
         setCurrentSessionId(null);
       }
-      
+
       setCurrentProblems(shuffledProblems);
       setCurrentIndex(0);
       setScore(0);
@@ -597,36 +492,34 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
       setStartTime(new Date());
       setMode('playing');
 
-      // 学習分析トラッカーを開始
       const tracker = AnalyticsManager.startSession(sessionId);
       setAnalyticsTracker(tracker);
-
-      // 最初の問題をトラッキング開始
       if (shuffledProblems.length > 0 && shuffledProblems[0].id) {
         tracker.startProblem(shuffledProblems[0].id);
       }
 
-      // 学習時間トラッキングセッションを開始
       try {
         const sessionType = type === 'incorrect' || type === 'quizSetIncorrect' ? 'review' : 'quiz';
         const studySessionId = await startSession(sessionType, quizSetId, category);
-        console.log('✅ 学習時間トラッキング開始:', { studySessionId, sessionType, quizSetId, category });
         setStudyTimeSessionId(studySessionId);
       } catch (studyTimeError) {
-        console.error('❌ 学習時間トラッキングの開始に失敗:', studyTimeError);
+        debugLog('Study time tracking failed:', studyTimeError);
       }
 
-      // 自動保存タイマーを開始（30秒間隔）
+      // Clear existing interval before creating a new one
+      if (autoSaveInterval) {
+        clearInterval(autoSaveInterval);
+      }
+
       const interval = setInterval(async () => {
         if (currentSessionId) {
           await saveSession();
-          setLastSaved(new Date());
         }
       }, 30000);
       setAutoSaveInterval(interval);
-      
+
     } catch (error) {
-      console.error('Quiz start error:', error);
+      debugLog('Quiz start error:', error);
       alert(t[currentLang].messages.quizStartError);
     }
   };
@@ -635,53 +528,30 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
     return startQuizWithParams(type, selectedCategory, selectedQuizSet ?? undefined, useLatestOnly);
   };
 
-  // 復習問題クイズを開始
   const startReviewQuiz = async (problemIds: number[]) => {
     try {
-      console.log('復習問題クイズ開始:', {
-        requestedIds: problemIds,
-        requestedCount: problemIds.length
-      });
-
-      // 問題IDから問題を取得
       const reviewProblems = await problemService.getByIds(problemIds);
-
-      console.log('復習問題取得結果:', {
-        requestedCount: problemIds.length,
-        retrievedCount: reviewProblems.length,
-        retrievedIds: reviewProblems.map(p => p.id),
-        missingIds: problemIds.filter(id => !reviewProblems.some(p => p.id === id))
-      });
-
       if (reviewProblems.length === 0) {
         alert('復習問題が見つかりません');
         return;
       }
-
-      // 取得できた問題数が予想より少ない場合の警告
       if (reviewProblems.length < problemIds.length * 0.7) {
         const missingCount = problemIds.length - reviewProblems.length;
-        console.warn(`復習問題の一部が見つかりません (${missingCount}問不足)`);
-        alert(`復習問題の一部（${missingCount}問）が見つかりませんでした。\n利用可能な${reviewProblems.length}問でクイズを開始します。`);
+        alert(`復習問題の一部（${missingCount} 問）が見つかりませんでした。\n利用可能な${reviewProblems.length} 問でクイズを開始します。`);
       }
-
-      // シャッフル
       const shuffledProblems = [...reviewProblems].sort(() => Math.random() - 0.5);
-
-      // クイズ開始
       setCurrentProblems(shuffledProblems);
       setCurrentIndex(0);
       setScore(0);
       setUserAnswers([]);
       setShowFeedback(false);
       setMode('playing');
-      setStartTime(new Date());
-
-      // セッション作成
+      const now = new Date();
+      setStartTime(now);
+      setQuestionStartTime(now); // 最初の問題の開始時刻を記録
       const sessionId = `review-${Date.now()}`;
       setCurrentSessionId(sessionId);
-
-      const newSession: QuizSession = {
+      await quizSessionService.save({
         id: sessionId,
         problems: shuffledProblems,
         currentIndex: 0,
@@ -690,38 +560,23 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
         startTime: new Date(),
         isCompleted: false,
         isPaused: false
-      };
-
-      await quizSessionService.save(newSession);
-      console.log('復習問題セッション作成完了:', sessionId);
-
+      });
     } catch (error) {
-      console.error('復習問題クイズ開始エラー:', error);
+      debugLog('Review quiz start error:', error);
       alert('復習問題の開始に失敗しました');
     }
   };
 
-  // 問題集のカテゴリー別間違い問題を開始
   const startQuizSetCategoryWorstProblems = async (quizSetId: number, category: string, useLatestOnly: boolean = true) => {
     try {
-      console.log('カテゴリー別間違い問題クイズ開始:', { quizSetId, category, useLatestOnly });
-      
-      // 問題集のカテゴリー別間違い問題を取得
       const incorrectProblems = await statisticsService.getQuizSetCategoryWorstProblems(quizSetId, category, 1000, useLatestOnly);
-      
       if (incorrectProblems.length === 0) {
         alert(`「${category}」カテゴリーに間違い問題がありません`);
         return;
       }
-      
-      console.log(`${category}カテゴリーの間違い問題数:`, incorrectProblems.length);
-      
-      // シャッフル
       const shuffledProblems = [...incorrectProblems.map(item => item.problem)].sort(() => Math.random() - 0.5);
-      
-      // セッション作成
       const sessionId = quizSessionService.generateSessionId();
-      const session: QuizSession = {
+      await quizSessionService.save({
         id: sessionId,
         quizSetId,
         category,
@@ -732,11 +587,7 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
         startTime: new Date(),
         isCompleted: false,
         isPaused: false
-      };
-      
-      await quizSessionService.save(session);
-      
-      // クイズ開始
+      });
       setCurrentSessionId(sessionId);
       setCurrentProblems(shuffledProblems);
       setCurrentIndex(0);
@@ -745,15 +596,14 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
       setShowFeedback(false);
       setStartTime(new Date());
       setMode('playing');
-      
-      // 自動保存の設定
       const interval = setInterval(async () => {
-        setLastSaved(new Date());
+        if (currentSessionId) {
+          await saveSession();
+        }
       }, 10000);
       setAutoSaveInterval(interval);
-      
     } catch (error) {
-      console.error('カテゴリー別間違い問題クイズ開始エラー:', error);
+      debugLog('Category worst problems quiz start error:', error);
       alert('クイズの開始に失敗しました');
     }
   };
@@ -765,20 +615,15 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
         alert(t[currentLang].messages.sessionNotFound);
         return;
       }
-
-      // セッション再開の確認
       const progressPercent = ((session.currentIndex / session.problems.length) * 100).toFixed(0);
-      const confirmMessage = `${t[currentLang].messages.confirmResumeSession}\n\n` +
-        `${t[currentLang].labels.totalQuestions}: ${session.problems.length}${currentLang === 'ja' ? '問' : ''}\n` +
-        `${t[currentLang].sections.savedSessions.progress} ${session.currentIndex + 1}${currentLang === 'ja' ? '問目' : ''} (${progressPercent}%)\n` +
-        `${t[currentLang].sections.savedSessions.correct} ${session.score}${currentLang === 'ja' ? '問' : ''}\n` +
-        `${currentLang === 'ja' ? '開始日時' : 'Start Time'}: ${session.startTime.toLocaleString()}`;
-      
-      if (!confirm(confirmMessage)) {
-        return;
-      }
+      const confirmMessage = `${t[currentLang].messages.confirmResumeSession} \n\n` +
+        `${t[currentLang].labels.totalQuestions}: ${session.problems.length}${currentLang === 'ja' ? '問' : ''} \n` +
+        `${t[currentLang].sections.savedSessions.progress} ${session.currentIndex + 1}${currentLang === 'ja' ? '問目' : ''} (${progressPercent}%) \n` +
+        `${t[currentLang].sections.savedSessions.correct} ${session.score}${currentLang === 'ja' ? '問' : ''} \n` +
+        `${currentLang === 'ja' ? '開始日時' : 'Start Time'}: ${session.startTime.toLocaleString()} `;
 
-      // セッションの再開処理
+      if (!confirm(confirmMessage)) return;
+
       await quizSessionService.save({
         ...session,
         isPaused: false,
@@ -792,1023 +637,667 @@ export function QuizView({ onBack, initialParams }: QuizViewProps) {
       setScore(session.score);
       setUserAnswers(session.answers);
       setShowFeedback(false);
-      setStartTime(session.startTime);
-      setIsResuming(true);
+
+      // 保存された経過時間を復元
+      if (session.elapsedTime !== undefined) {
+        // 保存された経過時間がある場合、それを考慮して新しい開始時刻を計算
+        const adjustedStartTime = new Date(Date.now() - session.elapsedTime * 1000);
+        setStartTime(adjustedStartTime);
+        setElapsedTime(session.elapsedTime);
+        debugLog(`▶️ Session resumed with elapsed time: ${session.elapsedTime}s`);
+      } else {
+        // 保存された経過時間がない場合（古いセッション）
+        setStartTime(session.startTime);
+      }
+
       setMode('playing');
-      
-      // 自動保存タイマーを再開
+
+      // Clear existing interval before creating a new one
+      if (autoSaveInterval) {
+        clearInterval(autoSaveInterval);
+      }
+
       const interval = setInterval(async () => {
         if (currentSessionId) {
           await saveSession();
-          setLastSaved(new Date());
         }
       }, 30000);
       setAutoSaveInterval(interval);
-      
-      // 再開通知
-      setTimeout(() => {
-        const notification = document.createElement('div');
-        notification.textContent = `${t[currentLang].messages.sessionResumed} (${session.currentIndex + 1}${currentLang === 'ja' ? '問目から' : ' onwards'})`;
-        notification.className = 'fixed top-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg z-50';
-        document.body.appendChild(notification);
-        setTimeout(() => {
-          if (document.body.contains(notification)) {
-            document.body.removeChild(notification);
-          }
-        }, 3000);
-      }, 500);
+
+      const tracker = AnalyticsManager.resumeSession(sessionId);
+      setAnalyticsTracker(tracker);
+      const problemId = session.problems[session.currentIndex]?.id;
+      if (problemId) {
+        tracker.startProblem(problemId);
+      }
+      toast.success(t[currentLang].messages.sessionResumed);
     } catch (error) {
-      console.error('Session resume error:', error);
+      debugLog('Session resume error:', error);
       alert(t[currentLang].messages.sessionResumeError);
     }
   };
 
-  const saveSession = async (showNotification: boolean = false) => {
-    if (!currentSessionId) return;
+  const handleAnswer = async (answer: boolean | number) => {
+    if (showFeedback) return;
+    const currentProblem = currentProblems[currentIndex];
+    const isCorrect = typeof answer === 'boolean' ? answer : answer === currentProblem.correctAnswer;
+    const newUserAnswers = [...userAnswers, answer];
+    setUserAnswers(newUserAnswers);
+    if (isCorrect) setScore(prev => prev + 1);
 
+    // 解答時間を計算
+    const responseTime = Date.now() - questionStartTime.getTime();
+
+    if (analyticsTracker && currentProblem.id) {
+      analyticsTracker.recordAnswer(answer, isCorrect, undefined);
+    }
     try {
+      await historyService.add({
+        problemId: currentProblem.id!,
+        category: currentProblem.category,
+        isCorrect,
+        responseTime // 実際の解答時間を保存
+      });
+      const allHistory = await historyService.getAll();
+      debugLog('✅ Answer saved to history:', {
+        problemId: currentProblem.id,
+        isCorrect,
+        responseTime: `${(responseTime / 1000).toFixed(1)}s`,
+        totalAnswers: allHistory.length
+      });
+    } catch (error) {
+      debugLog('❌ History save error:', error);
+    }
+
+    // SM-2復習モードの場合、カードを更新
+    if (currentSessionId && currentSessionId.startsWith('review-') && currentProblem.id) {
+      try {
+        debugLog('🔄 Updating SM-2 card:', currentProblem.id, 'isCorrect:', isCorrect);
+
+        // カードを取得
+        const card = await spacedRepetitionService.getCardByProblemId(currentProblem.id);
+        if (card) {
+          // 解答時間を計算（実際に計測）
+          const responseTime = Date.now() - questionStartTime.getTime();
+          const reviewResult: ReviewResult = {
+            wasCorrect: isCorrect,
+            responseTime: responseTime,
+            quality: 0 // Will be calculated by answerToQuality in updateCardAfterReview
+          };
+
+          // SM-2アルゴリズムでカードを更新
+          const updatedCard = updateCardAfterReview(card, reviewResult);
+          await spacedRepetitionService.updateCard(updatedCard);
+
+          debugLog('✅ SM-2 card updated:', {
+            problemId: currentProblem.id,
+            nextReview: updatedCard.nextReviewDate,
+            interval: updatedCard.interval,
+            repetitions: updatedCard.repetitions
+          });
+        } else {
+          debugLog('⚠️ SM-2 card not found for problemId:', currentProblem.id);
+        }
+      } catch (error) {
+        debugLog('❌ SM-2 card update error:', error);
+      }
+    }
+
+    setShowFeedback(true);
+    if (Math.random() < 0.2) {
+      setPendingSubjectiveFeedback({ problemIndex: currentIndex, answer });
+    }
+    if (currentSessionId) {
       const session = await quizSessionService.getById(currentSessionId);
       if (session) {
-        session.currentIndex = currentIndex;
-        session.score = score;
-        session.answers = userAnswers;
-        session.isPaused = true;
-        session.pausedAt = new Date();
-        session.lastSaved = new Date();
-        
-        await quizSessionService.save(session);
-        setLastSaved(new Date());
-        
-        if (showNotification) {
-          const notification = document.createElement('div');
-          notification.textContent = t[currentLang].messages.sessionSaved;
-          notification.className = 'fixed top-4 right-4 bg-green-500 text-white px-3 py-1 rounded-lg shadow-lg z-50 text-sm';
-          document.body.appendChild(notification);
-          setTimeout(() => {
-            if (document.body.contains(notification)) {
-              document.body.removeChild(notification);
-            }
-          }, 1500);
-        }
-      }
-    } catch (error) {
-      console.error('セッション保存エラー:', error);
-      if (showNotification) {
-        const notification = document.createElement('div');
-        notification.textContent = t[currentLang].messages.sessionSaveError;
-        notification.className = 'fixed top-4 right-4 bg-red-500 text-white px-3 py-1 rounded-lg shadow-lg z-50 text-sm';
-        document.body.appendChild(notification);
-        setTimeout(() => {
-          if (document.body.contains(notification)) {
-            document.body.removeChild(notification);
-          }
-        }, 2000);
+        await quizSessionService.save({
+          ...session,
+          score: isCorrect ? score + 1 : score,
+          answers: newUserAnswers,
+          currentIndex: currentIndex
+        });
       }
     }
   };
 
-  const deleteSession = async (sessionId: string) => {
-    try {
-      await quizSessionService.delete(sessionId);
-      await loadData(); // Reload to update saved sessions list
-    } catch (error) {
-      console.error('セッション削除エラー:', error);
-    }
-  };
-
-  const handleAnswer = async (answer: boolean | number) => {
-    console.log('handleAnswer called with:', answer);
-    const currentProblem = currentProblems[currentIndex];
-    if (!currentProblem) {
-      console.log('No current problem found');
+  const handleNext = async () => {
+    if (pendingSubjectiveFeedback) {
+      setShowSubjectiveFeedback(true);
       return;
     }
-
-    const isCorrect = currentProblem.type === 'multiple-choice'
-      ? answer === currentProblem.correctAnswer
-      : answer === currentProblem.answer;
-
-    console.log('Processing answer:', { answer, isCorrect });
-
-    // 主観的フィードバックが有効かチェック（デフォルトで有効）
-    const saved = localStorage.getItem('subjective-feedback-enabled');
-    const isSubjectiveFeedbackEnabled = saved === null ? true : saved === 'true';
-
-    console.log('Subjective feedback settings:', {
-      localStorage_value: localStorage.getItem('subjective-feedback-enabled'),
-      isEnabled: isSubjectiveFeedbackEnabled,
-      showSubjectiveFeedback,
-      pendingSubjectiveFeedback
-    });
-
-    if (isSubjectiveFeedbackEnabled) {
-      // 主観的フィードバックモーダルを表示
-      console.log('Setting up subjective feedback modal');
-      setPendingSubjectiveFeedback({ problemIndex: currentIndex, answer });
-      setShowSubjectiveFeedback(true);
-      console.log('Modal state should be set to true');
-    } else {
-      // 直接次に進む
-      console.log('Proceeding directly without feedback');
-      await processAnswerDirect(answer, isCorrect);
-    }
+    proceedToNextQuestion();
   };
 
-  const handleSubjectiveFeedbackSubmit = async (feedbackData: SubjectiveFeedbackData) => {
-    setShowSubjectiveFeedback(false);
-
-    if (!pendingSubjectiveFeedback) return;
-
-    const { answer } = pendingSubjectiveFeedback;
-    const currentProblem = currentProblems[currentIndex];
-    const isCorrect = currentProblem.type === 'multiple-choice'
-      ? answer === currentProblem.correctAnswer
-      : answer === currentProblem.answer;
-
-    await processAnswerWithFeedback(answer, isCorrect, feedbackData);
-    setPendingSubjectiveFeedback(null);
-  };
-
-  const handleSubjectiveFeedbackSkip = async () => {
-    setShowSubjectiveFeedback(false);
-
-    if (!pendingSubjectiveFeedback) return;
-
-    const { answer } = pendingSubjectiveFeedback;
-    const currentProblem = currentProblems[currentIndex];
-    const isCorrect = currentProblem.type === 'multiple-choice'
-      ? answer === currentProblem.correctAnswer
-      : answer === currentProblem.answer;
-
-    await processAnswerDirect(answer, isCorrect);
-    setPendingSubjectiveFeedback(null);
-  };
-
-  const processAnswerWithFeedback = async (
-    answer: boolean | number,
-    isCorrect: boolean,
-    feedbackData: SubjectiveFeedbackData
-  ) => {
-    const currentProblem = currentProblems[currentIndex];
-
-    // 学習分析データを記録（推定された学習状態を使用）
-    if (analyticsTracker && currentProblem.id) {
-      // 理解度と正解/不正解から詳細な学習状態を推定
-      const estimatedState = LearningStateEstimator.estimateLearningState({
-        understood: feedbackData.understood,
-        isCorrect: isCorrect,
-        responseTime: Date.now() - (startTime?.getTime() || Date.now()),
-        averageResponseTime: 30000, // TODO: ユーザーの平均回答時間を取得
-        problemDifficulty: 3, // TODO: 問題の客観的難易度を設定
-        recentAccuracy: 0.7 // TODO: 最近の正答率を取得
-      });
-
-      console.log('推定された学習状態:', estimatedState);
-
-      await analyticsTracker.recordAnswer(
-        answer,
-        isCorrect,
-        estimatedState.confidence,
-        estimatedState.wasGuessing,
-        estimatedState.perceivedDifficulty
-      );
-    }
-
-    // 履歴に主観的フィードバックを含めて保存
-    try {
-      await historyService.add({
-        problemId: currentProblem.id!,
-        category: currentProblem.category,
-        isCorrect: isCorrect,
-        userAnswer: answer,
-        questionText: currentProblem.question,
-        subjectiveFeedback: feedbackData
-      });
-    } catch (error) {
-      console.error('履歴保存エラー:', error);
-    }
-
-    // 通常の処理を続行
-    const newAnswers = [...userAnswers];
-    newAnswers[currentIndex] = answer;
-    setUserAnswers(newAnswers);
-
-    if (isCorrect) {
-      setScore(score + 1);
-
-      // 🎉 正解時のconfetti演出
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: ['#10b981', '#34d399', '#6ee7b7'] // green shades
-      });
-    }
-
-    setShowFeedback(true);
-
-    // マイルストーン通知（5問ごと）
-    const answeredCount = currentIndex + 1;
-    if (answeredCount % 5 === 0 && answeredCount < currentProblems.length) {
-      const remaining = currentProblems.length - answeredCount;
-      const currentLang = language as keyof typeof t;
-      toast.success(
-        currentLang === 'ja'
-          ? `🎉 ${answeredCount}問完了！あと${remaining}問！`
-          : `🎉 ${answeredCount} questions done! ${remaining} to go!`,
-        {
-          icon: '🎯',
-          duration: 2000,
-          style: {
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            color: '#fff',
-            fontWeight: 'bold',
-          }
-        }
-      );
-    }
-
-    // 自動進行を削除 - ユーザーが「次へ」ボタンをクリックするまで待機
-  };
-
-  const processAnswerDirect = async (answer: boolean | number, isCorrect: boolean) => {
-    console.log('processAnswerDirect called:', { answer, isCorrect, currentIndex });
-    const currentProblem = currentProblems[currentIndex];
-
-    // 学習分析データを記録（モーダルなし）
-    if (analyticsTracker && currentProblem.id) {
-      await analyticsTracker.recordAnswer(
-        answer,
-        isCorrect,
-        'medium', // デフォルト確信度
-        false,    // 適当回答ではない
-        3         // デフォルト難易度
-      );
-    }
-
-    if (isCorrect) {
-      setScore(score + 1);
-
-      // 🎉 正解時のconfetti演出
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: ['#10b981', '#34d399', '#6ee7b7'] // green shades
-      });
-    }
-
-    const newAnswers = [...userAnswers];
-    newAnswers[currentIndex] = answer;
-    setUserAnswers(newAnswers);
-
-    // 履歴に記録
-    try {
-      await historyService.add({
-        problemId: currentProblem.id!,
-        category: currentProblem.category,
-        isCorrect,
-        userAnswer: answer,
-        questionText: currentProblem.question
-      });
-    } catch (error) {
-      console.error('履歴記録エラー:', error);
-    }
-
-    setShowFeedback(true);
-
-    // マイルストーン通知（5問ごと）
-    const answeredCount = currentIndex + 1;
-    if (answeredCount % 5 === 0 && answeredCount < currentProblems.length) {
-      const remaining = currentProblems.length - answeredCount;
-      const currentLang = language as keyof typeof t;
-      toast.success(
-        currentLang === 'ja'
-          ? `🎉 ${answeredCount}問完了！あと${remaining}問！`
-          : `🎉 ${answeredCount} questions done! ${remaining} to go!`,
-        {
-          icon: '🎯',
-          duration: 2000,
-          style: {
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            color: '#fff',
-            fontWeight: 'bold',
-          }
-        }
-      );
-    }
-
-    // 自動進行を削除 - ユーザーが「次へ」ボタンをクリックするまで待機
-  };
-
-  // 選択肢クリック時に分析トラッカーに記録
-  const handleAnswerClick = (answer: boolean | number) => {
-    console.log('Answer clicked:', answer);
-    if (analyticsTracker) {
-      analyticsTracker.recordAnswerChange();
-    }
-    handleAnswer(answer);
-  };
-
-
-  const nextQuestion = async () => {
+  const proceedToNextQuestion = async () => {
+    setShowFeedback(false);
     if (currentIndex < currentProblems.length - 1) {
       const nextIndex = currentIndex + 1;
       setCurrentIndex(nextIndex);
-      setShowFeedback(false);
-      setIsResuming(false); // 次の問題に進んだら再開状態を解除
-
-      // 次の問題のトラッキングを開始
+      // 新しい問題の開始時刻を記録
+      setQuestionStartTime(new Date());
       if (analyticsTracker && currentProblems[nextIndex]?.id) {
         analyticsTracker.startProblem(currentProblems[nextIndex].id);
       }
-
-      // セッションの進捗を自動保存
-      await saveSession();
-    } else {
-      // クイズ完了時
       if (currentSessionId) {
-        try {
-          const session = await quizSessionService.getById(currentSessionId);
-          if (session) {
-            session.isCompleted = true;
-            session.isPaused = false;
-            session.completedAt = new Date();
-            await quizSessionService.save(session);
-            
-            // 完了通知
-            const notification = document.createElement('div');
-            notification.textContent = t[currentLang].messages.sessionCompleted;
-            notification.className = 'fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-50';
-            document.body.appendChild(notification);
-            setTimeout(() => {
-              if (document.body.contains(notification)) {
-                document.body.removeChild(notification);
-              }
-            }, 2000);
+        const session = await quizSessionService.getById(currentSessionId);
+        if (session) {
+          await quizSessionService.save({ ...session, currentIndex: nextIndex });
+        }
+      }
+    } else {
+      finishQuiz();
+    }
+  };
+
+  const handleSubjectiveFeedbackSubmit = async (data: SubjectiveFeedbackData) => {
+    if (pendingSubjectiveFeedback && analyticsTracker) {
+      const problemId = currentProblems[pendingSubjectiveFeedback.problemIndex].id;
+      if (problemId) {
+        debugLog(`Subjective feedback for problem ${problemId}:`, data);
+        // Here you would typically save the subjective feedback
+        // e.g., await historyService.addSubjectiveFeedback(problemId, data);
+      }
+    }
+    setShowSubjectiveFeedback(false);
+    setPendingSubjectiveFeedback(null);
+    proceedToNextQuestion();
+  };
+
+
+
+  const finishQuiz = async () => {
+    setMode('result');
+    if (autoSaveInterval) clearInterval(autoSaveInterval);
+    if (currentSessionId) {
+      try {
+        // セッション情報を取得してから完了を記録
+        const session = await quizSessionService.getById(currentSessionId);
+
+        // 問題集完了を記録（推奨順序の調整用）
+        if (session?.quizSetId) {
+          recordCompletion(session.quizSetId, score, currentProblems.length);
+          debugLog('✅ Quiz completion recorded for set:', session.quizSetId);
+        }
+
+        // 完了したセッションは削除（保存しない）
+        debugLog('🗑️ Deleting completed session:', currentSessionId);
+        await quizSessionService.delete(currentSessionId);
+
+        if (analyticsTracker) AnalyticsManager.endSession();
+        if (studyTimeSessionId) await endSession(studyTimeSessionId, currentProblems.length, score);
+
+        // 自動パーソナライゼーション: 解答時間を自動調整
+        autoPersonalizeSettings(10).then(wasUpdated => {
+          if (wasUpdated) {
+            debugLog('✅ Settings auto-personalized based on your response times');
           }
-        } catch (error) {
-          console.error('セッション完了処理エラー:', error);
-        }
+        }).catch(error => {
+          debugLog('❌ Auto-personalization failed:', error);
+        });
+      } catch (error) {
+        debugLog('Quiz finish error:', error);
       }
-      
-      // 自動保存タイマーをクリア
-      if (autoSaveInterval) {
-        clearInterval(autoSaveInterval);
-        setAutoSaveInterval(null);
-      }
-
-      // 学習時間トラッキングセッションを終了
-      if (studyTimeSessionId !== null) {
-        try {
-          const correctCount = userAnswers.filter((ans, idx) => {
-            const problem = currentProblems[idx];
-            return problem.type === 'true-false' ? ans === problem.answer : ans === problem.correctAnswer;
-          }).length;
-          await endSession(studyTimeSessionId, currentProblems.length, correctCount);
-          setStudyTimeSessionId(null);
-        } catch (studyTimeError) {
-          console.warn('学習時間トラッキングの終了に失敗:', studyTimeError);
-        }
-      }
-
-      setMode('result');
     }
   };
 
-  const resetQuiz = async () => {
-    // 自動保存タイマーをクリア
-    if (autoSaveInterval) {
-      clearInterval(autoSaveInterval);
-      setAutoSaveInterval(null);
+  const saveSession = async () => {
+    if (!currentSessionId) return;
+    try {
+      const session = await quizSessionService.getById(currentSessionId);
+      if (session) {
+        // 同じ問題集/カテゴリーの古いセッションを削除してから保存
+        await quizSessionService.saveWithCleanup({
+          ...session,
+          isPaused: true,
+          pausedAt: new Date(),
+          elapsedTime: elapsedTime // 現在の経過時間を保存
+        });
+        debugLog(`⏸️ Session paused with elapsed time: ${elapsedTime}s`);
+        toast.success(t[currentLang].messages.sessionSaved);
+      }
+    } catch (error) {
+      debugLog('Session save error:', error);
+      toast.error(t[currentLang].messages.sessionSaveError);
     }
-    
-    // 進行中のセッションを保存
-    if (currentSessionId && mode === 'playing') {
+  };
+
+  const handleQuitQuiz = async () => {
+    if (confirm(t[currentLang].messages.confirmEndQuiz)) {
       await saveSession();
+      if (autoSaveInterval) clearInterval(autoSaveInterval);
+      onBack();
     }
-    
-    setMode('selection');
-    setCurrentProblems([]);
-    setCurrentIndex(0);
-    setScore(0);
-    setUserAnswers([]);
-    setShowFeedback(false);
-    setStartTime(null);
-    setSelectedCategory('');
-    setSelectedQuizSet(null);
-    setCurrentSessionId(null);
-    setIsResuming(false);
-    setLastSaved(null);
-    
-    // セッション一覧を更新
-    await loadData();
   };
+
+  const handleDeleteSession = async (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm(t[currentLang].messages.confirmDeleteSession)) {
+      try {
+        await quizSessionService.delete(sessionId);
+        setSavedSessions(prev => prev.filter(s => s.id !== sessionId));
+      } catch (error) {
+        debugLog('Session delete error:', error);
+      }
+    }
+  };
+
+  const handleDeleteAllSessions = async () => {
+    if (confirm(t[currentLang].messages.confirmDeleteAllSessions)) {
+      try {
+        await quizSessionService.clearAll();
+        setSavedSessions([]);
+      } catch (error) {
+        debugLog('All sessions delete error:', error);
+      }
+    }
+  };
+
+  // Render Helpers
+  const renderSelectionMode = () => (
+    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="flex items-center justify-between mb-8">
+        <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">
+          {t[currentLang].pageTitle.selection}
+        </h1>
+        <NeumorphicButton variant="secondary" onClick={onBack} className="!px-4">
+          {t[currentLang].buttons.backToMenu}
+        </NeumorphicButton>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Category Selection */}
+        <GlassCard className="p-6 space-y-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-3 rounded-xl bg-primary/20 text-primary">
+              <BookOpen size={24} />
+            </div>
+            <h2 className="text-xl font-bold text-white">
+              {t[currentLang].sections.categoryQuiz.title}
+            </h2>
+          </div>
+
+          <div className="space-y-4">
+            <label className="block text-sm font-medium text-text-secondary">
+              {t[currentLang].labels.selectCategory}
+            </label>
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="w-full p-4 rounded-xl bg-surfaceHighlight border border-white/10 text-white focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+            >
+              <option value="">{t[currentLang].labels.selectCategoryOption}</option>
+              {categories.map(category => (
+                <option key={category} value={category}>{category}</option>
+              ))}
+            </select>
+            <NeumorphicButton
+              variant="primary"
+              fullWidth
+              onClick={() => startQuiz('category')}
+              disabled={!selectedCategory}
+              className="mt-4"
+            >
+              {t[currentLang].buttons.startQuiz}
+            </NeumorphicButton>
+          </div>
+        </GlassCard>
+
+        {/* Quiz Set Selection */}
+        <GlassCard className="p-6 space-y-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-3 rounded-xl bg-accent/20 text-accent">
+              <Layers size={24} />
+            </div>
+            <h2 className="text-xl font-bold text-white">
+              {t[currentLang].sections.quizSetQuiz.title}
+            </h2>
+          </div>
+
+          <div className="space-y-4">
+            <label className="block text-sm font-medium text-text-secondary">
+              {t[currentLang].labels.selectQuizSet}
+            </label>
+            <select
+              value={selectedQuizSet ?? ''}
+              onChange={(e) => setSelectedQuizSet(Number(e.target.value))}
+              className="w-full p-4 rounded-xl bg-surfaceHighlight border border-white/10 text-white focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+            >
+              <option value="">{t[currentLang].labels.selectQuizSetOption}</option>
+              {quizSets.map(set => (
+                <option key={set.id} value={set.id}>{set.name}</option>
+              ))}
+            </select>
+            <div className="grid grid-cols-1 gap-3">
+              <NeumorphicButton
+                variant="primary"
+                fullWidth
+                onClick={() => startQuiz('quizSet')}
+                disabled={!selectedQuizSet}
+              >
+                {t[currentLang].buttons.startQuizSet}
+              </NeumorphicButton>
+              <NeumorphicButton
+                variant="secondary"
+                fullWidth
+                onClick={() => startQuiz('quizSetIncorrect')}
+                disabled={!selectedQuizSet}
+                className="text-sm"
+              >
+                {t[currentLang].buttons.startIncorrectLatest}
+              </NeumorphicButton>
+            </div>
+          </div>
+        </GlassCard>
+
+        {/* Other Options */}
+        <GlassCard className="p-6 space-y-6 md:col-span-2">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-3 rounded-xl bg-purple-500/20 text-purple-400">
+              <Target size={24} />
+            </div>
+            <h2 className="text-xl font-bold text-white">
+              {t[currentLang].sections.otherQuiz.title}
+            </h2>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <NeumorphicButton
+              variant="secondary"
+              onClick={() => startQuiz('incorrect')}
+              className="h-full"
+            >
+              <div className="flex flex-col items-center gap-2 py-2">
+                <span className="text-2xl">🔄</span>
+                <span>{t[currentLang].buttons.startIncorrectOnly}</span>
+              </div>
+            </NeumorphicButton>
+            <NeumorphicButton
+              variant="secondary"
+              onClick={() => startQuiz('all')}
+              className="h-full"
+            >
+              <div className="flex flex-col items-center gap-2 py-2">
+                <span className="text-2xl">📚</span>
+                <span>{t[currentLang].buttons.startAllProblems}</span>
+              </div>
+            </NeumorphicButton>
+          </div>
+        </GlassCard>
+
+        {/* Saved Sessions */}
+        {savedSessions.length > 0 && (
+          <GlassCard className="p-6 space-y-6 md:col-span-2">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-xl bg-blue-500/20 text-blue-400">
+                  <Clock size={24} />
+                </div>
+                <h2 className="text-xl font-bold text-white">
+                  {t[currentLang].sections.savedSessions.title}
+                  <span className="ml-2 text-sm font-normal text-text-secondary">
+                    ({savedSessions.length} {t[currentLang].sections.savedSessions.count})
+                  </span>
+                </h2>
+              </div>
+              <button
+                onClick={handleDeleteAllSessions}
+                className="text-sm text-red-400 hover:text-red-300 transition-colors"
+              >
+                {t[currentLang].buttons.deleteAllSessions}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {savedSessions.map(session => (
+                <div
+                  key={session.id}
+                  onClick={() => resumeSession(session.id)}
+                  className="group relative p-4 rounded-xl bg-surfaceHighlight border border-white/5 hover:border-primary/30 hover:bg-surfaceHighlight/80 transition-all cursor-pointer"
+                >
+                  <div className="flex justify-between items-start mb-2">
+                    <h3 className="font-bold text-white group-hover:text-primary transition-colors">
+                      {session.quizSetId ? (quizSets.find(q => q.id === session.quizSetId)?.name || 'Quiz Set') :
+                        session.category ? session.category : 'Mixed Quiz'}
+                    </h3>
+                    <button
+                      onClick={(e) => handleDeleteSession(session.id, e)}
+                      className="p-1.5 rounded-lg hover:bg-white/10 text-text-secondary hover:text-red-400 transition-colors"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+
+                  <div className="space-y-1 text-sm text-text-secondary">
+                    <div className="flex justify-between">
+                      <span>{t[currentLang].sections.savedSessions.progress}</span>
+                      <span className="text-white">{session.currentIndex + 1} / {session.problems.length}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>{t[currentLang].sections.savedSessions.correct}</span>
+                      <span className="text-accent">{session.score}</span>
+                    </div>
+                    <div className="flex justify-between text-xs mt-2 pt-2 border-t border-white/5">
+                      <span>{new Date(session.startTime).toLocaleDateString()}</span>
+                      <span>{t[currentLang].sections.savedSessions.paused}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </GlassCard>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderPlayingMode = () => {
+    const currentProblem = currentProblems[currentIndex];
+    if (!currentProblem) return <div>Loading...</div>;
+
+    return (
+      <div className="max-w-4xl mx-auto pb-20">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8">
+          <NeumorphicButton variant="secondary" onClick={handleQuitQuiz} className="!px-4 !py-2 text-sm">
+            {t[currentLang].buttons.endQuiz}
+          </NeumorphicButton>
+
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-surfaceHighlight border border-white/10">
+              <Clock size={16} className="text-primary" />
+              <span className="font-mono font-bold text-white">
+                {Math.floor(elapsedTime / 60)}:{String(elapsedTime % 60).padStart(2, '0')}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-surfaceHighlight border border-white/10">
+              <span className="text-sm text-text-secondary">{t[currentLang].labels.correctCount}</span>
+              <span className="font-bold text-accent">{score}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Progress */}
+        <QuizProgress
+          current={currentIndex}
+          total={currentProblems.length}
+          showFeedback={showFeedback}
+        />
+
+        {/* Quiz Card */}
+        <div className="mb-8">
+          <QuizCard
+            category={currentProblem.category}
+            question={currentProblem.question}
+            showFeedback={showFeedback}
+            isCorrect={userAnswers[currentIndex] === currentProblem.correctAnswer || (typeof userAnswers[currentIndex] === 'boolean' && userAnswers[currentIndex] === true)}
+          >
+            <div className="grid grid-cols-1 gap-4">
+              {currentProblem.options ? (
+                currentProblem.options.map((option, idx) => (
+                  <AnswerButton
+                    key={idx}
+                    index={idx}
+                    label={option}
+                    onClick={() => handleAnswer(idx)}
+                    disabled={showFeedback}
+                    showResult={showFeedback}
+                    isCorrect={idx === currentProblem.correctAnswer}
+                    isSelected={userAnswers[currentIndex] === idx}
+                  />
+                ))
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  <AnswerButton
+                    label="True"
+                    onClick={() => handleAnswer(true)}
+                    disabled={showFeedback}
+                    showResult={showFeedback}
+                    isCorrect={currentProblem.answer === true}
+                    isSelected={userAnswers[currentIndex] === true}
+                  />
+                  <AnswerButton
+                    label="False"
+                    onClick={() => handleAnswer(false)}
+                    disabled={showFeedback}
+                    showResult={showFeedback}
+                    isCorrect={typeof currentProblem.correctAnswer === 'boolean' ? currentProblem.correctAnswer === false : false}
+                    isSelected={userAnswers[currentIndex] === false}
+                  />
+                </div>
+              )}
+            </div>
+          </QuizCard>
+        </div>
+
+        {/* Feedback / Next Button */}
+        <AnimatePresence>
+          {showFeedback && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="fixed bottom-20 left-0 right-0 p-6 bg-surface/95 backdrop-blur-xl border-t border-white/10 z-50 md:static md:bg-transparent md:border-0 md:p-0"
+            >
+              <div className="max-w-4xl mx-auto">
+                <div className="mb-6 p-6 rounded-2xl bg-surfaceHighlight border border-white/10">
+                  <div className="flex items-start gap-4">
+                    <div className="p-2 rounded-lg bg-primary/20 text-primary mt-1">
+                      <HelpCircle size={20} />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-white mb-2">{t[currentLang].labels.explanation}</h3>
+                      <p className="text-text-secondary leading-relaxed">
+                        {currentProblem.explanation || "No explanation available."}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <NeumorphicButton
+                  variant="primary"
+                  fullWidth
+                  onClick={handleNext}
+                  className="shadow-xl shadow-primary/20"
+                >
+                  {t[currentLang].buttons.nextQuestion}
+                </NeumorphicButton>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  };
+
+  const renderResultMode = () => (
+    <div className="max-w-2xl mx-auto text-center space-y-8 animate-in fade-in zoom-in duration-500">
+      <div className="relative inline-block">
+        <div className="absolute inset-0 bg-primary/20 blur-3xl rounded-full" />
+        <RingChart
+          current={score}
+          target={currentProblems.length}
+          label="Score"
+          color={score / currentProblems.length >= 0.8 ? '#10B981' : '#6366F1'}
+        />
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-5xl font-black text-white">{Math.round((score / currentProblems.length) * 100)}%</span>
+          <span className="text-sm font-bold text-text-secondary uppercase tracking-wider">Accuracy</span>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <h2 className="text-3xl font-bold text-white">{t[currentLang].messages.sessionCompleted}</h2>
+        <p className="text-text-secondary">
+          {t[currentLang].labels.correctCount} <span className="text-accent font-bold">{score}</span> / {currentProblems.length}
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <GlassCard className="p-4 flex flex-col items-center justify-center gap-2">
+          <Clock className="text-primary" size={24} />
+          <span className="text-2xl font-bold text-white">
+            {Math.floor(elapsedTime / 60)}<span className="text-sm text-text-secondary font-normal">m</span> {elapsedTime % 60}<span className="text-sm text-text-secondary font-normal">s</span>
+          </span>
+          <span className="text-xs text-text-secondary uppercase tracking-wider">Time</span>
+        </GlassCard>
+
+        <GlassCard className="p-4 flex flex-col items-center justify-center gap-2">
+          <Zap className="text-yellow-400" size={24} />
+          <span className="text-2xl font-bold text-white">+{score * 10}</span>
+          <span className="text-xs text-text-secondary uppercase tracking-wider">XP Earned</span>
+        </GlassCard>
+      </div>
+
+      <div className="flex flex-col gap-4 pt-8">
+        <NeumorphicButton variant="primary" onClick={onBack} fullWidth>
+          {t[currentLang].buttons.backToMenu}
+        </NeumorphicButton>
+        <NeumorphicButton variant="secondary" onClick={() => setMode('selection')} fullWidth>
+          {t[currentLang].buttons.retryQuiz}
+        </NeumorphicButton>
+      </div>
+    </div>
+  );
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-300">{t[currentLang].loading}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (mode === 'selection') {
-    return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-8">
-        <div className="max-w-4xl mx-auto">
-          <header className="mb-8">
-            <button
-              onClick={onBack}
-              className="mb-4 px-4 py-2 bg-white/90 dark:bg-gray-700/90 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-lg transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm"
-            >
-              {t[currentLang].buttons.backToMenu}
-            </button>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{t[currentLang].pageTitle.selection}</h1>
-          </header>
-
-          {/* 保存されたセッション */}
-          {savedSessions.length > 0 && (
-            <div className="mb-8 bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 rounded-lg shadow-md p-6 border border-purple-200 dark:border-purple-800">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-semibold text-purple-900 dark:text-purple-100">
-                  {t[currentLang].sections.savedSessions.title}
-                </h2>
-                <span className="text-sm text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-800 px-2 py-1 rounded">
-                  {savedSessions.length}{t[currentLang].sections.savedSessions.count}
-                </span>
-              </div>
-              <div className="space-y-3">
-                {savedSessions.map((session) => {
-                  const progress = ((session.currentIndex / session.problems.length) * 100).toFixed(0);
-                  const timeElapsed = session.pausedAt ? 
-                    Math.floor((session.pausedAt.getTime() - session.startTime.getTime()) / (1000 * 60)) : 
-                    Math.floor((new Date().getTime() - session.startTime.getTime()) / (1000 * 60));
-                  
-                  return (
-                    <div key={session.id} className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-purple-100 dark:border-purple-700 hover:shadow-lg transition-shadow">
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center space-x-2 mb-2">
-                            <span className="text-sm font-medium text-gray-900 dark:text-white">
-                              {session.quizSetId ? 
-                                quizSets.find(qs => qs.id === session.quizSetId)?.name || (currentLang === 'ja' ? '問題集' : 'Quiz Set') :
-                                session.category || (currentLang === 'ja' ? '全問題' : 'All Problems')
-                              }
-                            </span>
-                            <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs rounded-full">
-                              {session.currentIndex + 1}/{session.problems.length}{currentLang === 'ja' ? '問' : ''} ({progress}%)
-                            </span>
-                            <span className="px-2 py-1 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 text-xs rounded-full">
-                              {t[currentLang].sections.savedSessions.correct} {session.score}
-                            </span>
-                          </div>
-                          
-                          {/* プログレスバー */}
-                          <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 mb-2">
-                            <div 
-                              className="bg-gradient-to-r from-purple-500 to-blue-500 h-2 rounded-full transition-all"
-                              style={{ width: `${progress}%` }}
-                            ></div>
-                          </div>
-                          
-                          <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
-                            <div className="flex items-center space-x-3">
-                              <span>📅 {session.startTime.toLocaleDateString(currentLang === 'ja' ? 'ja-JP' : 'en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                              <span>⏱️ {timeElapsed}{t[currentLang].sections.savedSessions.timeElapsed}</span>
-                              {session.pausedAt && (
-                                <span className="text-orange-600 dark:text-orange-400">{t[currentLang].sections.savedSessions.paused}</span>
-                              )}
-                            </div>
-                            {session.currentIndex > 0 && (
-                              <span className="text-purple-600 dark:text-purple-400">
-                                {t[currentLang].sections.savedSessions.accuracyRate} {((session.score / session.currentIndex) * 100).toFixed(0)}%
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex flex-col space-y-1 ml-4">
-                          <button
-                            onClick={() => resumeSession(session.id)}
-                            className="px-4 py-2 bg-cyan-500 dark:bg-cyan-600 text-white border border-cyan-400 dark:border-cyan-500 hover:bg-cyan-600 dark:hover:bg-cyan-700 rounded-lg transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm text-sm font-medium"
-                          >
-                            {t[currentLang].buttons.resumeSession}
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (confirm(t[currentLang].messages.confirmDeleteSession)) {
-                                deleteSession(session.id);
-                              }
-                            }}
-                            className="px-4 py-1 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-700 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-md transition-all text-xs shadow-md hover:shadow-lg backdrop-blur-sm"
-                          >
-                            {t[currentLang].buttons.deleteSession}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              
-              {/* 一括操作 */}
-              {savedSessions.length > 1 && (
-                <div className="mt-4 pt-4 border-t border-purple-200 dark:border-purple-700">
-                  <button
-                    onClick={() => {
-                      if (confirm(t[currentLang].messages.confirmDeleteAllSessions)) {
-                        savedSessions.forEach(session => deleteSession(session.id));
-                      }
-                    }}
-                    className="px-3 py-1 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-700 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-md transition-all text-xs shadow-md hover:shadow-lg backdrop-blur-sm"
-                  >
-                    {t[currentLang].buttons.deleteAllSessions}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* カテゴリー別クイズ */}
-            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-800 rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-semibold text-blue-900 dark:text-blue-100 mb-4">
-                {t[currentLang].sections.categoryQuiz.title}
-              </h2>
-              
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    {t[currentLang].labels.selectCategory}
-                  </label>
-                  <select
-                    value={selectedCategory}
-                    onChange={(e) => setSelectedCategory(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
-                  >
-                    <option value="">{t[currentLang].labels.selectCategoryOption}</option>
-                    {categories.map((category) => (
-                      <option key={category} value={category}>{category}</option>
-                    ))}
-                  </select>
-                </div>
-                
-                <div className="space-y-2">
-                  <button
-                    onClick={() => startQuiz('category')}
-                    disabled={!selectedCategory}
-                    className="quiz-action-button w-full px-4 py-2 rounded-lg transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm disabled:bg-gray-400 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
-                  >
-                    {t[currentLang].buttons.startQuiz}
-                  </button>
-                  <button
-                    onClick={() => startQuiz('incorrect')}
-                    disabled={!selectedCategory}
-                    className="quiz-action-button w-full px-4 py-2 rounded-md transition-all disabled:bg-gray-400 disabled:cursor-not-allowed shadow-md hover:shadow-lg disabled:shadow-none backdrop-blur-sm"
-                  >
-                    {t[currentLang].buttons.startIncorrect}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* 問題集クイズ */}
-            <div className="bg-gradient-to-br from-purple-50 to-violet-50 dark:from-purple-900/20 dark:to-violet-900/20 border border-purple-200 dark:border-purple-800 rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-semibold text-purple-900 dark:text-purple-100 mb-4">
-                {t[currentLang].sections.quizSetQuiz.title}
-              </h2>
-              
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    {t[currentLang].labels.selectQuizSet}
-                  </label>
-                  <select
-                    value={selectedQuizSet || ''}
-                    onChange={(e) => setSelectedQuizSet(e.target.value ? Number(e.target.value) : null)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
-                  >
-                    <option value="">{t[currentLang].labels.selectQuizSetOption}</option>
-                    {quizSets.map((quizSet) => (
-                      <option key={quizSet.id} value={quizSet.id}>
-                        {quizSet.name} ({quizSet.problemIds.length}{currentLang === 'ja' ? '問' : ' questions'})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                
-                <div className="space-y-2">
-                  <button
-                    onClick={() => startQuiz('quizSet')}
-                    disabled={!selectedQuizSet}
-                    className="quiz-action-button w-full px-4 py-2 rounded-lg transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm disabled:bg-gray-400 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
-                  >
-                    {t[currentLang].buttons.startQuizSet}
-                  </button>
-                  <button
-                    onClick={() => startQuiz('quizSetIncorrect', true)}
-                    disabled={!selectedQuizSet}
-                    className="quiz-action-button w-full px-4 py-2 rounded-md transition-all disabled:bg-gray-400 disabled:cursor-not-allowed shadow-md hover:shadow-lg disabled:shadow-none backdrop-blur-sm"
-                  >
-                    {t[currentLang].buttons.startIncorrectLatest}
-                  </button>
-                  <button
-                    onClick={() => startQuiz('quizSetIncorrect', false)}
-                    disabled={!selectedQuizSet}
-                    className="quiz-action-button w-full px-4 py-2 rounded-md transition-all disabled:bg-gray-400 disabled:cursor-not-allowed shadow-md hover:shadow-lg disabled:shadow-none backdrop-blur-sm"
-                  >
-                    {t[currentLang].buttons.startIncorrectAll}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* 全問題・間違い問題 */}
-            <div className="bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border border-green-200 dark:border-green-800 rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-semibold text-green-900 dark:text-green-100 mb-4">
-                {t[currentLang].sections.otherQuiz.title}
-              </h2>
-              
-              <div className="space-y-2">
-                <button
-                  onClick={() => startQuiz('all')}
-                  disabled={allProblems.length === 0}
-                  className="w-full px-4 py-2 bg-cyan-500 dark:bg-cyan-600 text-white border border-cyan-400 dark:border-cyan-500 hover:bg-cyan-600 dark:hover:bg-cyan-700 rounded-lg transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm disabled:bg-gray-400 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
-                >
-                  {t[currentLang].buttons.startAllProblems} ({allProblems.length}{currentLang === 'ja' ? '問' : ' questions'})
-                </button>
-                <button
-                  onClick={() => startQuiz('incorrect')}
-                  className="quiz-action-button w-full px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg backdrop-blur-sm"
-                >
-                  {t[currentLang].buttons.startIncorrectOnly}
-                </button>
-              </div>
-            </div>
-
-            {/* 統計情報 */}
-            <div className="bg-gradient-to-br from-orange-50 to-red-50 dark:from-orange-900/20 dark:to-red-900/20 border border-orange-200 dark:border-orange-800 rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-semibold text-orange-900 dark:text-orange-100 mb-4">
-                {t[currentLang].sections.statistics.title}
-              </h2>
-              
-              <div className="space-y-2 text-sm text-gray-600 dark:text-gray-300">
-                <div className="flex justify-between">
-                  <span>{t[currentLang].sections.statistics.totalProblems}</span>
-                  <span className="font-semibold">{allProblems.length}{currentLang === 'ja' ? '問' : ''}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>{t[currentLang].sections.statistics.totalCategories}</span>
-                  <span className="font-semibold">{categories.length}{currentLang === 'ja' ? '個' : ''}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>{t[currentLang].sections.statistics.totalQuizSets}</span>
-                  <span className="font-semibold">{quizSets.length}{currentLang === 'ja' ? '個' : ''}</span>
-                </div>
-              </div>
-            </div>
+      <div className="flex items-center justify-center min-h-[50vh]">
+        <div className="relative">
+          <div className="w-16 h-16 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-8 h-8 bg-primary/20 rounded-full blur-md animate-pulse" />
           </div>
         </div>
       </div>
     );
   }
 
-  if (mode === 'playing') {
-    const currentProblem = currentProblems[currentIndex];
-    if (!currentProblem) return null;
+  return (
+    <div className="min-h-screen pb-20 md:pb-0">
+      {mode === 'selection' && renderSelectionMode()}
+      {mode === 'playing' && renderPlayingMode()}
+      {mode === 'result' && renderResultMode()}
 
-    return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-8">
-        <div className="max-w-4xl mx-auto">
-          <header className="mb-8">
-            <div className="flex flex-wrap space-x-2 mb-4">
-              <button
-                onClick={() => {
-                  if (confirm(t[currentLang].messages.confirmEndQuiz)) {
-                    resetQuiz();
-                  }
-                }}
-                className="px-4 py-2 bg-white/90 dark:bg-gray-700/90 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-lg transition-all shadow-md hover:shadow-lg backdrop-blur-sm"
-              >
-                {t[currentLang].buttons.endQuiz}
-              </button>
-              <button
-                onClick={async () => {
-                  await saveSession(true);
-                  setTimeout(() => {
-                    resetQuiz();
-                  }, 1500);
-                }}
-                className="px-4 py-2 bg-cyan-500 dark:bg-cyan-600 text-white border border-cyan-400 dark:border-cyan-500 hover:bg-cyan-600 dark:hover:bg-cyan-700 rounded-lg transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm"
-              >
-                {t[currentLang].buttons.saveAndExit}
-              </button>
-              {isResuming && (
-                <div className="px-3 py-2 bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-900 dark:to-orange-900 text-amber-800 dark:text-amber-200 rounded-lg border border-amber-300 dark:border-amber-700 text-sm">
-                  {t[currentLang].messages.resumedSession}
-                </div>
-              )}
-            </div>
-            
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">{t[currentLang].pageTitle.playing}</h1>
-
-            {/* プログレスバー */}
-            <div className="mb-6">
-              <div
-                className="relative w-full rounded-full overflow-hidden"
-                style={{
-                  height: '12px',
-                  background: 'rgba(156, 163, 175, 0.3)',
-                  boxShadow: 'inset 0 2px 4px rgba(0, 0, 0, 0.1)'
-                }}
-              >
-                <div
-                  style={{
-                    width: `${((currentIndex + (showFeedback ? 1 : 0)) / currentProblems.length) * 100}%`,
-                    background: 'linear-gradient(to right, rgb(168 85 247), rgb(236 72 153))',
-                    transition: 'width 0.5s ease',
-                    height: '100%',
-                    boxShadow: '0 0 10px rgba(168, 85, 247, 0.5)'
-                  }}
-                  className="rounded-full"
-                />
-              </div>
-              {/* パーセント表示 */}
-              <div className="text-right mt-1">
-                <span className="text-xs font-medium text-purple-600 dark:text-purple-400">
-                  {Math.round(((currentIndex + (showFeedback ? 1 : 0)) / currentProblems.length) * 100)}%
-                </span>
-              </div>
-            </div>
-
-            {/* 統計情報 */}
-            <div className="flex items-center justify-between text-sm mb-2 flex-wrap gap-2">
-              <div className="flex items-center gap-4 flex-wrap">
-                <span className="font-medium text-gray-700 dark:text-gray-300">
-                  📝 {t[currentLang].labels.questionNumber} {currentIndex + 1} / {currentProblems.length}
-                </span>
-                <span className="text-gray-600 dark:text-gray-400">
-                  ⏱️ {Math.floor(elapsedTime / 60)}:{(elapsedTime % 60).toString().padStart(2, '0')}
-                </span>
-                <span
-                  className="font-medium"
-                  style={{
-                    color: (() => {
-                      const answeredCount = currentIndex + (showFeedback ? 1 : 0);
-                      if (answeredCount === 0) return 'rgb(107 114 128)'; // gray
-                      const accuracy = (score / answeredCount) * 100;
-                      if (accuracy >= 80) return 'rgb(34 197 94)'; // green
-                      if (accuracy >= 60) return 'rgb(234 179 8)'; // yellow
-                      return 'rgb(239 68 68)'; // red
-                    })()
-                  }}
-                >
-                  💯 {currentIndex + (showFeedback ? 1 : 0) > 0 ? Math.round((score / (currentIndex + (showFeedback ? 1 : 0))) * 100) : 0}%
-                </span>
-              </div>
-              {lastSaved && (
-                <span className="text-xs text-green-600 dark:text-green-400">
-                  {t[currentLang].labels.lastSaved} {lastSaved.toLocaleTimeString(currentLang === 'ja' ? 'ja-JP' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
-                </span>
-              )}
-            </div>
-          </header>
-
-          <motion.div
-            key={currentIndex}
-            initial={{ opacity: 0, x: 50 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -50 }}
-            transition={{ duration: 0.3, ease: 'easeInOut' }}
-            className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-8"
-          >
-            <div className="mb-6">
-              <span className="inline-block px-3 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded-full text-sm mb-4">
-                {currentProblem.category}
-              </span>
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
-                {currentProblem.question}
-              </h2>
-            </div>
-
-            {!showFeedback ? (
-              <div className="space-y-4">
-                {currentProblem.type === 'multiple-choice' && currentProblem.options ? (
-                  <div className="space-y-3">
-                    {currentProblem.options.map((option, index) => (
-                      <button
-                        key={index}
-                        onClick={() => handleAnswerClick(index)}
-                        className="quiz-action-button w-full p-4 text-left rounded-lg transition-all transform hover:scale-102 shadow-md hover:shadow-lg backdrop-blur-sm"
-                      >
-                        <span className="font-bold text-white drop-shadow-sm">
-                          {String.fromCharCode(65 + index)}. {option}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex space-x-4">
-                    <button
-                      onClick={() => handleAnswerClick(true)}
-                      className="quiz-action-button flex-1 p-6 rounded-lg transition-all transform hover:scale-105 shadow-md hover:shadow-lg backdrop-blur-sm"
-                    >
-                      <span className="text-3xl font-bold text-white drop-shadow-md">○</span>
-                      <p className="text-white/95 mt-2 font-medium">{t[currentLang].labels.correct}</p>
-                    </button>
-                    <button
-                      onClick={() => handleAnswerClick(false)}
-                      className="quiz-action-button flex-1 p-6 rounded-lg transition-all transform hover:scale-105 shadow-md hover:shadow-lg backdrop-blur-sm"
-                    >
-                      <span className="text-3xl font-bold text-white drop-shadow-md">×</span>
-                      <p className="text-white/95 mt-2 font-medium">{t[currentLang].labels.incorrect}</p>
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-6">
-                <motion.div
-                  initial={{ scale: 0.8, opacity: 0 }}
-                  animate={
-                    (currentProblem.type === 'multiple-choice'
-                      ? userAnswers[currentIndex] === currentProblem.correctAnswer
-                      : userAnswers[currentIndex] === currentProblem.answer)
-                      ? { scale: 1, opacity: 1, transition: { type: 'spring', stiffness: 300, damping: 20 } }
-                      : { scale: 1, opacity: 1, x: [-10, 10, -10, 10, 0], transition: { duration: 0.5 } }
-                  }
-                  className={`p-4 rounded-lg ${
-                    (currentProblem.type === 'multiple-choice'
-                      ? userAnswers[currentIndex] === currentProblem.correctAnswer
-                      : userAnswers[currentIndex] === currentProblem.answer)
-                      ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
-                      : 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200'
-                  }`}
-                >
-                  <h3 className="font-semibold text-lg mb-2">
-                    {(currentProblem.type === 'multiple-choice' 
-                      ? userAnswers[currentIndex] === currentProblem.correctAnswer
-                      : userAnswers[currentIndex] === currentProblem.answer)
-                      ? t[currentLang].feedback.correct : t[currentLang].feedback.incorrect}
-                  </h3>
-                  <p>
-                    {t[currentLang].labels.yourAnswer} {
-                      currentProblem.type === 'multiple-choice' && currentProblem.options
-                        ? `${String.fromCharCode(65 + (userAnswers[currentIndex] as number))}. ${currentProblem.options[userAnswers[currentIndex] as number]}`
-                        : userAnswers[currentIndex] ? `○ (${t[currentLang].labels.correct})` : `× (${t[currentLang].labels.incorrect})`
-                    }
-                  </p>
-                  {(currentProblem.type === 'multiple-choice' 
-                    ? userAnswers[currentIndex] !== currentProblem.correctAnswer
-                    : userAnswers[currentIndex] !== currentProblem.answer) && (
-                    <p>
-                      {t[currentLang].labels.correctAnswer} {
-                        currentProblem.type === 'multiple-choice' && currentProblem.options
-                          ? `${String.fromCharCode(65 + currentProblem.correctAnswer!)}. ${currentProblem.options[currentProblem.correctAnswer!]}`
-                          : currentProblem.answer ? `○ (${t[currentLang].labels.correct})` : `× (${t[currentLang].labels.incorrect})`
-                      }
-                    </p>
-                  )}
-                </motion.div>
-
-                <div className="bg-blue-50 dark:bg-blue-900 p-4 rounded-lg">
-                  <h4 className="font-semibold text-blue-800 dark:text-blue-200 mb-2">{t[currentLang].labels.explanation}</h4>
-                  <p className="text-blue-700 dark:text-blue-300">{currentProblem.explanation}</p>
-                </div>
-                
-                <button
-                  onClick={nextQuestion}
-                  className="w-full px-6 py-3 bg-cyan-500 dark:bg-cyan-600 text-white border border-cyan-400 dark:border-cyan-500 hover:bg-cyan-600 dark:hover:bg-cyan-700 rounded-lg transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm font-semibold"
-                >
-                  {currentIndex < currentProblems.length - 1 ? t[currentLang].buttons.nextQuestion : t[currentLang].buttons.finishQuiz}
-                </button>
-              </div>
-            )}
-          </motion.div>
-        </div>
-
-        {/* 主観的フィードバックモーダル */}
-        <SubjectiveFeedback
-          onSubmit={handleSubjectiveFeedbackSubmit}
-          onSkip={handleSubjectiveFeedbackSkip}
-          isEnabled={showSubjectiveFeedback}
-          language={language as 'ja' | 'en'}
-        />
-      </div>
-    );
-  }
-
-  if (mode === 'result') {
-    const accuracy = currentProblems.length > 0 ? (score / currentProblems.length * 100) : 0;
-    const endTime = new Date();
-    const playTime = startTime ? Math.floor((endTime.getTime() - startTime.getTime()) / 1000) : 0;
-
-    return (
-      <>
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-8">
-        <div className="max-w-4xl mx-auto">
-          <header className="mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white text-center">{t[currentLang].pageTitle.result}</h1>
-          </header>
-
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-8">
-            <div className="text-center mb-8">
-              <div className="text-6xl font-bold text-blue-600 mb-4">
-                {score} / {currentProblems.length}
-              </div>
-              <div className="text-2xl font-semibold text-gray-900 dark:text-white mb-2">
-                {t[currentLang].labels.accuracy} {accuracy.toFixed(1)}%
-              </div>
-              <div className="text-gray-600 dark:text-gray-300">
-                {t[currentLang].labels.playTime} {Math.floor(playTime / 60)}{t[currentLang].labels.minutes}{playTime % 60}{t[currentLang].labels.seconds}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-              <div className="text-center p-4 bg-green-50 dark:bg-green-900 rounded-lg">
-                <div className="text-2xl font-bold text-green-600 dark:text-green-400">{score}</div>
-                <div className="text-green-800 dark:text-green-200">{t[currentLang].labels.correctAnswers}</div>
-              </div>
-              <div className="text-center p-4 bg-red-50 dark:bg-red-900 rounded-lg">
-                <div className="text-2xl font-bold text-red-600 dark:text-red-400">{currentProblems.length - score}</div>
-                <div className="text-red-800 dark:text-red-200">{t[currentLang].labels.incorrectAnswers}</div>
-              </div>
-              <div className="text-center p-4 bg-blue-50 dark:bg-blue-900 rounded-lg">
-                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{currentProblems.length}</div>
-                <div className="text-blue-800 dark:text-blue-200">{t[currentLang].labels.totalQuestions}</div>
-              </div>
-            </div>
-
-            <div className="flex space-x-4">
-              <button
-                onClick={resetQuiz}
-                className="flex-1 px-6 py-3 bg-cyan-500 dark:bg-cyan-600 text-white border border-cyan-400 dark:border-cyan-500 hover:bg-cyan-600 dark:hover:bg-cyan-700 rounded-lg transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm font-semibold"
-              >
-                {t[currentLang].buttons.retryQuiz}
-              </button>
-              <button
-                onClick={onBack}
-                className="flex-1 px-6 py-3 bg-white/90 dark:bg-gray-700/90 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-lg transition-all font-semibold shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm"
-              >
-                {t[currentLang].buttons.backToMenu}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* レベルアップモーダル */}
       <LevelUpModal
         isOpen={showLevelUpModal}
         onClose={() => setShowLevelUpModal(false)}
         score={score}
         totalQuestions={currentProblems.length}
-        language={language as 'ja' | 'en'}
+        language={currentLang}
       />
 
-      {/* 主観的フィードバックモーダル */}
-      {console.log('Rendering SubjectiveFeedback with state:', { showSubjectiveFeedback })}
+      <SubjectiveFeedback
+        isEnabled={showSubjectiveFeedback}
+        onSkip={() => {
+          setShowSubjectiveFeedback(false);
+          setPendingSubjectiveFeedback(null);
+          proceedToNextQuestion();
+        }}
+        onSubmit={handleSubjectiveFeedbackSubmit}
+      />
+    </div>
+  );
+};
 
-      {/* テスト用の簡易モーダル */}
-      {showSubjectiveFeedback && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-xl max-w-md w-full mx-4 border border-gray-200 dark:border-gray-600">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              🔧 デバッグ用モーダル
-            </h3>
-            <p className="text-gray-600 dark:text-gray-400 mb-4">
-              基本的なモーダル表示機能をテスト中です。<br/>
-              状態: showSubjectiveFeedback = {showSubjectiveFeedback.toString()}
-            </p>
-            <div className="flex space-x-3">
-              <button
-                onClick={handleSubjectiveFeedbackSkip}
-                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition"
-              >
-                スキップ
-              </button>
-              <button
-                onClick={() => handleSubjectiveFeedbackSubmit({
-                  understood: true,
-                  confidence: 'medium',
-                  wasGuessing: false,
-                  perceivedDifficulty: 3
-                })}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-              >
-                送信
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      </>
-    );
-  }
-
-  return null;
-}
+// React.memoでラップしてパフォーマンス最適化
+export default memo(QuizView);

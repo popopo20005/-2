@@ -136,7 +136,7 @@ export function QuizSetCategorySelector({ onBack, onStartQuiz }: QuizSetCategory
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-50 to-yellow-50 dark:from-gray-900 dark:to-gray-800 p-8">
+    <div className="min-h-screen bg-gradient-to-br from-amber-50 to-yellow-50 dark:from-gray-900 dark:to-gray-800 px-6 py-8 md:px-12 lg:px-16">
       <div className="max-w-6xl mx-auto">
         <header className="mb-8">
           <button

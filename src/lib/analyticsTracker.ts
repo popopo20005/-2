@@ -210,7 +210,6 @@ export class AnalyticsTracker {
     const casualRatio = casualAnswerCount / completedProblems;
     return Math.max(0, 1 - casualRatio * 2); // 適当回答率の2倍を信頼性から減算
   }
-
 }
 
 // シングルトンパターンでアクティブなトラッカーを管理
@@ -220,6 +219,10 @@ export class AnalyticsManager {
   static startSession(sessionId: string): AnalyticsTracker {
     this.activeTracker = new AnalyticsTracker(sessionId);
     return this.activeTracker;
+  }
+
+  static resumeSession(sessionId: string): AnalyticsTracker {
+    return this.startSession(sessionId);
   }
 
   static getActiveTracker(): AnalyticsTracker | null {

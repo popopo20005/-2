@@ -23,9 +23,14 @@ export interface SectionHeaderProps {
    */
   action?: ReactNode;
   /**
+  /**
    * サイズ
    */
   size?: 'sm' | 'md' | 'lg';
+  /**
+   * 追加のクラス名
+   */
+  className?: string;
 }
 
 /**
@@ -39,6 +44,7 @@ export function SectionHeader({
   subtitle,
   action,
   size = 'md',
+  className = '',
 }: SectionHeaderProps) {
   const sizeClasses = {
     sm: {
@@ -61,7 +67,7 @@ export function SectionHeader({
   const classes = sizeClasses[size];
 
   return (
-    <div className="flex items-center justify-between mb-4">
+    <div className={`flex items-center justify-between mb-4 ${className}`}>
       <div className="flex-1">
         <div className="flex items-center gap-2">
           {Icon && <Icon className={`${classes.icon} ${iconColor}`} />}

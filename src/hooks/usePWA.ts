@@ -66,9 +66,15 @@ export function usePWA(): PWAInfo & PWAActions {
   }, []);
 
   const registerServiceWorker = async () => {
+    // 開発環境ではService Workerを登録しない
+    if (import.meta.env.DEV) {
+      console.log('[PWA] Service Worker registration skipped in development mode');
+      return;
+    }
+
     try {
       const registration = await navigator.serviceWorker.register('/sw.js');
-      
+
       console.log('[PWA] Service Worker registered:', registration);
 
       // Service Worker の更新チェック

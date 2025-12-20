@@ -46,9 +46,10 @@ export function QRScanner({ onScan, onError, onClose }: QRScannerProps) {
         scannerRef.current = scanner;
         await scanner.start();
         setIsScanning(true);
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('スキャナー初期化エラー:', error);
-        onError('カメラの起動に失敗しました: ' + (error?.message || '不明なエラー'));
+        const message = error instanceof Error ? error.message : '不明なエラー';
+        onError('カメラの起動に失敗しました: ' + message);
       }
     };
 
@@ -70,7 +71,7 @@ export function QRScanner({ onScan, onError, onClose }: QRScannerProps) {
     try {
       const result = await QrScanner.scanImage(file);
       onScan(result);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('ファイル読み取りエラー:', error);
       onError('QRコードの読み取りに失敗しました。有効なQRコード画像を選択してください。');
     }

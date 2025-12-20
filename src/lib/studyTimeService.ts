@@ -287,6 +287,60 @@ export async function getCategoryStudyTime(
 }
 
 /**
+ * 指定した日付以降の合計学習時間を取得（秒）
+ */
+export async function getTotalStudyTime(since?: Date): Promise<number> {
+  try {
+    let sessions;
+
+    if (since) {
+      sessions = await db.studyTimeSessions
+        .where('startTime')
+        .aboveOrEqual(since)
+        .toArray();
+    } else {
+      sessions = await db.studyTimeSessions.toArray();
+    }
+
+    const totalSeconds = sessions.reduce((total, session) => {
+      return total + (session.duration || 0);
+    }, 0);
+
+    return totalSeconds;
+  } catch (error) {
+    console.error('[StudyTimeService] 合計学習時間の取得に失敗:', error);
+    return 0;
+  }
+}
+
+/**
+ * 指定日の学習時間を取得（秒単位）
+ */
+export async function getDailyStudyTime(date: Date): Promise<number> {
+  try {
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const sessions = await db.studyTimeSessions
+      .where('startTime')
+      .between(startOfDay, endOfDay)
+      .toArray();
+
+    const totalSeconds = sessions.reduce((total, session) => {
+      return total + (session.duration || 0);
+    }, 0);
+
+    return totalSeconds;
+  } catch (error) {
+    console.error('[StudyTimeService] 指定日の学習時間取得に失敗:', error);
+    return 0;
+  }
+}
+
+/**
  * 学習時間を人間が読みやすい形式に変換
  */
 export function formatDuration(seconds: number): string {

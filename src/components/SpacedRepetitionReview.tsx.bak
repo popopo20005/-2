@@ -1,0 +1,706 @@
+import { useState, useEffect } from 'react';
+import type { Problem, SpacedRepetitionCard, ReviewSession, ReviewResult } from '../types';
+import { problemService, spacedRepetitionService } from '../lib/database';
+import {
+  updateCardAfterReview,
+  sortCardsByPriority,
+  isCardDue
+} from '../lib/sm2Algorithm';
+
+interface SpacedRepetitionReviewProps {
+  onComplete: () => void;
+  onBack: () => void;
+  category?: string;
+  quizSetId?: number;
+  language?: 'ja' | 'en';
+}
+
+// Session state for pause/resume functionality
+interface SavedSessionState {
+  sessionId: string;
+  cards: SpacedRepetitionCard[];
+  currentCardIndex: number;
+  correctCount: number;
+  incorrectCount: number;
+  startTime: string;
+  category?: string;
+  quizSetId?: number;
+}
+
+const STORAGE_KEY = 'spacedRepetitionPausedSession';
+
+export function SpacedRepetitionReview({
+  onComplete,
+  onBack,
+  category,
+  quizSetId,
+  language = 'ja'
+}: SpacedRepetitionReviewProps) {
+  const [cards, setCards] = useState<SpacedRepetitionCard[]>([]);
+  const [currentCardIndex, setCurrentCardIndex] = useState(0);
+  const [currentProblem, setCurrentProblem] = useState<Problem | null>(null);
+  const [showAnswer, setShowAnswer] = useState(false);
+  const [selectedAnswer, setSelectedAnswer] = useState<boolean | number | null>(null);
+  const [startTime, setStartTime] = useState<Date>(new Date());
+  const [answerStartTime, setAnswerStartTime] = useState<Date>(new Date());
+  const [sessionId] = useState(() => reviewSessionService.generateSessionId());
+  const [session, setSession] = useState<Omit<ReviewSession, 'id'> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [correctCount, setCorrectCount] = useState(0);
+  const [incorrectCount, setIncorrectCount] = useState(0);
+  const [isResumed, setIsResumed] = useState(false);
+
+  const texts = language === 'ja' ? {
+    title: '間隔反復復習',
+    dueCards: '復習予定',
+    cardsRemaining: '残り',
+    cards: '枚',
+    showAnswer: '答えを表示',
+    difficulty: '難易度を評価',
+    again: 'もう一度',
+    hard: '難しい',
+    good: '普通',
+    easy: '簡単',
+    correct: '正解',
+    incorrect: '不正解',
+    explanation: '解説',
+    complete: '完了！',
+    reviewComplete: '本日の復習が完了しました',
+    cardsReviewed: '復習したカード',
+    accuracy: '正答率',
+    continue: '続ける',
+    finish: '終了',
+    noCardsTitle: '復習カードなし',
+    noCardsMessage: '今日復習するカードはありません',
+    loading: '読み込み中...',
+    trueAnswer: '○ (正しい)',
+    falseAnswer: '× (誤り)',
+    progress: '進捗',
+    pause: '一時停止',
+    resumeSession: '前回のセッションを再開しますか？',
+    resumeButton: '続きから再開',
+    startNew: '新しく始める'
+  } : {
+    title: 'Spaced Repetition Review',
+    dueCards: 'Due Cards',
+    cardsRemaining: 'Remaining',
+    cards: 'cards',
+    showAnswer: 'Show Answer',
+    difficulty: 'Rate Difficulty',
+    again: 'Again',
+    hard: 'Hard',
+    good: 'Good',
+    easy: 'Easy',
+    correct: 'Correct',
+    incorrect: 'Incorrect',
+    explanation: 'Explanation',
+    complete: 'Complete!',
+    reviewComplete: 'Review session completed',
+    cardsReviewed: 'Cards Reviewed',
+    accuracy: 'Accuracy',
+    continue: 'Continue',
+    finish: 'Finish',
+    noCardsTitle: 'No Cards to Review',
+    noCardsMessage: 'You have no cards due for review today',
+    loading: 'Loading...',
+    trueAnswer: '○ (True)',
+    falseAnswer: '× (False)',
+    progress: 'Progress',
+    pause: 'Pause',
+    resumeSession: 'Resume previous session?',
+    resumeButton: 'Resume',
+    startNew: 'Start New'
+  };
+
+  // Save session state to localStorage
+  const saveSessionState = () => {
+    const state: SavedSessionState = {
+      sessionId,
+      cards,
+      currentCardIndex,
+      correctCount,
+      incorrectCount,
+      startTime: startTime.toISOString(),
+      category,
+      quizSetId
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  };
+
+  // Load session state from localStorage
+  const loadSessionState = (): SavedSessionState | null => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return null;
+    try {
+      return JSON.parse(saved);
+    } catch (error) {
+      console.error('Failed to parse saved session:', error);
+      return null;
+    }
+  };
+
+  // Clear saved session state
+  const clearSessionState = () => {
+    localStorage.removeItem(STORAGE_KEY);
+  };
+
+  // Initialize review session
+  useEffect(() => {
+    initializeSession();
+  }, [category]);
+
+  const initializeSession = async () => {
+    setLoading(true);
+    try {
+      // Check for saved session state
+      const savedState = loadSessionState();
+      if (savedState && !isResumed) {
+        // Check if saved session matches current context
+        if (savedState.category === category && savedState.quizSetId === quizSetId) {
+          // Ask user if they want to resume
+          // This will be handled in the render function
+          setLoading(false);
+          return;
+        } else {
+          // Different context, clear saved state
+          clearSessionState();
+        }
+      }
+
+      // Get due cards (cards that are actually due for review today)
+      let dueCards = category
+        ? await spacedRepetitionService.getDueCardsByCategory(category)
+        : await spacedRepetitionService.getDueCards();
+
+      dueCards = dueCards.filter(card => isCardDue(card));
+
+      // Filter by quizSetId if specified
+      if (quizSetId !== undefined) {
+        dueCards = dueCards.filter(card => card.quizSetId === quizSetId);
+      }
+
+      // If no due cards, get new cards to learn
+      if (dueCards.length === 0) {
+        const newCards = await spacedRepetitionService.getNewCards(category, 20);
+        let filteredNewCards = newCards;
+
+        // Filter by quizSetId if specified
+        if (quizSetId !== undefined) {
+          filteredNewCards = newCards.filter(card => card.quizSetId === quizSetId);
+        }
+
+        dueCards = filteredNewCards;
+      }
+
+      // If still no cards (no due cards and no new cards), try to get learning cards
+      if (dueCards.length === 0) {
+        const learningCards = await spacedRepetitionService.getLearningCards(category);
+        let filteredLearningCards = learningCards.filter((card: SpacedRepetitionCard) => isCardDue(card));
+
+        // Filter by quizSetId if specified
+        if (quizSetId !== undefined) {
+          filteredLearningCards = filteredLearningCards.filter((card: SpacedRepetitionCard) => card.quizSetId === quizSetId);
+        }
+
+        dueCards = filteredLearningCards;
+      }
+
+      const sortedCards = sortCardsByPriority(dueCards);
+      setCards(sortedCards);
+
+      // Create session
+      const newSession: Omit<ReviewSession, 'id'> = {
+        sessionId,
+        startTime: new Date(),
+        totalCards: sortedCards.length,
+        reviewedCards: 0,
+        correctCount: 0,
+        incorrectCount: 0,
+        averageQuality: 0,
+        newCards: sortedCards.filter(c => c.isNew).length,
+        learningCards: sortedCards.filter(c => c.isLearning).length,
+        dueCards: sortedCards.filter(c => !c.isNew).length,
+        createdAt: new Date()
+      };
+
+      setSession(newSession);
+      await reviewSessionService.createSession(newSession);
+
+      // Load first problem
+      if (sortedCards.length > 0) {
+        await loadProblem(sortedCards[0].problemId);
+      }
+    } catch (error) {
+      console.error('Failed to initialize review session:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadProblem = async (problemId: number) => {
+    const problem = await problemService.getById(problemId);
+    setCurrentProblem(problem || null);
+    setAnswerStartTime(new Date());
+  };
+
+  // Resume from saved session
+  const handleResumeSession = async () => {
+    const savedState = loadSessionState();
+    if (!savedState) return;
+
+    // Clear saved state first to prevent re-rendering issues
+    clearSessionState();
+
+    // Mark as resumed before setting loading to prevent showing resume dialog again
+    setIsResumed(true);
+    setLoading(true);
+
+    try {
+      // Restore state
+      setCards(savedState.cards);
+      setCurrentCardIndex(savedState.currentCardIndex);
+      setCorrectCount(savedState.correctCount);
+      setIncorrectCount(savedState.incorrectCount);
+      setStartTime(new Date(savedState.startTime));
+
+      // Check if session already exists
+      const existingSession = await reviewSessionService.getSessionById(savedState.sessionId);
+
+      if (!existingSession) {
+        // Create new session only if it doesn't exist
+        const newSession: Omit<ReviewSession, 'id'> = {
+          sessionId: savedState.sessionId,
+          startTime: new Date(savedState.startTime),
+          totalCards: savedState.cards.length,
+          reviewedCards: savedState.currentCardIndex,
+          correctCount: savedState.correctCount,
+          incorrectCount: savedState.incorrectCount,
+          averageQuality: 0,
+          newCards: savedState.cards.filter(c => c.isNew).length,
+          learningCards: savedState.cards.filter(c => c.isLearning).length,
+          dueCards: savedState.cards.filter(c => !c.isNew).length,
+          createdAt: new Date(savedState.startTime)
+        };
+
+        setSession(newSession);
+        await reviewSessionService.createSession(newSession);
+      } else {
+        // Use existing session
+        setSession(existingSession);
+      }
+
+      // Load current problem
+      if (savedState.cards.length > savedState.currentCardIndex) {
+        const currentCard = savedState.cards[savedState.currentCardIndex];
+        console.log('Resuming session - loading problem:', currentCard.problemId, 'Card index:', savedState.currentCardIndex);
+        await loadProblem(currentCard.problemId);
+      } else {
+        console.error('Invalid card index:', savedState.currentCardIndex, 'Total cards:', savedState.cards.length);
+      }
+    } catch (error) {
+      console.error('Failed to resume session:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Start new session (ignore saved state)
+  const handleStartNewSession = () => {
+    clearSessionState();
+    setIsResumed(true);
+    initializeSession();
+  };
+
+  // Pause current session
+  const handlePauseSession = () => {
+    saveSessionState();
+    onBack();
+  };
+
+  const handleAnswerSelect = (answer: boolean | number) => {
+    setSelectedAnswer(answer);
+  };
+
+  const handleShowAnswer = () => {
+    setShowAnswer(true);
+  };
+
+  const handleDifficultyRating = async (quality: number) => {
+    if (!currentProblem || !currentProblem.id) return;
+
+    const currentCard = cards[currentCardIndex];
+    const responseTime = new Date().getTime() - answerStartTime.getTime();
+
+    // Determine if answer was correct
+    let wasCorrect = false;
+    if (currentProblem.type === 'multiple-choice') {
+      wasCorrect = selectedAnswer === currentProblem.correctAnswer;
+    } else {
+      wasCorrect = selectedAnswer === currentProblem.answer;
+    }
+
+    // Create review result
+    const result: ReviewResult = {
+      quality,
+      responseTime,
+      wasCorrect
+    };
+
+    // Update card using SM-2 algorithm
+    const updatedCard = updateCardAfterReview(currentCard, result);
+    await spacedRepetitionService.updateCard(updatedCard);
+
+    // Update session stats
+    const newCorrectCount = wasCorrect ? correctCount + 1 : correctCount;
+    const newIncorrectCount = wasCorrect ? incorrectCount : incorrectCount + 1;
+
+    setCorrectCount(newCorrectCount);
+    setIncorrectCount(newIncorrectCount);
+
+    // Move to next card
+    const nextIndex = currentCardIndex + 1;
+    if (nextIndex < cards.length) {
+      setCurrentCardIndex(nextIndex);
+      await loadProblem(cards[nextIndex].problemId);
+      setShowAnswer(false);
+      setSelectedAnswer(null);
+    } else {
+      // Session complete
+      await completeSession(newCorrectCount, newIncorrectCount);
+    }
+  };
+
+  const completeSession = async (finalCorrect: number, finalIncorrect: number) => {
+    if (!session) return;
+
+    const updatedSession: ReviewSession = {
+      ...session,
+      endTime: new Date(),
+      reviewedCards: cards.length,
+      correctCount: finalCorrect,
+      incorrectCount: finalIncorrect,
+      averageQuality: cards.length > 0 ? (finalCorrect / cards.length) * 5 : 0
+    };
+
+    await reviewSessionService.updateSession(updatedSession);
+    setSession(updatedSession);
+
+    // Clear saved session state since session is complete
+    clearSessionState();
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-gray-900 dark:via-indigo-950 dark:to-purple-950 flex items-center justify-center" style={{ backgroundColor: '#f0f9ff' }}>
+        <div className="text-center" style={{ color: '#374151' }}>
+          <div className="text-xl font-semibold">{texts.loading}</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Check for saved session and show resume dialog
+  const savedState = loadSessionState();
+  if (savedState && !isResumed && savedState.category === category && savedState.quizSetId === quizSetId) {
+    const remainingCards = savedState.cards.length - savedState.currentCardIndex;
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-gray-900 dark:via-indigo-950 dark:to-purple-950 p-6 flex items-center justify-center" style={{ backgroundColor: '#f0f9ff' }}>
+        <div className="max-w-md w-full">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8 text-center" style={{ backgroundColor: '#ffffff' }}>
+            <div className="text-5xl mb-4">⏸️</div>
+            <h2 className="text-2xl font-bold mb-4" style={{ color: '#111827' }}>
+              {texts.resumeSession}
+            </h2>
+            <p className="text-gray-600 dark:text-gray-400 mb-6" style={{ color: '#6b7280' }}>
+              {language === 'ja'
+                ? `前回のセッションが残っています（残り${remainingCards}枚）`
+                : `Previous session found (${remainingCards} cards remaining)`}
+            </p>
+            <div className="space-y-3">
+              <button
+                onClick={handleResumeSession}
+                className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+                style={{ backgroundColor: '#2563eb', color: '#ffffff' }}
+              >
+                {texts.resumeButton}
+              </button>
+              <button
+                onClick={handleStartNewSession}
+                className="w-full px-6 py-3 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors font-semibold"
+                style={{ backgroundColor: '#e5e7eb', color: '#1f2937' }}
+              >
+                {texts.startNew}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (cards.length === 0) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-gray-900 dark:via-indigo-950 dark:to-purple-950 p-6" style={{ backgroundColor: '#f0f9ff' }}>
+        <div className="max-w-2xl mx-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8 text-center" style={{ backgroundColor: '#ffffff' }}>
+            <h2 className="text-2xl font-bold mb-4" style={{ color: '#111827' }}>
+              {texts.noCardsTitle}
+            </h2>
+            <p className="text-gray-600 dark:text-gray-400 mb-6" style={{ color: '#6b7280' }}>
+              {texts.noCardsMessage}
+            </p>
+            <button
+              onClick={onBack}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              style={{ backgroundColor: '#2563eb', color: '#ffffff' }}
+            >
+              {texts.finish}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Session complete
+  if (currentCardIndex >= cards.length) {
+    const accuracy = cards.length > 0 ? (correctCount / cards.length) * 100 : 0;
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-gray-900 dark:via-indigo-950 dark:to-purple-950 p-6" style={{ backgroundColor: '#f0f9ff' }}>
+        <div className="max-w-2xl mx-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8 text-center" style={{ backgroundColor: '#ffffff' }}>
+            <div className="text-6xl mb-4">🎉</div>
+            <h2 className="text-3xl font-bold mb-4" style={{ color: '#111827' }}>
+              {texts.complete}
+            </h2>
+            <p className="text-xl text-gray-600 dark:text-gray-400 mb-8" style={{ color: '#6b7280' }}>
+              {texts.reviewComplete}
+            </p>
+
+            <div className="grid grid-cols-2 gap-4 mb-8">
+              <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4" style={{ backgroundColor: '#eff6ff' }}>
+                <div className="text-sm text-gray-600 dark:text-gray-400 mb-1" style={{ color: '#6b7280' }}>
+                  {texts.cardsReviewed}
+                </div>
+                <div className="text-3xl font-bold text-blue-600 dark:text-blue-400" style={{ color: '#2563eb' }}>
+                  {cards.length}
+                </div>
+              </div>
+
+              <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4" style={{ backgroundColor: '#f0fdf4' }}>
+                <div className="text-sm text-gray-600 dark:text-gray-400 mb-1" style={{ color: '#6b7280' }}>
+                  {texts.accuracy}
+                </div>
+                <div className="text-3xl font-bold text-green-600 dark:text-green-400" style={{ color: '#16a34a' }}>
+                  {accuracy.toFixed(0)}%
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={onComplete}
+              className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-lg font-semibold"
+              style={{ backgroundColor: '#2563eb', color: '#ffffff' }}
+            >
+              {texts.finish}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentProblem) {
+    return <div style={{ color: '#374151' }}>Problem not found</div>;
+  }
+
+  const progress = ((currentCardIndex + 1) / cards.length) * 100;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-gray-900 dark:via-indigo-950 dark:to-purple-950 p-6" style={{ backgroundColor: '#f0f9ff' }}>
+      <div className="max-w-4xl mx-auto">
+        {/* Header */}
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h1 className="text-2xl font-bold" style={{ color: '#111827' }}>
+              {texts.title}
+            </h1>
+            <div className="flex items-center gap-4">
+              <div className="text-sm" style={{ color: '#6b7280' }}>
+                {currentCardIndex + 1} / {cards.length} {texts.cards}
+              </div>
+              <button
+                onClick={handlePauseSession}
+                className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors text-sm font-semibold"
+                style={{ backgroundColor: '#eab308', color: '#ffffff' }}
+              >
+                ⏸️ {texts.pause}
+              </button>
+            </div>
+          </div>
+
+          {/* Progress bar */}
+          <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2" style={{ backgroundColor: '#e5e7eb' }}>
+            <div
+              className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+              style={{ width: `${progress}%`, backgroundColor: '#2563eb' }}
+            />
+          </div>
+        </div>
+
+        {/* Question card */}
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8 mb-6" style={{ backgroundColor: '#ffffff' }}>
+          <div className="mb-4">
+            <span className="inline-block px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded-full text-sm font-medium">
+              {currentProblem.category}
+            </span>
+          </div>
+
+          <h2 className="text-xl font-semibold mb-6" style={{ color: '#111827' }}>
+            {currentProblem.question}
+          </h2>
+
+          {/* Answer options */}
+          {!showAnswer && (
+            <div className="space-y-3 mb-6">
+              {currentProblem.type === 'multiple-choice' && currentProblem.options ? (
+                currentProblem.options.map((option, index) => (
+                  <button
+                    key={index}
+                    onClick={() => handleAnswerSelect(index)}
+                    className={`w-full p-4 text-left rounded-lg border-2 transition-all ${selectedAnswer === index
+                      ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20'
+                      : 'border-gray-200 hover:border-blue-300'
+                      }`}
+                    style={{
+                      borderColor: selectedAnswer === index ? '#2563eb' : '#e5e7eb',
+                      backgroundColor: selectedAnswer === index ? '#eff6ff' : 'transparent',
+                      color: '#111827'
+                    }}
+                  >
+                    <span className="font-medium">{String.fromCharCode(65 + index)}.</span> {option}
+                  </button>
+                ))
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  <button
+                    onClick={() => handleAnswerSelect(true)}
+                    className={`p-6 rounded-lg border-2 transition-all ${selectedAnswer === true
+                      ? 'border-green-600 bg-green-50 dark:bg-green-900/20'
+                      : 'border-gray-200 hover:border-green-300'
+                      }`}
+                    style={{
+                      borderColor: selectedAnswer === true ? '#16a34a' : '#e5e7eb',
+                      backgroundColor: selectedAnswer === true ? '#f0fdf4' : 'transparent',
+                      color: '#111827'
+                    }}
+                  >
+                    <div className="text-4xl mb-2">○</div>
+                    <div className="font-semibold">{texts.trueAnswer}</div>
+                  </button>
+                  <button
+                    onClick={() => handleAnswerSelect(false)}
+                    className={`p-6 rounded-lg border-2 transition-all ${selectedAnswer === false
+                      ? 'border-red-600 bg-red-50 dark:bg-red-900/20'
+                      : 'border-gray-200 hover:border-red-300'
+                      }`}
+                    style={{
+                      borderColor: selectedAnswer === false ? '#dc2626' : '#e5e7eb',
+                      backgroundColor: selectedAnswer === false ? '#fef2f2' : 'transparent',
+                      color: '#111827'
+                    }}
+                  >
+                    <div className="text-4xl mb-2">×</div>
+                    <div className="font-semibold">{texts.falseAnswer}</div>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Show answer button */}
+          {!showAnswer && (
+            <button
+              onClick={handleShowAnswer}
+              disabled={selectedAnswer === null}
+              className="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+              style={{
+                backgroundColor: selectedAnswer === null ? '#d1d5db' : '#2563eb',
+                color: '#ffffff'
+              }}
+            >
+              {texts.showAnswer}
+            </button>
+          )}
+
+          {/* Answer and explanation */}
+          {showAnswer && (
+            <div className="space-y-4">
+              <div className={`p-4 rounded-lg ${(currentProblem.type === 'multiple-choice'
+                ? selectedAnswer === currentProblem.correctAnswer
+                : selectedAnswer === currentProblem.answer)
+                ? 'bg-green-50 dark:bg-green-900/20'
+                : 'bg-red-50 dark:bg-red-900/20'
+                }`} style={{
+                  backgroundColor: (currentProblem.type === 'multiple-choice'
+                    ? selectedAnswer === currentProblem.correctAnswer
+                    : selectedAnswer === currentProblem.answer)
+                    ? '#f0fdf4'
+                    : '#fef2f2'
+                }}>
+                <div className="font-semibold mb-2" style={{ color: '#111827' }}>
+                  {(currentProblem.type === 'multiple-choice'
+                    ? selectedAnswer === currentProblem.correctAnswer
+                    : selectedAnswer === currentProblem.answer)
+                    ? texts.correct
+                    : texts.incorrect}
+                </div>
+                <div style={{ color: '#374151' }}>
+                  <strong>{texts.explanation}:</strong> {currentProblem.explanation}
+                </div>
+              </div>
+
+              {/* Difficulty rating buttons */}
+              <div>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-3" style={{ color: '#6b7280' }}>
+                  {texts.difficulty}:
+                </p>
+                <div className="grid grid-cols-4 gap-2">
+                  <button
+                    onClick={() => handleDifficultyRating(0)}
+                    className="py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
+                    style={{ backgroundColor: '#dc2626', color: '#ffffff' }}
+                  >
+                    {texts.again}
+                  </button>
+                  <button
+                    onClick={() => handleDifficultyRating(3)}
+                    className="py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-medium"
+                    style={{ backgroundColor: '#f97316', color: '#ffffff' }}
+                  >
+                    {texts.hard}
+                  </button>
+                  <button
+                    onClick={() => handleDifficultyRating(4)}
+                    className="py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                    style={{ backgroundColor: '#16a34a', color: '#ffffff' }}
+                  >
+                    {texts.good}
+                  </button>
+                  <button
+                    onClick={() => handleDifficultyRating(5)}
+                    className="py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                    style={{ backgroundColor: '#2563eb', color: '#ffffff' }}
+                  >
+                    {texts.easy}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

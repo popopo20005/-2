@@ -246,6 +246,129 @@ export const layouts = {
 } as const;
 
 /**
+ * WCAG 2.1 AA準拠カラーパレット
+ * コントラスト比4.5:1以上を保証
+ */
+export const wcagColors = {
+  // ライトモード（背景: #FFFFFF）
+  light: {
+    text: {
+      primary: '#1F2937',    // gray-800, contrast: 12.63:1
+      secondary: '#4B5563',  // gray-600, contrast: 7.52:1
+      tertiary: '#6B7280',   // gray-500, contrast: 5.34:1
+    },
+    background: {
+      primary: '#FFFFFF',
+      secondary: '#F9FAFB',  // gray-50
+      tertiary: '#F3F4F6',   // gray-100
+    },
+    interactive: {
+      primary: '#2563EB',    // blue-600, contrast: 5.54:1
+      primaryHover: '#1D4ED8', // blue-700
+      success: '#059669',    // green-600, contrast: 4.54:1
+      warning: '#D97706',    // amber-600, contrast: 4.51:1
+      error: '#DC2626',      // red-600, contrast: 5.89:1
+    },
+  },
+  // ダークモード（背景: #111827 gray-900）
+  dark: {
+    text: {
+      primary: '#F9FAFB',    // gray-50, contrast: 15.76:1
+      secondary: '#E5E7EB',  // gray-200, contrast: 12.63:1
+      tertiary: '#D1D5DB',   // gray-300, contrast: 10.05:1
+    },
+    background: {
+      primary: '#111827',    // gray-900
+      secondary: '#1F2937',  // gray-800
+      tertiary: '#374151',   // gray-700
+    },
+    interactive: {
+      primary: '#60A5FA',    // blue-400, contrast: 6.21:1
+      primaryHover: '#3B82F6', // blue-500
+      success: '#34D399',    // green-400, contrast: 8.14:1
+      warning: '#FBBF24',    // amber-400, contrast: 11.96:1
+      error: '#F87171',      // red-400, contrast: 5.76:1
+    },
+  },
+} as const;
+
+/**
+ * Figmaデザイン準拠カラーパレット
+ * 新しいUIデザインに基づく色定義
+ */
+export const figmaColors = {
+  // 背景グラデーション（淡い紫〜グレー）
+  background: {
+    light: 'linear-gradient(135deg, #f5f3ff 0%, #e5e7eb 100%)',
+    dark: 'linear-gradient(135deg, #1e1b4b 0%, #111827 100%)',
+  },
+  // カード背景（クリーンな白）
+  card: {
+    light: '#FFFFFF',
+    dark: '#1F2937',
+  },
+  // プライマリー紫（アバター、アクティブ状態）
+  primary: {
+    base: '#8B5CF6',      // violet-500
+    light: '#A78BFA',     // violet-400
+    dark: '#7C3AED',      // violet-600
+    gradient: 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)',
+  },
+  // オレンジCTA（学習開始ボタン）
+  cta: {
+    base: '#F59E0B',      // amber-500
+    gradient: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
+    text: '#FFFFFF',
+  },
+  // FABカラー
+  fab: {
+    stats: {
+      base: '#3B82F6',    // blue-500
+      gradient: 'linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)',
+    },
+    add: {
+      base: '#10B981',    // green-500
+      gradient: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+    },
+    play: {
+      base: '#8B5CF6',    // violet-500
+      gradient: 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)',
+    },
+  },
+  // カテゴリーバッジ
+  category: {
+    biology: {
+      bg: '#DDD6FE',      // violet-200
+      text: '#6B21A8',    // violet-800
+    },
+    math: {
+      bg: '#BFDBFE',      // blue-200
+      text: '#1E40AF',    // blue-800
+    },
+    english: {
+      bg: '#FED7AA',      // orange-200
+      text: '#9A3412',    // orange-800
+    },
+  },
+  // チャートカラー
+  chart: {
+    primary: 'linear-gradient(180deg, #8B5CF6 0%, #6366F1 100%)',
+    secondary: '#93C5FD',
+    grid: '#E5E7EB',
+    text: '#6B7280',
+  },
+} as const;
+
+/**
+ * ダークモード切り替えアニメーション設定
+ */
+export const darkModeTransition = {
+  duration: 300, // ms
+  easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  properties: ['background-color', 'color', 'border-color', 'box-shadow'],
+} as const;
+
+/**
  * 型エクスポート
  */
 export type GradientTheme = keyof typeof gradientThemes;

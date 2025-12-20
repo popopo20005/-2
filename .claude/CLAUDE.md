@@ -375,16 +375,343 @@ npm install react-loading-skeleton framer-motion react-hot-toast canvas-confetti
 - ✅ Quiz screen dramatically improved
 - ✅ Learning calendar operational
 - ✅ Smooth animations throughout
-- ✅ Pomodoro timer usable (Week 4)
+- ✅ Pomodoro timer usable
 
 ---
 
-**Last Updated**: 2025-11-18
-**Current Phase**: Week 2 Complete - Learning Time Tracking
-**Status**: Ready for Week 3 (Engagement Enhancement)
-**Recent Commits**:
-- `3f4e337` - Fix Week 2: Today highlight bar visibility with absolute positioning
-- `2902940` - Add debug logs for learning time tracking diagnosis
-- `15fe2d4` - Enhance design tokens
-- `cd1727e` - Add EmptyState and Skeleton components
-**8-Week Plan Progress**: Week 2/8 ✅ (25% complete)
+### Latest Achievement: Week 3 - Engagement Enhancement Complete (2025-11-20)
+Successfully completed Week 3 of 8-week development plan - implemented comprehensive engagement features:
+
+#### **Week 3 Task#6: Progress Display Enhancement** ✅
+   - File: [src/components/QuizView.tsx](src/components/QuizView.tsx)
+   - Features: Progress bar, question counter, elapsed time, real-time accuracy, milestone notifications
+   - Already implemented in previous sessions
+
+#### **Week 3 Task#7: Skeleton Loaders** ✅
+   - File: [src/components/ui/Skeleton.tsx](src/components/ui/Skeleton.tsx)
+   - Library: `react-loading-skeleton` (installed)
+   - Features: 8 specialized skeleton components with dark mode support
+
+#### **Week 3 Task#8: Micro-interactions** ✅
+   - Files: [src/components/QuizView.tsx](src/components/QuizView.tsx)
+   - Libraries: `framer-motion`, `react-hot-toast`, `canvas-confetti` (all installed)
+   - Features: Button hover effects, correct/incorrect animations, confetti, toast notifications
+
+#### **Week 3 Task#9: Learning Calendar Heatmap** ✅
+   - File: [src/components/StudyCalendar.tsx](src/components/StudyCalendar.tsx)
+   - Features: 365-day calendar, SM-2 review schedule integration, card name display, duplicate removal
+   - Result: Shows learning history and upcoming review schedule
+
+#### **Week 3 Task#10: Pomodoro Timer** ✅
+   - Files: [src/contexts/PomodoroContext.tsx](src/contexts/PomodoroContext.tsx), [src/components/PomodoroTimer.tsx](src/components/PomodoroTimer.tsx)
+   - Features: Global state management, 4 presets (Pomodoro/Deep Work/Light/Custom), Web Audio API notifications
+   - Integration: Added to Guide component, persists across navigation
+
+---
+
+## 🎯 Week 4 Preparation
+
+### Week 4 Overview: Data Utilization + Visual Enhancement (Week 5-6 in Plan)
+**Duration**: 2 weeks
+**Focus**: Responsive design + Weakness detection + Goal management
+
+#### Phase 2 UI/UX Improvements (Continued):
+
+**11. Responsive Design Optimization** (2 days)
+- Target: All components
+- Features:
+  - Mobile: Single column, large tap targets
+  - Tablet: 2-column layout
+  - Desktop: 3-column layout
+  - Thumb zone respect (iOS 44×44pt, Android 48×48dp)
+  - Swipe gesture support
+- Tailwind breakpoints: sm(640px), md(768px), lg(1024px), xl(1280px)
+
+**12. Dark Mode Improvement** (1 day)
+- Files: [src/styles/designTokens.ts](src/styles/designTokens.ts), all components
+- Features:
+  - WCAG 2.1 AA compliance (contrast ratio 4.5:1+)
+  - Color palette optimization
+  - Gradient effects
+  - Smooth transition animations
+  - Auto-detection (system settings)
+
+**13. Framer Motion Integration** (2 days)
+- Library: `framer-motion` (already installed)
+- File: [src/utils/animations.ts](src/utils/animations.ts) (new)
+- Features:
+  - Page transition animations (fade, slide, scale)
+  - Card flip animations
+  - Stagger animations (list display)
+  - Hover effects
+  - Common animation config file
+
+#### Phase 3 Feature Improvements:
+
+**14. Weakness Detection** (3 days)
+- Files:
+  - [src/services/weaknessDetectionService.ts](src/services/weaknessDetectionService.ts) (new)
+  - [src/components/Dashboard.tsx](src/components/Dashboard.tsx) (integration)
+  - [src/components/Statistics.tsx](src/components/Statistics.tsx) (detail view)
+- Features:
+  - Category-wise accuracy analysis
+  - Highlight categories with <60% accuracy as "weakness"
+  - Dedicated learning mode for weak categories
+  - "Today's recommended problems" feature
+  - Algorithm: `weakness_score = (1 - accuracy) × frequency × days_since_last_study`
+
+**15. Goal Setting & Progress Management** (3 days)
+- Files:
+  - [src/lib/database.ts](src/lib/database.ts) (add goals table)
+  - [src/components/GoalManager.tsx](src/components/GoalManager.tsx) (new)
+  - [src/components/Dashboard.tsx](src/components/Dashboard.tsx) (integration)
+- DB Schema:
+  ```typescript
+  goals: {
+    id: number;
+    type: 'short' | 'medium' | 'long';
+    title: string;
+    targetValue: number;
+    currentValue: number;
+    unit: 'problems' | 'hours' | 'streak' | 'accuracy';
+    deadline?: Date;
+    isCompleted: boolean;
+  }
+  ```
+- Features:
+  - Short-term goals (100 problems this week)
+  - Medium-term goals (500 problems this month)
+  - Long-term goals (master all problems by exam date)
+  - Progress display
+  - Celebration on achievement (confetti + modal)
+
+### Week 4 Success Criteria:
+- ✅ Responsive on all devices
+- ✅ Weakness auto-detection working
+- ✅ Goal management system operational
+- ✅ Dark mode polished
+- ✅ Smooth animations with Framer Motion
+
+---
+
+## 🔄 開発計画の再構築 (2025-11-20)
+
+### 新方針：バックエンド優先 + Figma統合UI/UX
+
+**背景**: Week 1-3でUI/UX基盤は完成。Week 4-7はデータドリブン機能とロジックに集中し、Week 8でFigmaを使用してUI/UXを一括リファクタリング。
+
+---
+
+## 📅 Week 4-8: 再構築済み開発計画
+
+### **Week 4: データ分析基盤** (2025-11-20 ~ 11-27)
+**Focus**: 弱点検出 + 目標管理のロジック実装
+
+#### Task#14: 弱点分野の自動検出 (3日間)
+- **ファイル**:
+  - `src/services/weaknessDetectionService.ts` (新規)
+  - `src/lib/database.ts` (categoryStats追加)
+- **機能**:
+  - カテゴリー別正答率の集計アルゴリズム
+  - 弱点スコア計算: `(1 - accuracy) × frequency × days_since_last_study`
+  - トップ3弱点カテゴリーの抽出
+  - 推奨問題セットの自動生成
+- **DB設計**:
+  ```typescript
+  categoryStats: {
+    id: number;
+    category: string;
+    totalAttempts: number;
+    correctCount: number;
+    accuracy: number;
+    lastStudied: Date;
+    weaknessScore: number;
+  }
+  ```
+
+#### Task#15: 目標設定と進捗管理 (3日間)
+- **ファイル**:
+  - `src/lib/database.ts` (goalsテーブル追加)
+  - `src/services/goalService.ts` (新規)
+  - `src/components/GoalManager.tsx` (新規、シンプルUI)
+- **機能**:
+  - CRUD操作（目標の作成・更新・削除）
+  - 進捗計算ロジック
+  - 目標達成判定アルゴリズム
+  - データ集計と統計処理
+- **DB設計**:
+  ```typescript
+  goals: {
+    id: number;
+    type: 'short' | 'medium' | 'long';
+    title: string;
+    targetValue: number;
+    currentValue: number;
+    unit: 'problems' | 'hours' | 'streak' | 'accuracy';
+    deadline?: Date;
+    isCompleted: boolean;
+    createdAt: Date;
+  }
+  ```
+
+**Week 4 成果物**: 学習データ分析エンジン + 目標管理システム
+
+---
+
+### **Week 5: パーソナライゼーション** (2025-11-27 ~ 12-04)
+
+#### Task#16: 適応的問題推奨システム (4日間)
+- **ファイル**:
+  - `src/services/recommendationEngine.ts` (新規)
+  - `src/lib/adaptiveDifficulty.ts` (新規)
+- **機能**:
+  - ユーザーの正答率ベースの難易度調整
+  - 学習履歴からの最適問題推奨
+  - スペースドリピティション統合
+  - 推奨アルゴリズム:
+    ```typescript
+    score = weakness_score × 0.4 +
+            time_since_review × 0.3 +
+            difficulty_match × 0.3
+    ```
+- **最適化**:
+  - IndexedDBクエリの効率化
+  - キャッシング戦略
+
+#### Task#17: 学習データ統計処理 (2日間)
+- **ファイル**:
+  - `src/services/statisticsAggregator.ts` (新規)
+  - 既存Statisticsコンポーネントへの統合
+- **機能**:
+  - 週次・月次データ集計
+  - トレンド分析（移動平均）
+  - パフォーマンス予測
+  - データエクスポート用JSON生成
+
+**Week 5 成果物**: 個別最適化学習エンジン
+
+---
+
+### **Week 6: 通知とバックグラウンド** (2025-12-04 ~ 12-11)
+
+#### Task#18: Web Push API統合 (3日間)
+- **ファイル**:
+  - `src/services/notificationService.ts` (新規)
+  - `public/sw.js` (Service Worker拡張)
+- **機能**:
+  - Push API登録とサブスクリプション
+  - 通知許可フロー
+  - バックグラウンド通知送信
+  - 通知タイプ:
+    - 復習リマインダー（SM-2ベース）
+    - 目標達成通知
+    - ストリーク継続アラート
+
+#### Task#19: バックグラウンドタスク (2日間)
+- **ファイル**:
+  - `src/workers/dataAggregator.ts` (新規)
+  - Service Worker統合
+- **機能**:
+  - 定期的なデータ集計（日次統計）
+  - 古いデータのクリーンアップ
+  - キャッシュ最適化
+  - オフライン同期準備
+
+**Week 6 成果物**: プッシュ通知システム + バックグラウンド処理
+
+---
+
+### **Week 7: データ管理と最適化** (2025-12-11 ~ 12-18)
+
+#### Task#20: 学習メモ機能 (2日間)
+- **ファイル**:
+  - `src/lib/database.ts` (Problem拡張)
+  - `src/services/noteService.ts` (新規)
+- **機能**:
+  - Markdown形式メモ
+  - 全文検索（Fuse.js）
+  - メモのエクスポート
+- **DB拡張**:
+  ```typescript
+  problems: {
+    // 既存フィールド...
+    userNotes?: string;
+    noteUpdatedAt?: Date;
+  }
+  ```
+
+#### Task#21: データエクスポート/インポート強化 (2日間)
+- **ファイル**:
+  - `src/services/exportService.ts` (拡張)
+  - `src/services/importService.ts` (拡張)
+- **機能**:
+  - 全データの完全バックアップ（JSON）
+  - 選択的インポート
+  - データ検証とマイグレーション
+  - クラウドストレージ連携準備
+
+#### Task#22: パフォーマンス最適化 (2日間)
+- **対象**:
+  - IndexedDBクエリ最適化
+  - コード分割（React.lazy）
+  - 画像最適化（WebP）
+  - Lighthouseスコア90+達成
+
+**Week 7 成果物**: データ管理完全システム + 最適化済みアプリ
+
+---
+
+### **Week 8: UI/UX総仕上げ** (2025-12-18 ~ 12-25)
+
+#### Task#23: Figmaデザインシステム再設計 (2日間)
+- **成果物**:
+  - 完全なデザインシステム（Figma）
+  - コンポーネントライブラリ
+  - カラーパレット最適化
+  - タイポグラフィ体系
+
+#### Task#24: コンポーネント一括リファクタリング (3日間)
+- **対象**: 全コンポーネント
+- **作業**:
+  - Figmaデザインに基づく再実装
+  - レスポンシブデザイン完全対応
+  - アクセシビリティ改善（WCAG AA）
+  - アニメーション統合
+
+#### Task#25: 最終テストとバグ修正 (2日間)
+- **テスト**:
+  - Playwright E2Eテスト拡充
+  - クロスブラウザテスト
+  - モバイル実機テスト
+  - パフォーマンステスト
+- **バグ修正**: 全既知問題の解決
+
+**Week 8 成果物**: プロダクション準備完了
+
+---
+
+## 📊 改善後の工数配分
+
+| Week | フェーズ | 工数 | UI/UX | バックエンド |
+|------|---------|------|-------|-------------|
+| 1-3 | 完了 | 15日 | ✅ 80% | ✅ 60% |
+| 4 | データ分析 | 6日 | 10% | 90% |
+| 5 | パーソナライゼーション | 6日 | 10% | 90% |
+| 6 | 通知・バックグラウンド | 5日 | 5% | 95% |
+| 7 | データ管理・最適化 | 6日 | 10% | 90% |
+| 8 | UI/UX総仕上げ | 7日 | 100% | 0% |
+
+**合計**: 45日（Week 4-8で30日、Week 1-3で15日）
+
+---
+
+**Last Updated**: 2025-11-20
+**Current Phase**: Week 4 Start - Data Analysis Foundation
+**Status**: Implementing Weakness Detection & Goal Management
+**Recent Achievements**:
+- ✅ Week 3 Complete: Engagement Enhancement
+- ✅ Framer Motion Integration
+- ✅ Dark Mode WCAG 2.1 AA Compliance
+- ✅ Horizontal padding fixes
+**8-Week Plan Progress**: Week 4/8 (50% complete)
+**Next Milestone**: Week 4 - Weakness Detection Service

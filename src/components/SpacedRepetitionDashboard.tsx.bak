@@ -1,0 +1,1361 @@
+import { useState, useEffect } from 'react';
+import type { SpacedRepetitionCard, QuizSet, SharedCardListFull } from '../types';
+import { spacedRepetitionService, problemService, quizSetService, categoryService } from '../lib/database';
+import { createNewCard } from '../lib/sm2Algorithm';
+import { SpacedRepetitionReview } from './SpacedRepetitionReview';
+
+interface SpacedRepetitionDashboardProps {
+  onBack: () => void;
+  language?: 'ja' | 'en';
+}
+
+export function SpacedRepetitionDashboard({
+  onBack,
+  language = 'ja'
+}: SpacedRepetitionDashboardProps) {
+  const [stats, setStats] = useState({
+    total: 0,
+    new: 0,
+    learning: 0,
+    due: 0,
+    averageRetention: 0
+  });
+  const [showReview, setShowReview] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [showSelector, setShowSelector] = useState(false);
+  const [quizSets, setQuizSets] = useState<QuizSet[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [selectedQuizSets, setSelectedQuizSets] = useState<number[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [reviewQuizSetId, setReviewQuizSetId] = useState<number | null>(null);
+  const [reviewCategory, setReviewCategory] = useState<string | null>(null);
+  const [quizSetStats, setQuizSetStats] = useState<Array<{
+    quizSetId: number | null;
+    quizSetName: string;
+    total: number;
+    new: number;
+    learning: number;
+    due: number;
+    averageRetention: number;
+  }>>([]);
+  const [showCardList, setShowCardList] = useState(false);
+  const [selectedCardQuizSetId, setSelectedCardQuizSetId] = useState<number | string | null>(null);
+  const [cards, setCards] = useState<SpacedRepetitionCard[]>([]);
+  const [editingCard, setEditingCard] = useState<SpacedRepetitionCard | null>(null);
+  const [cardName, setCardName] = useState<string>('');
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareQuizSetId, setShareQuizSetId] = useState<number | string | null>(null);
+  const [shareQuizSetName, setShareQuizSetName] = useState<string>('');
+  const [shareDescription, setShareDescription] = useState<string>('');
+  const [includeProgress, setIncludeProgress] = useState(false);
+
+  const texts = language === 'ja' ? {
+    title: '間隔反復学習',
+    subtitle: 'SM-2アルゴリズムで効率的に復習',
+    cardStats: 'カード統計',
+    totalCards: 'トータル',
+    newCards: '新規',
+    learningCards: '学習中',
+    dueCards: '復習予定',
+    retention: '定着率',
+    sessionStats: '復習統計',
+    totalSessions: 'セッション数',
+    cardsReviewed: '復習カード数',
+    accuracy: '正答率',
+    studyTime: '学習時間',
+    minutes: '分',
+    startReview: '復習を開始',
+    initializeCards: 'カードを初期化',
+    noCardsYet: 'まだカードがありません',
+    initializeMessage: '問題からカードを作成して学習を始めましょう',
+    initialize: '初期化',
+    initializing: '初期化中...',
+    back: '戻る',
+    whatIsSM2: 'SM-2とは？',
+    sm2Description: 'SuperMemo 2アルゴリズムは、科学的根拠に基づいた間隔反復学習法です。復習のタイミングを最適化し、長期記憶の定着を促進します。',
+    howItWorks: '仕組み：',
+    howItWorksDetails: [
+      '正解するたびに復習間隔が延びます',
+      '間違えた場合は復習間隔がリセットされます',
+      '各カードの難易度が個別に調整されます',
+      '忘却曲線に基づいて最適なタイミングで復習できます'
+    ],
+    reviewToday: '今日の復習',
+    upcomingReviews: '今後の復習予定',
+    addFromQuizSet: '問題集から追加',
+    addFromCategory: 'カテゴリーから追加',
+    selectQuizSet: '問題集を選択',
+    selectCategory: 'カテゴリーを選択',
+    addCards: 'カードを追加',
+    cancel: 'キャンセル',
+    cardsAdded: 'カードを追加しました'
+  } : {
+    title: 'Spaced Repetition',
+    subtitle: 'Efficient review with SM-2 algorithm',
+    cardStats: 'Card Statistics',
+    totalCards: 'Total',
+    newCards: 'New',
+    learningCards: 'Learning',
+    dueCards: 'Due',
+    retention: 'Retention',
+    sessionStats: 'Review Statistics',
+    totalSessions: 'Sessions',
+    cardsReviewed: 'Cards Reviewed',
+    accuracy: 'Accuracy',
+    studyTime: 'Study Time',
+    minutes: 'min',
+    startReview: 'Start Review',
+    initializeCards: 'Initialize Cards',
+    noCardsYet: 'No cards yet',
+    initializeMessage: 'Create cards from problems to start learning',
+    initialize: 'Initialize',
+    initializing: 'Initializing...',
+    back: 'Back',
+    whatIsSM2: 'What is SM-2?',
+    sm2Description: 'SuperMemo 2 algorithm is a scientifically-backed spaced repetition method that optimizes review timing and promotes long-term memory retention.',
+    howItWorks: 'How it works:',
+    howItWorksDetails: [
+      'Review intervals increase with each correct answer',
+      'Intervals reset when you make a mistake',
+      'Difficulty is adjusted individually for each card',
+      'Reviews are scheduled based on the forgetting curve'
+    ],
+    reviewToday: 'Review Today',
+    upcomingReviews: 'Upcoming Reviews',
+    addFromQuizSet: 'Add from Quiz Set',
+    addFromCategory: 'Add from Category',
+    selectQuizSet: 'Select Quiz Set',
+    selectCategory: 'Select Category',
+    addCards: 'Add Cards',
+    cancel: 'Cancel',
+    cardsAdded: 'Cards added'
+  };
+
+  useEffect(() => {
+    loadStats();
+    loadQuizSetsAndCategories();
+  }, []);
+
+  const loadQuizSetsAndCategories = async () => {
+    try {
+      const [sets, cats] = await Promise.all([
+        quizSetService.getAll(),
+        categoryService.getAll()
+      ]);
+      setQuizSets(sets);
+      setCategories(cats);
+    } catch (error) {
+      console.error('Failed to load quiz sets and categories:', error);
+    }
+  };
+
+  const loadStats = async () => {
+    setLoading(true);
+    try {
+      const [cardStats, quizSetStatsData] = await Promise.all([
+        spacedRepetitionService.getCardStats(),
+        spacedRepetitionService.getQuizSetStats()
+      ]);
+
+      setStats(cardStats);
+      setQuizSetStats(quizSetStatsData);
+    } catch (error) {
+      console.error('Failed to load stats:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleInitializeCards = async () => {
+    setLoading(true);
+    try {
+      // Get all problems
+      const problems = await problemService.getAll();
+      let updatedCount = 0;
+      let createdCount = 0;
+
+      // Create cards for problems that don't have cards yet
+      // Also update existing new cards to be available today
+      for (const problem of problems) {
+        if (!problem.id) continue;
+
+        const existingCard = await spacedRepetitionService.getCardByProblemId(problem.id);
+        if (!existingCard) {
+          // Create new card
+          const newCard = createNewCard(problem.id, problem.category);
+          await spacedRepetitionService.createCard(newCard);
+          createdCount++;
+        } else if (existingCard.isNew && !existingCard.isDue) {
+          // Update existing new cards to be available today
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const updatedCard = {
+            ...existingCard,
+            nextReviewDate: today,
+            isDue: true,
+            interval: 0,
+            updatedAt: new Date()
+          };
+          await spacedRepetitionService.updateCard(updatedCard);
+          updatedCount++;
+        }
+      }
+
+      console.log(`Cards initialized: ${createdCount} created, ${updatedCount} updated`);
+
+      // Reload stats
+      await loadStats();
+    } catch (error) {
+      console.error('Failed to initialize cards:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReviewComplete = () => {
+    setShowReview(false);
+    loadStats();
+  };
+
+  const handleAddFromQuizSet = async () => {
+    if (selectedQuizSets.length === 0) return;
+
+    setLoading(true);
+    try {
+      // 複数問題集選択時は全問題を結合
+      if (selectedQuizSets.length >= 2) {
+        // すべての問題集を取得
+        const quizSets = await Promise.all(
+          selectedQuizSets.map(id => quizSetService.getById(id))
+        );
+        const validQuizSets = quizSets.filter(qs => qs !== undefined);
+
+        if (validQuizSets.length === 0) return;
+
+        // すべての問題集の問題を結合（重複を除く）
+        const allProblemIds = new Set<number>();
+        validQuizSets.forEach(qs => {
+          qs.problemIds.forEach(id => allProblemIds.add(id));
+        });
+
+        const uniqueProblemIds = Array.from(allProblemIds);
+        console.log(`Combining ${validQuizSets.length} quiz sets: Total ${uniqueProblemIds.length} unique problems`);
+
+        // 複数問題集の組み合わせを表すIDを生成（ソートして一意に）
+        const combinedQuizSetId = selectedQuizSets.sort((a, b) => a - b).join('-');
+        const combinedQuizSetName = validQuizSets.map(qs => qs.name).join(' + ');
+
+        // パフォーマンス最適化：全カードを一度だけ取得
+        const existingCards = await spacedRepetitionService.getAllCards();
+        const existingCardMap = new Map<string, boolean>();
+        existingCards.forEach(card => {
+          const key = `${card.problemId}-${card.quizSetId}`;
+          existingCardMap.set(key, true);
+        });
+
+        let addedCount = 0;
+        let skippedCount = 0;
+
+        // 新規カードをバッチで作成
+        const cardsToAdd: Array<Omit<SpacedRepetitionCard, 'id'>> = [];
+
+        for (const problemId of uniqueProblemIds) {
+          // マップを使って高速重複チェック
+          const key = `${problemId}-${combinedQuizSetId}`;
+
+          if (!existingCardMap.has(key)) {
+            const problem = await problemService.getById(problemId);
+            if (problem) {
+              const trimmedName = cardName.trim() || undefined;
+              const newCard = createNewCard(problemId, problem.category, combinedQuizSetId as any, trimmedName);
+              console.log(`Creating card with name: "${trimmedName}" for problem ${problemId}`);
+              cardsToAdd.push(newCard);
+              addedCount++;
+            }
+          } else {
+            skippedCount++;
+          }
+        }
+
+        // バッチでカード作成
+        for (const card of cardsToAdd) {
+          console.log(`Saving card to DB:`, { problemId: card.problemId, name: card.name });
+          await spacedRepetitionService.createCard(card);
+        }
+
+        // Save custom group name if provided
+        const trimmedName = cardName.trim();
+        if (trimmedName) {
+          await quizSetGroupNameService.saveGroupName(combinedQuizSetId, trimmedName);
+          console.log(`Saved group name "${trimmedName}" for ${combinedQuizSetId}`);
+        }
+
+        alert(`結合カード (${combinedQuizSetName})\n追加: ${addedCount}枚, スキップ: ${skippedCount}枚`);
+
+      } else {
+        // 単一問題集の場合
+        const quizSetId = selectedQuizSets[0];
+        const quizSet = await quizSetService.getById(quizSetId);
+        if (!quizSet) return;
+
+        console.log(`Processing quiz set: ${quizSet.name}, ${quizSet.problemIds.length} problems`);
+
+        // パフォーマンス最適化：全カードを一度だけ取得してマップ化
+        const existingCards = await spacedRepetitionService.getAllCards();
+        const existingCardMap = new Map<string, boolean>();
+        existingCards.forEach(card => {
+          const key = `${card.problemId}-${card.quizSetId}`;
+          existingCardMap.set(key, true);
+        });
+
+        let addedCount = 0;
+        let skippedCount = 0;
+
+        // 新規カードをバッチで作成
+        const cardsToAdd: Array<Omit<SpacedRepetitionCard, 'id'>> = [];
+
+        for (const problemId of quizSet.problemIds) {
+          const key = `${problemId}-${quizSetId}`;
+
+          if (!existingCardMap.has(key)) {
+            const problem = await problemService.getById(problemId);
+            if (problem) {
+              const trimmedName = cardName.trim() || undefined;
+              const newCard = createNewCard(problemId, problem.category, quizSetId, trimmedName);
+              console.log(`Creating card with name: "${trimmedName}" for problem ${problemId}`);
+              cardsToAdd.push(newCard);
+              addedCount++;
+            }
+          } else {
+            skippedCount++;
+          }
+        }
+
+        // バッチでカード作成
+        for (const card of cardsToAdd) {
+          console.log(`Saving card to DB:`, { problemId: card.problemId, name: card.name });
+          await spacedRepetitionService.createCard(card);
+        }
+
+        alert(`追加: ${addedCount}枚, スキップ: ${skippedCount}枚 (既に存在)`);
+      }
+
+      setShowSelector(false);
+      setSelectedQuizSets([]);
+      setCardName('');
+      await loadStats();
+    } catch (error) {
+      console.error('Failed to add cards from quiz set:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddFromCategory = async () => {
+    if (!selectedCategory) return;
+
+    setLoading(true);
+    try {
+      const problems = await problemService.getByCategory(selectedCategory);
+      console.log(`Processing category: ${selectedCategory}, ${problems.length} problems`);
+
+      let addedCount = 0;
+      let skippedCount = 0;
+
+      for (const problem of problems) {
+        if (!problem.id) continue;
+
+        // Check if card already exists for this problem in this category context (no quizSet)
+        const existingCard = await spacedRepetitionService.getCardByProblemAndQuizSet(
+          problem.id,
+          undefined // No quizSetId for category-based cards
+        );
+
+        if (!existingCard) {
+          const trimmedName = cardName.trim() || undefined;
+          const newCard = createNewCard(problem.id, problem.category, undefined, trimmedName);
+          console.log(`Creating card with name: "${trimmedName}" for problem ${problem.id}`);
+          console.log(`Saving card to DB:`, { problemId: newCard.problemId, name: newCard.name });
+          await spacedRepetitionService.createCard(newCard);
+          addedCount++;
+          console.log(`Added card for problem ${problem.id} in category ${selectedCategory}`);
+        } else {
+          skippedCount++;
+        }
+      }
+
+      console.log(`Category Result: Added ${addedCount}, Skipped ${skippedCount} (already exist)`);
+      alert(`追加: ${addedCount}枚, スキップ: ${skippedCount}枚 (既に存在)`);
+
+      setShowSelector(false);
+      setSelectedCategory(null);
+      setCardName('');
+      await loadStats();
+    } catch (error) {
+      console.error('Failed to add cards from category:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleShowCardList = async (quizSetId: number | string | null) => {
+    setLoading(true);
+    try {
+      const allCards = await spacedRepetitionService.getAllCards();
+      console.log(`Loaded ${allCards.length} cards from DB, checking names:`, allCards.map(c => ({ id: c.id, name: c.name })));
+      const filteredCards = allCards.filter(card => {
+        if (quizSetId === null) {
+          return card.quizSetId === null || card.quizSetId === undefined;
+        }
+        return String(card.quizSetId) === String(quizSetId);
+      });
+      console.log(`Filtered ${filteredCards.length} cards for quizSetId ${quizSetId}:`, filteredCards.map(c => ({ id: c.id, name: c.name })));
+      setCards(filteredCards);
+      setSelectedCardQuizSetId(quizSetId);
+      setShowCardList(true);
+    } catch (error) {
+      console.error('Failed to load cards:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditCard = async (card: SpacedRepetitionCard) => {
+    setEditingCard(card);
+  };
+
+  const handleSaveCard = async () => {
+    if (!editingCard) return;
+
+    setLoading(true);
+    try {
+      await spacedRepetitionService.updateCard(editingCard);
+      alert('カードを更新しました');
+      setEditingCard(null);
+      // カードリストを再読み込み
+      await handleShowCardList(selectedCardQuizSetId);
+      await loadStats();
+    } catch (error) {
+      console.error('Failed to update card:', error);
+      alert('カードの更新に失敗しました');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteSingleCard = async (cardId: number) => {
+    if (!confirm('このカードを削除しますか？')) return;
+
+    setLoading(true);
+    try {
+      await spacedRepetitionService.deleteCard(cardId);
+      alert('カードを削除しました');
+      // カードリストを再読み込み
+      await handleShowCardList(selectedCardQuizSetId);
+      await loadStats();
+    } catch (error) {
+      console.error('Failed to delete card:', error);
+      alert('カードの削除に失敗しました');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleShareCardList = async (quizSetId: number | string | null, quizSetName: string) => {
+    console.log('Share button clicked:', { quizSetId, quizSetName });
+    setShareQuizSetId(quizSetId);
+    setShareQuizSetName(quizSetName);
+    setShowShareModal(true);
+    setShareDescription('');
+    setIncludeProgress(false);
+    console.log('Share modal should be visible now');
+  };
+
+  const handleDownloadCardListFile = async () => {
+    if (!shareQuizSetId) return;
+
+    setLoading(true);
+    try {
+      // Get all cards for this quiz set
+      const allCards = await spacedRepetitionService.getAllCards();
+      const cardsToShare = allCards.filter(card => {
+        if (shareQuizSetId === null) {
+          return card.quizSetId === null || card.quizSetId === undefined;
+        }
+        return String(card.quizSetId) === String(shareQuizSetId);
+      });
+
+      if (cardsToShare.length === 0) {
+        alert('共有するカードがありません');
+        return;
+      }
+
+      // Create full card list with problem data
+      const cardListDataFull: SharedCardListFull = {
+        name: shareQuizSetName,
+        description: shareDescription || undefined,
+        cards: [],
+        createdAt: new Date()
+      };
+
+      for (const card of cardsToShare) {
+        const problem = await problemService.getById(card.problemId);
+        if (problem) {
+          cardListDataFull.cards.push({
+            problem,
+            totalReviews: includeProgress ? card.totalReviews : undefined,
+            accuracy: includeProgress ? card.accuracy : undefined
+          });
+        }
+      }
+
+      // Create download file with type info
+      const fileData = {
+        version: '1.0.0',
+        type: 'cardListFull',
+        timestamp: Date.now(),
+        data: cardListDataFull
+      };
+
+      const jsonString = JSON.stringify(fileData, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${shareQuizSetName.replace(/[^a-z0-9]/gi, '_')}_cards.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      alert(`ファイルをダウンロードしました！\n${cardListDataFull.cards.length}枚のカード（問題データを含む）`);
+    } catch (error) {
+      console.error('Failed to download file:', error);
+      alert('ファイルのダウンロードに失敗しました: ' + (error instanceof Error ? error.message : '不明なエラー'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (showReview) {
+    return (
+      <SpacedRepetitionReview
+        onComplete={handleReviewComplete}
+        onBack={() => {
+          setShowReview(false);
+          setReviewQuizSetId(null);
+          setReviewCategory(null);
+        }}
+        category={reviewCategory || undefined}
+        quizSetId={reviewQuizSetId || undefined}
+        language={language}
+      />
+    );
+  }
+
+  console.log('Component render - showShareModal:', showShareModal, 'shareQuizSetId:', shareQuizSetId);
+
+  return (
+    <>
+      {/* Share Modal - Render at top level */}
+      {showShareModal ? (
+        <div
+          className="fixed inset-0 flex items-center justify-center p-4"
+          style={{
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 10000
+          }}
+        >
+          <div
+            className="max-w-2xl w-full max-h-[80vh] overflow-auto rounded-xl shadow-2xl"
+            style={{ backgroundColor: '#ffffff' }}
+          >
+            <div className="p-6 border-b border-gray-200" style={{ backgroundColor: '#ffffff' }}>
+              <h2 className="text-2xl font-bold" style={{ color: '#111827' }}>
+                📥 カードリストをファイル共有
+              </h2>
+              <p className="text-gray-600 mt-2" style={{ color: '#6b7280' }}>
+                {shareQuizSetName}
+              </p>
+            </div>
+
+            <div className="p-6 space-y-4" style={{ backgroundColor: '#ffffff' }}>
+              {/* Description */}
+              <div>
+                <label className="block text-sm font-medium mb-2" style={{ color: '#111827' }}>
+                  説明 (任意)
+                </label>
+                <textarea
+                  value={shareDescription}
+                  onChange={(e) => setShareDescription(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  style={{ borderColor: '#d1d5db', minHeight: '80px' }}
+                  placeholder="このカードリストについての説明を入力..."
+                />
+              </div>
+
+              {/* Include Progress Option */}
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={includeProgress}
+                  onChange={(e) => setIncludeProgress(e.target.checked)}
+                  className="w-4 h-4"
+                  style={{ accentColor: '#2563eb' }}
+                />
+                <label className="text-sm" style={{ color: '#111827' }}>
+                  学習進捗データも含める（復習回数・正答率）
+                </label>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 justify-end pt-4">
+                <button
+                  onClick={() => {
+                    setShowShareModal(false);
+                  }}
+                  className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  style={{ color: '#374151', borderColor: '#d1d5db' }}
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={handleDownloadCardListFile}
+                  disabled={loading}
+                  className="px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
+                  style={{
+                    backgroundColor: loading ? '#9ca3af' : '#2563eb',
+                    color: '#ffffff'
+                  }}
+                >
+                  {loading ? 'ダウンロード中...' : '📥 ダウンロード'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-gray-900 dark:via-indigo-950 dark:to-purple-950 p-6" style={{ backgroundColor: '#f0f9ff' }}>
+        <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="mb-8">
+          <button
+            onClick={onBack}
+            className="mb-4 px-4 py-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+            style={{ color: '#2563eb' }}
+          >
+            ← {texts.back}
+          </button>
+
+          <h1 className="text-4xl font-bold mb-2" style={{ color: '#111827' }}>
+            {texts.title}
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400" style={{ color: '#6b7280' }}>
+            {texts.subtitle}
+          </p>
+        </div>
+
+        {/* Card Stats */}
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold mb-4" style={{ color: '#111827' }}>
+            {texts.cardStats}
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow" style={{ backgroundColor: '#ffffff' }}>
+              <div className="text-sm text-gray-600 dark:text-gray-400 mb-1" style={{ color: '#6b7280' }}>
+                {texts.totalCards}
+              </div>
+              <div className="text-3xl font-bold" style={{ color: '#111827' }}>
+                {stats.total}
+              </div>
+            </div>
+
+            <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4 shadow" style={{ backgroundColor: '#f0fdf4' }}>
+              <div className="text-sm text-green-800 dark:text-green-400 mb-1" style={{ color: '#166534' }}>
+                {texts.newCards}
+              </div>
+              <div className="text-3xl font-bold text-green-600 dark:text-green-400" style={{ color: '#16a34a' }}>
+                {stats.new}
+              </div>
+            </div>
+
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-4 shadow" style={{ backgroundColor: '#fefce8' }}>
+              <div className="text-sm text-yellow-800 dark:text-yellow-400 mb-1" style={{ color: '#854d0e' }}>
+                {texts.learningCards}
+              </div>
+              <div className="text-3xl font-bold text-yellow-600 dark:text-yellow-400" style={{ color: '#ca8a04' }}>
+                {stats.learning}
+              </div>
+            </div>
+
+            <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 shadow" style={{ backgroundColor: '#eff6ff' }}>
+              <div className="text-sm text-blue-800 dark:text-blue-400 mb-1" style={{ color: '#1e40af' }}>
+                {texts.dueCards}
+              </div>
+              <div className="text-3xl font-bold text-blue-600 dark:text-blue-400" style={{ color: '#2563eb' }}>
+                {stats.due}
+              </div>
+            </div>
+
+            <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-4 shadow" style={{ backgroundColor: '#faf5ff' }}>
+              <div className="text-sm text-purple-800 dark:text-purple-400 mb-1" style={{ color: '#6b21a8' }}>
+                {texts.retention}
+              </div>
+              <div className="text-3xl font-bold text-purple-600 dark:text-purple-400" style={{ color: '#9333ea' }}>
+                {stats.averageRetention.toFixed(0)}%
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Quiz Set Stats */}
+        {quizSetStats.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold mb-4" style={{ color: '#111827' }}>
+              問題集別カード統計
+            </h2>
+            <div className="space-y-3">
+              {quizSetStats.map((stat) => (
+                <div
+                  key={stat.quizSetId || 'general'}
+                  className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow"
+                  style={{ backgroundColor: '#ffffff' }}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-lg font-bold" style={{ color: '#111827' }}>
+                      {stat.quizSetName}
+                    </h3>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          setReviewQuizSetId(stat.quizSetId);
+                          setReviewCategory(null);
+                          setShowReview(true);
+                        }}
+                        disabled={stat.due === 0 && stat.new === 0}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed text-sm"
+                        style={{
+                          backgroundColor: (stat.due === 0 && stat.new === 0) ? '#d1d5db' : '#2563eb',
+                          color: '#ffffff'
+                        }}
+                      >
+                        復習
+                      </button>
+                      <button
+                        onClick={() => handleShowCardList(stat.quizSetId)}
+                        className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
+                        style={{
+                          backgroundColor: '#4b5563',
+                          color: '#ffffff'
+                        }}
+                      >
+                        カード一覧
+                      </button>
+                      <button
+                        onClick={() => handleShareCardList(stat.quizSetId, stat.quizSetName)}
+                        disabled={stat.total === 0}
+                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed text-sm"
+                        style={{
+                          backgroundColor: stat.total === 0 ? '#d1d5db' : '#16a34a',
+                          color: '#ffffff'
+                        }}
+                      >
+                        📱 共有
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (confirm(`「${stat.quizSetName}」の全カード (${stat.total}枚) の学習進捗をリセットしますか？\n\n全カードが新規カードの状態に戻ります。`)) {
+                            setLoading(true);
+                            try {
+                              const allCards = await spacedRepetitionService.getAllCards();
+                              const cardsToReset = allCards.filter(card => {
+                                if (stat.quizSetId === null) {
+                                  return card.quizSetId === null || card.quizSetId === undefined;
+                                }
+                                return String(card.quizSetId) === String(stat.quizSetId);
+                              });
+
+                              for (const card of cardsToReset) {
+                                const today = new Date();
+                                today.setHours(0, 0, 0, 0);
+                                const resetCard = {
+                                  ...card,
+                                  easinessFactor: 2.5,
+                                  repetitions: 0,
+                                  interval: 0,
+                                  nextReviewDate: today,
+                                  totalReviews: 0,
+                                  correctReviews: 0,
+                                  accuracy: 0,
+                                  isNew: true,
+                                  isDue: true,
+                                  isLearning: true,
+                                  updatedAt: new Date()
+                                };
+                                await spacedRepetitionService.updateCard(resetCard);
+                              }
+
+                              alert(`${cardsToReset.length}枚のカードをリセットしました`);
+                              await loadStats();
+                            } catch (error) {
+                              console.error('Failed to reset cards:', error);
+                              alert('カードのリセットに失敗しました');
+                            } finally {
+                              setLoading(false);
+                            }
+                          }
+                        }}
+                        className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors text-sm"
+                        style={{
+                          backgroundColor: '#ca8a04',
+                          color: '#ffffff'
+                        }}
+                      >
+                        リセット
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (confirm(`「${stat.quizSetName}」の全カード (${stat.total}枚) を削除しますか？\n\nこの操作は取り消せません。`)) {
+                            setLoading(true);
+                            try {
+                              const deletedCount = await spacedRepetitionService.deleteCardsByQuizSetId(stat.quizSetId);
+                              alert(`${deletedCount}枚のカードを削除しました`);
+                              await loadStats();
+                            } catch (error) {
+                              console.error('Failed to delete cards:', error);
+                              alert('カードの削除に失敗しました');
+                            } finally {
+                              setLoading(false);
+                            }
+                          }
+                        }}
+                        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
+                        style={{
+                          backgroundColor: '#dc2626',
+                          color: '#ffffff'
+                        }}
+                      >
+                        削除
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-5 gap-3">
+                    <div>
+                      <div className="text-xs text-gray-600" style={{ color: '#6b7280' }}>トータル</div>
+                      <div className="text-xl font-bold" style={{ color: '#111827' }}>{stat.total}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-green-800" style={{ color: '#166534' }}>新規</div>
+                      <div className="text-xl font-bold text-green-600" style={{ color: '#16a34a' }}>{stat.new}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-yellow-800" style={{ color: '#854d0e' }}>学習中</div>
+                      <div className="text-xl font-bold text-yellow-600" style={{ color: '#ca8a04' }}>{stat.learning}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-blue-800" style={{ color: '#1e40af' }}>復習予定</div>
+                      <div className="text-xl font-bold text-blue-600" style={{ color: '#2563eb' }}>{stat.due}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-purple-800" style={{ color: '#6b21a8' }}>定着率</div>
+                      <div className="text-xl font-bold text-purple-600" style={{ color: '#9333ea' }}>{stat.averageRetention.toFixed(0)}%</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Action Buttons */}
+        <div className="mb-8">
+          {stats.total === 0 ? (
+            <div className="bg-white dark:bg-gray-800 rounded-lg p-8 shadow text-center" style={{ backgroundColor: '#ffffff' }}>
+              <div className="text-6xl mb-4">📚</div>
+              <h3 className="text-xl font-bold mb-2" style={{ color: '#111827' }}>
+                {texts.noCardsYet}
+              </h3>
+              <p className="text-gray-600 dark:text-gray-400 mb-6" style={{ color: '#6b7280' }}>
+                {texts.initializeMessage}
+              </p>
+              <button
+                onClick={handleInitializeCards}
+                disabled={loading}
+                className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+                style={{
+                  backgroundColor: loading ? '#d1d5db' : '#2563eb',
+                  color: '#ffffff'
+                }}
+              >
+                {loading ? texts.initializing : texts.initialize}
+              </button>
+            </div>
+          ) : (
+            <div className="flex justify-center">
+              <button
+                onClick={handleInitializeCards}
+                disabled={loading}
+                className="p-6 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors border-2 border-gray-200 dark:border-gray-700 shadow disabled:opacity-50 disabled:cursor-not-allowed max-w-md w-full"
+                style={{
+                  backgroundColor: loading ? '#f3f4f6' : '#ffffff',
+                  borderColor: '#e5e7eb',
+                  color: '#111827',
+                  opacity: loading ? 0.5 : 1
+                }}
+              >
+                <div className="text-4xl mb-2">🔄</div>
+                <div className="text-xl font-bold mb-1">{texts.initializeCards}</div>
+                <div className="text-sm text-gray-600 dark:text-gray-400" style={{ color: '#6b7280' }}>
+                  {loading ? texts.initializing : `${texts.newCards}: ${stats.new}`}
+                </div>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Add Cards Selector - Always show */}
+        <div className="mb-8">
+          <h3 className="text-lg font-semibold mb-4" style={{ color: '#111827' }}>
+            カードを追加
+          </h3>
+          <div className="grid md:grid-cols-2 gap-4">
+            <button
+              onClick={() => setShowSelector(true)}
+              className="p-4 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors border-2 border-blue-200 dark:border-blue-700 shadow"
+              style={{
+                backgroundColor: '#ffffff',
+                borderColor: '#bfdbfe',
+                color: '#111827'
+              }}
+            >
+              <div className="text-3xl mb-2">📚</div>
+              <div className="text-lg font-bold mb-1">{texts.addFromQuizSet}</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400" style={{ color: '#6b7280' }}>
+                {quizSets.length}個の問題集
+              </div>
+            </button>
+
+            <button
+              onClick={() => setShowSelector(true)}
+              className="p-4 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors border-2 border-green-200 dark:border-green-700 shadow"
+              style={{
+                backgroundColor: '#ffffff',
+                borderColor: '#bbf7d0',
+                color: '#111827'
+              }}
+            >
+              <div className="text-3xl mb-2">🏷️</div>
+              <div className="text-lg font-bold mb-1">{texts.addFromCategory}</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400" style={{ color: '#6b7280' }}>
+                {categories.length}個のカテゴリー
+              </div>
+            </button>
+          </div>
+        </div>
+
+        {/* Selector Modal */}
+        {showSelector && (
+          <div
+            className="fixed inset-0 flex items-center justify-center p-4"
+            style={{
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              zIndex: 9999,
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0
+            }}
+          >
+            <div
+              className="max-w-2xl w-full max-h-[80vh] overflow-auto rounded-xl shadow-2xl"
+              style={{ backgroundColor: '#ffffff', opacity: 1 }}
+            >
+              <div className="p-6 border-b border-gray-200" style={{ backgroundColor: '#ffffff' }}>
+                <h2 className="text-2xl font-bold" style={{ color: '#111827' }}>
+                  {texts.addCards}
+                </h2>
+              </div>
+
+              <div className="p-6" style={{ backgroundColor: '#ffffff' }}>
+                {/* Quiz Sets */}
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold mb-3" style={{ color: '#111827' }}>
+                    {texts.selectQuizSet} (複数選択可)
+                  </h3>
+                  <div className="space-y-2">
+                    {quizSets.map((quizSet) => {
+                      const isSelected = selectedQuizSets.includes(quizSet.id!);
+                      return (
+                        <div
+                          key={quizSet.id}
+                          onClick={() => {
+                            if (isSelected) {
+                              setSelectedQuizSets(selectedQuizSets.filter(id => id !== quizSet.id));
+                            } else {
+                              setSelectedQuizSets([...selectedQuizSets, quizSet.id!]);
+                              setSelectedCategory(null);
+                            }
+                          }}
+                          className={`w-full p-4 text-left rounded-lg border-2 transition-all cursor-pointer ${
+                            isSelected
+                              ? 'border-blue-600 bg-blue-50'
+                              : 'border-gray-200 hover:border-blue-300'
+                          }`}
+                          style={{
+                            borderColor: isSelected ? '#2563eb' : '#e5e7eb',
+                            backgroundColor: isSelected ? '#eff6ff' : 'transparent',
+                            color: '#111827'
+                          }}
+                        >
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {}}
+                              className="w-5 h-5"
+                              style={{ accentColor: '#2563eb' }}
+                            />
+                            <div className="flex-1">
+                              <div className="font-semibold">{quizSet.name}</div>
+                              <div className="text-sm text-gray-600" style={{ color: '#6b7280' }}>
+                                {quizSet.problemIds.length} problems
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Categories */}
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold mb-3" style={{ color: '#111827' }}>
+                    {texts.selectCategory}
+                  </h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    {categories.map((category) => (
+                      <button
+                        key={category}
+                        onClick={() => {
+                          setSelectedCategory(category);
+                          setSelectedQuizSets([]);
+                        }}
+                        className={`p-3 text-left rounded-lg border-2 transition-all ${
+                          selectedCategory === category
+                            ? 'border-green-600 bg-green-50'
+                            : 'border-gray-200 hover:border-green-300'
+                        }`}
+                        style={{
+                          borderColor: selectedCategory === category ? '#16a34a' : '#e5e7eb',
+                          backgroundColor: selectedCategory === category ? '#f0fdf4' : 'transparent',
+                          color: '#111827'
+                        }}
+                      >
+                        {category}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Card Name Input */}
+                <div>
+                  <h3 className="text-lg font-semibold mb-3" style={{ color: '#111827' }}>
+                    カード名 (任意)
+                  </h3>
+                  <input
+                    type="text"
+                    value={cardName}
+                    onChange={(e) => setCardName(e.target.value)}
+                    placeholder="例: 重要問題、基礎問題など"
+                    className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none"
+                    style={{ borderColor: '#d1d5db', color: '#111827' }}
+                  />
+                  <p className="text-sm text-gray-600 mt-2" style={{ color: '#6b7280' }}>
+                    カードに名前を付けると、後で識別しやすくなります
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-6 border-t border-gray-200 flex justify-between items-center" style={{ backgroundColor: '#ffffff' }}>
+                <div className="text-sm text-gray-600" style={{ color: '#6b7280' }}>
+                  {selectedQuizSets.length > 0 && `${selectedQuizSets.length}個の問題集を選択中`}
+                  {selectedCategory && `カテゴリー: ${selectedCategory}`}
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setShowSelector(false);
+                      setSelectedQuizSets([]);
+                      setSelectedCategory(null);
+                    }}
+                    className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                    style={{ color: '#374151', borderColor: '#d1d5db' }}
+                  >
+                    {texts.cancel}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (selectedQuizSets.length > 0) {
+                        handleAddFromQuizSet();
+                      } else if (selectedCategory) {
+                        handleAddFromCategory();
+                      }
+                    }}
+                    disabled={selectedQuizSets.length === 0 && !selectedCategory}
+                    className="px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{
+                      backgroundColor: (selectedQuizSets.length === 0 && !selectedCategory) ? '#d1d5db' : '#2563eb',
+                      color: '#ffffff'
+                    }}
+                  >
+                    {texts.addCards}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* What is SM-2 */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow" style={{ backgroundColor: '#ffffff' }}>
+          <h3 className="text-xl font-bold mb-3" style={{ color: '#111827' }}>
+            💡 {texts.whatIsSM2}
+          </h3>
+          <p className="text-gray-700 dark:text-gray-300 mb-4" style={{ color: '#374151' }}>
+            {texts.sm2Description}
+          </p>
+          <div className="space-y-2">
+            <p className="font-semibold" style={{ color: '#111827' }}>
+              {texts.howItWorks}
+            </p>
+            <ul className="list-disc list-inside space-y-1 text-gray-700 dark:text-gray-300" style={{ color: '#374151' }}>
+              {texts.howItWorksDetails.map((detail, index) => (
+                <li key={index}>{detail}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        {/* Card List Modal */}
+        {showCardList && (
+          <div
+            className="fixed inset-0 flex items-center justify-center p-4"
+            style={{
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              zIndex: 9999,
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0
+            }}
+          >
+            <div
+              className="max-w-6xl w-full max-h-[80vh] overflow-auto rounded-xl shadow-2xl"
+              style={{ backgroundColor: '#ffffff', opacity: 1 }}
+            >
+              <div className="p-6 border-b border-gray-200 flex justify-between items-center" style={{ backgroundColor: '#ffffff' }}>
+                <h2 className="text-2xl font-bold" style={{ color: '#111827' }}>
+                  カード一覧 ({cards.length}枚)
+                </h2>
+                <button
+                  onClick={() => {
+                    setShowCardList(false);
+                    setCards([]);
+                  }}
+                  className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                  style={{ color: '#6b7280' }}
+                >
+                  ✕ 閉じる
+                </button>
+              </div>
+
+              <div className="p-6" style={{ backgroundColor: '#ffffff' }}>
+                <div className="space-y-3">
+                  {cards.map((card) => (
+                    <div
+                      key={card.id}
+                      className="border-2 border-gray-200 rounded-lg p-4"
+                      style={{ borderColor: '#e5e7eb' }}
+                    >
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="flex-1">
+                          {card.name && (
+                            <div className="text-lg font-bold mb-1" style={{ color: '#111827' }}>
+                              📝 {card.name}
+                            </div>
+                          )}
+                          <div className="text-sm text-gray-600" style={{ color: '#6b7280' }}>
+                            問題ID: {card.problemId} | カテゴリー: {card.category || '未分類'}
+                          </div>
+                          <div className="grid grid-cols-5 gap-2 mt-2 text-sm">
+                            <div>
+                              <span className="text-gray-600" style={{ color: '#6b7280' }}>復習回数:</span> {card.totalReviews}
+                            </div>
+                            <div>
+                              <span className="text-gray-600" style={{ color: '#6b7280' }}>正答率:</span> {card.accuracy.toFixed(0)}%
+                            </div>
+                            <div>
+                              <span className="text-gray-600" style={{ color: '#6b7280' }}>E-Factor:</span> {card.easinessFactor.toFixed(2)}
+                            </div>
+                            <div>
+                              <span className="text-gray-600" style={{ color: '#6b7280' }}>間隔:</span> {card.interval}日
+                            </div>
+                            <div>
+                              <span className="text-gray-600" style={{ color: '#6b7280' }}>次回:</span> {new Date(card.nextReviewDate).toLocaleDateString()}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex gap-2 ml-4">
+                          <button
+                            onClick={() => handleEditCard(card)}
+                            className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                            style={{ backgroundColor: '#2563eb', color: '#ffffff' }}
+                          >
+                            編集
+                          </button>
+                          <button
+                            onClick={() => handleDeleteSingleCard(card.id!)}
+                            className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
+                            style={{ backgroundColor: '#dc2626', color: '#ffffff' }}
+                          >
+                            削除
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Card Edit Modal */}
+        {editingCard && (
+          <div
+            className="fixed inset-0 flex items-center justify-center p-4"
+            style={{
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              zIndex: 10000,
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0
+            }}
+          >
+            <div
+              className="max-w-2xl w-full rounded-xl shadow-2xl"
+              style={{ backgroundColor: '#ffffff', opacity: 1 }}
+            >
+              <div className="p-6 border-b border-gray-200" style={{ backgroundColor: '#ffffff' }}>
+                <h2 className="text-2xl font-bold" style={{ color: '#111827' }}>
+                  カードを編集
+                </h2>
+              </div>
+
+              <div className="p-6" style={{ backgroundColor: '#ffffff' }}>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2" style={{ color: '#111827' }}>
+                      カード名
+                    </label>
+                    <input
+                      type="text"
+                      value={editingCard.name || ''}
+                      onChange={(e) => setEditingCard({ ...editingCard, name: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                      style={{ borderColor: '#d1d5db' }}
+                      placeholder="例: 重要問題、基礎問題など"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2" style={{ color: '#111827' }}>
+                      カテゴリー
+                    </label>
+                    <input
+                      type="text"
+                      value={editingCard.category || ''}
+                      onChange={(e) => setEditingCard({ ...editingCard, category: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                      style={{ borderColor: '#d1d5db' }}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-2" style={{ color: '#111827' }}>
+                        E-Factor
+                      </label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="1.3"
+                        value={editingCard.easinessFactor}
+                        onChange={(e) => setEditingCard({ ...editingCard, easinessFactor: parseFloat(e.target.value) })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                        style={{ borderColor: '#d1d5db' }}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2" style={{ color: '#111827' }}>
+                        復習間隔（日）
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editingCard.interval}
+                        onChange={(e) => setEditingCard({ ...editingCard, interval: parseInt(e.target.value) })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                        style={{ borderColor: '#d1d5db' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2" style={{ color: '#111827' }}>
+                      次回復習日
+                    </label>
+                    <input
+                      type="date"
+                      value={new Date(editingCard.nextReviewDate).toISOString().split('T')[0]}
+                      onChange={(e) => setEditingCard({ ...editingCard, nextReviewDate: new Date(e.target.value) })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                      style={{ borderColor: '#d1d5db' }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6 border-t border-gray-200 flex justify-end gap-3" style={{ backgroundColor: '#ffffff' }}>
+                <button
+                  onClick={() => setEditingCard(null)}
+                  className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  style={{ color: '#374151', borderColor: '#d1d5db' }}
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={handleSaveCard}
+                  className="px-6 py-2 rounded-lg font-medium transition-colors"
+                  style={{
+                    backgroundColor: '#2563eb',
+                    color: '#ffffff'
+                  }}
+                >
+                  保存
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+    </>
+  );
+}

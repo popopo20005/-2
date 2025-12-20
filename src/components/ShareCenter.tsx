@@ -1,8 +1,15 @@
 import { useState, useEffect } from 'react';
-import { problemService, quizSetService } from '../lib/database';
+import { problemService, quizSetService, spacedRepetitionService } from '../lib/database';
 import { qrShareService, type ShareData } from '../lib/qrShare';
 import { QRScanner } from './QRScanner';
-import type { Problem, QuizSet } from '../types';
+import { createNewCard } from '../lib/sm2Algorithm';
+import type { Problem, QuizSet, SharedCardList, SharedCardListFull } from '../types';
+
+// エラーメッセージを安全に取得するヘルパー関数
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  return String(error);
+};
 
 interface ShareCenterProps {
   onBack: () => void;
@@ -535,9 +542,9 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
       
       saveCreatedQR(qrData);
       console.log('QR作成完了:', qrData);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(t[currentLang].messages.qrCreateError, error);
-      alert(`${t[currentLang].messages.qrCreateFailed} ${error.message}`);
+      alert(`${t[currentLang].messages.qrCreateFailed} ${getErrorMessage(error)}`);
     } finally {
       setIsGeneratingQR(false);
     }
@@ -548,8 +555,8 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
       const shareData = qrShareService.parseQRData(data);
       setImportedData(shareData);
       setShowScanner(false);
-    } catch (error: any) {
-      alert(`${t[currentLang].messages.qrReadFailed} ${error.message}`);
+    } catch (error: unknown) {
+      alert(`${t[currentLang].messages.qrReadFailed} ${getErrorMessage(error)}`);
     }
   };
 
@@ -563,7 +570,7 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
           type: problem.type,
           explanation: problem.explanation
         };
-        
+
         if (problem.type === 'multiple-choice') {
           newProblem.options = problem.options;
           newProblem.correctAnswer = problem.correctAnswer;
@@ -573,10 +580,10 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
           newProblem.options = []; // Default empty array
           newProblem.correctAnswer = 0; // Default value
         }
-        
+
         await problemService.add(newProblem);
         alert(t[currentLang].messages.problemImported);
-      } else {
+      } else if (shareData.type === 'quizSet') {
         const quizSet = shareData.data as QuizSet;
         await quizSetService.save({
           name: quizSet.name,
@@ -584,10 +591,86 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
           createdAt: new Date()
         });
         alert(t[currentLang].messages.quizSetImported);
+      } else if (shareData.type === 'cardList') {
+        const cardList = shareData.data as SharedCardList;
+
+        // Verify that all problem IDs exist in the database
+        const missingProblems: number[] = [];
+        const validProblems: number[] = [];
+
+        for (const problemId of cardList.problemIds) {
+          const problem = await problemService.getById(problemId);
+          if (problem) {
+            validProblems.push(problemId);
+          } else {
+            missingProblems.push(problemId);
+          }
+        }
+
+        if (missingProblems.length > 0) {
+          const message = language === 'ja'
+            ? `警告: ${missingProblems.length}個の問題がデータベースに存在しません。\n\n存在する問題のみをインポートしますか？\n\n有効: ${validProblems.length}個\n無効: ${missingProblems.length}個`
+            : `Warning: ${missingProblems.length} problems not found in database.\n\nImport only existing problems?\n\nValid: ${validProblems.length}\nInvalid: ${missingProblems.length}`;
+
+          if (!confirm(message)) {
+            return;
+          }
+        }
+
+        if (validProblems.length === 0) {
+          alert(language === 'ja' ? 'インポートできる問題がありません' : 'No problems can be imported');
+          return;
+        }
+
+        // Create spaced repetition cards for valid problems
+        let addedCount = 0;
+        let skippedCount = 0;
+
+        // Build progress data map if available
+        const progressMap = new Map<number, { totalReviews: number; accuracy: number }>();
+        if (cardList.progressData) {
+          cardList.progressData.forEach(progress => {
+            progressMap.set(progress.problemId, {
+              totalReviews: progress.totalReviews,
+              accuracy: progress.accuracy
+            });
+          });
+        }
+
+        for (const problemId of validProblems) {
+          // Check if card already exists
+          const existingCard = await spacedRepetitionService.getCardByProblemId(problemId);
+
+          if (!existingCard) {
+            const problem = await problemService.getById(problemId);
+            if (problem) {
+              const newCard = createNewCard(problemId, problem.category, undefined, cardList.name);
+
+              // Apply progress data if available
+              const progress = progressMap.get(problemId);
+              if (progress) {
+                newCard.totalReviews = progress.totalReviews;
+                newCard.accuracy = progress.accuracy;
+                newCard.correctReviews = Math.round(progress.totalReviews * progress.accuracy / 100);
+              }
+
+              await spacedRepetitionService.createCard(newCard);
+              addedCount++;
+            }
+          } else {
+            skippedCount++;
+          }
+        }
+
+        const message = language === 'ja'
+          ? `カードリスト「${cardList.name}」をインポートしました！\n\n追加: ${addedCount}枚\nスキップ: ${skippedCount}枚（既に存在）`
+          : `Card list "${cardList.name}" imported!\n\nAdded: ${addedCount}\nSkipped: ${skippedCount} (already exist)`;
+
+        alert(message);
       }
       setImportedData(null);
-    } catch (error: any) {
-      alert(`${t[currentLang].messages.importFailed} ${error.message}`);
+    } catch (error: unknown) {
+      alert(`${t[currentLang].messages.importFailed} ${getErrorMessage(error)}`);
     }
   };
 
@@ -622,9 +705,9 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
         console.error('自動解析失敗:', parseError);
         alert(`${t[currentLang].messages.qrReadButParseFailed} ${parseError.message}`);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('画像読み取りエラー:', error);
-      alert(`${t[currentLang].messages.qrReadFinalFailed} ${error.message || 'Unknown error'}`);
+      alert(`${t[currentLang].messages.qrReadFinalFailed} ${getErrorMessage(error)}`);
     }
   };
 
@@ -674,9 +757,9 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
       const shareData = qrShareService.parseQRData(manualQRInput.trim());
       console.log('解析成功:', shareData);
       setImportedData(shareData);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('手動インポートエラー:', error);
-      alert(`${t[currentLang].messages.qrParseFailed} ${error.message}`);
+      alert(`${t[currentLang].messages.qrParseFailed} ${getErrorMessage(error)}`);
     }
   };
 
@@ -725,9 +808,9 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
       
       alert(`${t[currentLang].messages.testSetCreated}\n${t[currentLang].units.problems} ${selected100.length}${t[currentLang].units.questions}\n問題集ID: ${testQuizSetId}`);
       
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('テスト問題集作成エラー:', error);
-      alert(`❌ ${t[currentLang].messages.testSetCreated.replace('✅', '❌')}: ${error.message}`);
+      alert(`❌ ${t[currentLang].messages.testSetCreated.replace('✅', '❌')}: ${getErrorMessage(error)}`);
     }
   };
 
@@ -784,9 +867,9 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
       
       alert(`${t[currentLang].messages.megaSetCreated}\n${t[currentLang].units.problems} ${problemCount}${t[currentLang].units.questions}\n${t[currentLang].messages.createTime} ${duration}${t[currentLang].units.seconds}\n問題集ID: ${megaQuizSetId}`);
       
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('巨大問題集作成エラー:', error);
-      alert(`❌ ${t[currentLang].messages.megaSetCreated.replace('✅', '❌')}: ${error.message}`);
+      alert(`❌ ${t[currentLang].messages.megaSetCreated.replace('✅', '❌')}: ${getErrorMessage(error)}`);
     }
   };
 
@@ -848,9 +931,9 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
       
       alert(`${t[currentLang].messages.fileDownloaded}\n${t[currentLang].messages.fileName} ${fileName}\nサイズ: ${formatDataSize(blob.size)}`);
       
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('ファイルダウンロードエラー:', error);
-      alert(`❌ ${t[currentLang].messages.fileDownloadFailed} ${error.message}`);
+      alert(`❌ ${t[currentLang].messages.fileDownloadFailed} ${getErrorMessage(error)}`);
     }
   };
 
@@ -937,16 +1020,86 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
         });
         
         alert(`${t[currentLang].messages.fullQuizSetImported}\n${t[currentLang].units.problems} ${problems.length}${t[currentLang].units.questions}\n問題集名: ${quizSet.name}`);
+
+      } else if (importData.type === 'cardListFull') {
+        // 完全なカードリスト（問題データ含む）
+        const cardListFull: SharedCardListFull = importData.data || importData;
+
+        // データ構造の確認
+        if (!cardListFull.cards || !Array.isArray(cardListFull.cards)) {
+          throw new Error('カードリストのデータ形式が不正です');
+        }
+
+        let addedCount = 0;
+        const newProblemIds: number[] = [];
+
+        // 問題を先にインポート
+        for (const cardData of cardListFull.cards) {
+          const problem = cardData.problem;
+          const newProblem: any = {
+            category: problem.category,
+            question: problem.question,
+            type: problem.type,
+            explanation: problem.explanation
+          };
+
+          if (problem.type === 'multiple-choice') {
+            newProblem.options = problem.options;
+            newProblem.correctAnswer = problem.correctAnswer;
+            newProblem.answer = false;
+          } else {
+            newProblem.answer = problem.answer;
+            newProblem.options = [];
+            newProblem.correctAnswer = 0;
+          }
+
+          const problemId = await problemService.add(newProblem);
+          newProblemIds.push(problemId);
+        }
+
+        // 問題集を作成
+        const quizSetId = await quizSetService.save({
+          name: `${cardListFull.name} (インポート)`,
+          problemIds: newProblemIds,
+          description: cardListFull.description,
+          createdAt: new Date()
+        });
+
+        // カードを作成（問題集に紐付け）
+        for (let i = 0; i < cardListFull.cards.length; i++) {
+          const cardData = cardListFull.cards[i];
+          const problemId = newProblemIds[i];
+          const problem = cardData.problem;
+
+          // カードを作成
+          const newCard = createNewCard(problemId, problem.category, quizSetId, cardListFull.name);
+
+          // 進捗データがあれば適用
+          if (cardData.totalReviews !== undefined && cardData.accuracy !== undefined) {
+            newCard.totalReviews = cardData.totalReviews;
+            newCard.accuracy = cardData.accuracy;
+            newCard.correctReviews = Math.round(cardData.totalReviews * cardData.accuracy / 100);
+          }
+
+          await spacedRepetitionService.createCard(newCard);
+          addedCount++;
+        }
+
+        const message = language === 'ja'
+          ? `カードリスト「${cardListFull.name}」をインポートしました！\n\n追加: ${addedCount}枚のカード\n${newProblemIds.length}個の問題も含まれています\n問題集名: ${cardListFull.name} (インポート)`
+          : `Card list "${cardListFull.name}" imported!\n\nAdded: ${addedCount} cards\nIncluding ${newProblemIds.length} problems\nQuiz set: ${cardListFull.name} (Imported)`;
+
+        alert(message);
       }
-      
+
       // データを再読み込み
       await loadData();
-      
-    } catch (error: any) {
+
+    } catch (error: unknown) {
       console.error('ファイルインポートエラー:', error);
-      alert(`❌ ${t[currentLang].messages.fileImportFailed} ${error.message}`);
+      alert(`❌ ${t[currentLang].messages.fileImportFailed} ${getErrorMessage(error)}`);
     }
-    
+
     // ファイル入力をリセット
     event.target.value = '';
   };

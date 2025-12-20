@@ -6,8 +6,8 @@ import { AdProvider, useAd } from './contexts/AdContext';
 import { AdFreeProvider } from './contexts/AdFreeContext';
 import { PomodoroProvider } from './contexts/PomodoroContext';
 import { MainMenu } from './components/MainMenu';
-import { DashboardV2 } from './components/DashboardV2';
-import { QuizView } from './components/QuizView';
+import DashboardV2 from './components/DashboardV2';
+import QuizView from './components/QuizView';
 import { PWAInstallPrompt } from './components/PWAInstallPrompt';
 import { AdMobInitializer } from './components/AdMobInitializer';
 import { AdMobBanner } from './components/AdMobBanner';
@@ -41,6 +41,8 @@ const PomodoroTimer = lazy(() => import('./components/PomodoroTimer').then(m => 
 const WeaknessAnalysis = lazy(() => import('./components/WeaknessAnalysis').then(m => ({ default: m.WeaknessAnalysis })));
 const GoalManager = lazy(() => import('./components/GoalManager').then(m => ({ default: m.GoalManager })));
 const NoteManager = lazy(() => import('./components/NoteManager').then(m => ({ default: m.NoteManager })));
+const SpacedRepetitionManager = lazy(() => import('./components/SpacedRepetitionManager').then(m => ({ default: m.SpacedRepetitionManager })));
+const SpacedRepetitionReview = lazy(() => import('./components/SpacedRepetitionReview').then(m => ({ default: m.SpacedRepetitionReview })));
 
 
 
@@ -51,9 +53,62 @@ function AppContent() {
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   // ビューが変更されたら広告表示状態を更新
-  const handleViewChange = (view: View) => {
+  const handleViewChange = (view: View, options?: { quizSetId?: number; problemIds?: number[]; sessionId?: string }) => {
+    // セッションIDが渡された場合は保存済みセッションを再開
+    if (view === 'quiz' && options?.sessionId) {
+      console.log('🎯 Resuming session:', options.sessionId);
+      setQuizParams({
+        sessionId: options.sessionId,
+        mode: 'resume'
+      });
+      setCurrentView('quiz');
+      setAdView('quiz');
+      return;
+    }
+
+    // クイズ画面に遷移する際は問題集IDを保存（ビュー変更の前に）
+    if (view === 'quiz' && options?.quizSetId) {
+      setQuizParams({
+        quizSetId: options.quizSetId,
+        mode: undefined
+      });
+    } else if (view === 'quiz') {
+      // クイズ画面でパラメータなしの場合はクリア
+      setQuizParams(null);
+    }
+
+    // SM-2復習画面に遷移する際は問題集IDを保存してQuizViewで表示
+    if (view === 'spacedRepetitionReview' && options?.quizSetId) {
+      setQuizParams({
+        quizSetId: options.quizSetId,
+        mode: 'review' // SM-2モード
+      });
+      setCurrentView('quiz'); // QuizViewを使用
+      setAdView('quiz');
+      return; // 早期リターン
+    } else if (view === 'spacedRepetitionReview' && options?.problemIds && options.problemIds.length > 0) {
+      // problemIdsが渡された場合は復習期限カードをレビュー
+      console.log('🎯 Starting review with problemIds:', options.problemIds.length);
+      setQuizParams({
+        problemIds: options.problemIds,
+        mode: 'review' // SM-2モード
+      });
+      setCurrentView('quiz');
+      setAdView('quiz');
+      return;
+    } else if (view === 'spacedRepetitionReview') {
+      // quizSetIdもproblemIdsもない場合は全カードをレビュー
+      setQuizParams({
+        mode: 'review' // SM-2モード
+      });
+      setCurrentView('quiz');
+      setAdView('quiz');
+      return;
+    }
+
     setCurrentView(view);
     setAdView(view);
+
     // 統計画面に遷移する際は最新データを読み込むためにキーを更新
     if (view === 'stats') {
       setStatsRefreshKey(prev => prev + 1);
@@ -184,13 +239,15 @@ function AppContent() {
     }
   };
 
-  const startQuizSetWorstProblems = (quizSetId: number, useLatestOnly: boolean) => {
+  const startQuizSetWorstProblems = (quizSetId: number, useLatestOnly: boolean, problemCount?: number | 'all') => {
     setQuizParams({
       quizSetId,
       useLatestOnly,
+      problemCount,
       mode: 'quizSetWorstProblems'
     });
-    handleViewChange('quiz');
+    setCurrentView('quiz');
+    setAdView('quiz');
   };
 
 
@@ -199,7 +256,8 @@ function AppContent() {
       quizSetId,
       mode: undefined
     });
-    handleViewChange('quiz');
+    setCurrentView('quiz');
+    setAdView('quiz');
   };
 
   const startQuizSetCategoryQuiz = (quizSetId: number, category: string) => {
@@ -208,7 +266,8 @@ function AppContent() {
       category,
       mode: 'categoryQuiz'
     });
-    handleViewChange('quiz');
+    setCurrentView('quiz');
+    setAdView('quiz');
   };
 
   const openQuizSetStats = (quizSetId: number) => {
@@ -252,6 +311,10 @@ function AppContent() {
           onBack={() => handleViewChange('menu')}
           onStartQuiz={startQuizSetQuiz}
           onStartCategoryQuiz={startQuizSetCategoryQuiz}
+          onShare={(quizSetId) => {
+            setSelectedQuizSetId(quizSetId);
+            handleViewChange('qrShare');
+          }}
         />;
       case 'stats':
         return <Statistics
@@ -378,6 +441,11 @@ function AppContent() {
         return <GoalManager onBack={() => handleViewChange('menu')} language={language as 'ja' | 'en'} />;
       case 'noteManager':
         return <NoteManager onBack={() => handleViewChange('menu')} />;
+      case 'spacedRepetitionManager':
+        return <SpacedRepetitionManager onNavigate={handleViewChange} />;
+      case 'spacedRepetitionReview':
+        // SM-2復習は現在QuizViewで表示されるため、このケースは使われない
+        return <SpacedRepetitionReview onNavigate={handleViewChange} />;
       default:
         return <MainMenu onNavigate={handleViewChange} onToggleDarkMode={toggleDarkMode} isDarkMode={isDarkMode} />;
     }

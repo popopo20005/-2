@@ -13,6 +13,10 @@ export interface Problem {
   type?: 'true-false' | 'multiple-choice';
   options?: string[];
   correctAnswer?: number;
+  // 学習メモ機能
+  userNotes?: string;
+  noteUpdatedAt?: Date;
+  noteTags?: string[];
 }
 
 export interface SubjectiveFeedbackData {
@@ -31,6 +35,7 @@ export interface HistoryEntry {
   userAnswer?: boolean | number;
   questionText?: string;
   subjectiveFeedback?: SubjectiveFeedbackData; // Subjective feedback
+  responseTime?: number; // 解答時間（ミリ秒）
 }
 
 export interface QuizSet {
@@ -68,6 +73,7 @@ export interface QuizSession {
   resumedAt?: Date;
   lastSaved?: Date;
   completedAt?: Date;
+  elapsedTime?: number; // 経過時間（秒）- 一時停止時に保存
 }
 
 // Backup data structure
@@ -241,6 +247,8 @@ export interface SpacedRepetitionCard {
   isNew: boolean; // Whether this is a new card
   isDue: boolean; // Whether the card is due for review
   isLearning: boolean; // Whether card is in learning phase (repetitions < 2)
+  // Memory stage (optional for backward compatibility)
+  memoryStage?: 'acquisition' | 'consolidation' | 'storage' | 'automaticity';
   // Metadata
   createdAt: Date;
   updatedAt: Date;
@@ -327,4 +335,17 @@ export interface ApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
+}
+
+// View types
+export type View = 'menu' | 'quiz' | 'editor' | 'quizSets' | 'stats' | 'history' | 'settings' | 'migration' | 'backup' | 'share' | 'qrShare' | 'exam' | 'categoryQuiz' | 'problemEdit' | 'quizSetStats' | 'diary' | 'insights' | 'recommendations' | 'sessionSettings' | 'reminderSettings' | 'difficultySettings' | 'spacedRepetition' | 'spacedRepetitionManager' | 'spacedRepetitionReview' | 'guide' | 'pomodoro' | 'weaknessAnalysis' | 'goalManager' | 'noteManager';
+
+export interface QuizParams {
+  quizSetId?: number;
+  useLatestOnly?: boolean;
+  problemCount?: number | 'all';
+  mode?: 'quizSetWorstProblems' | 'categoryQuiz' | 'review' | 'resume';
+  category?: string;
+  problemIds?: number[];
+  sessionId?: string;
 }

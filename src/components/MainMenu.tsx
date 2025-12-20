@@ -286,6 +286,7 @@ export function MainMenu({ onNavigate }: MainMenuProps) {
         diary: { title: '学習日記', desc: '学習の記録と振り返り' },
         insights: { title: '学習インサイト', desc: '統計分析による可視化' },
         weaknessAnalysis: { title: '弱点分析', desc: '苦手分野を自動検出' },
+        spacedRepetitionManager: { title: '間隔反復学習', desc: 'SM-2アルゴリズムで記憶定着' },
         goalManager: { title: '目標管理', desc: '学習目標を設定' },
         noteManager: { title: '学習メモ', desc: 'Markdown形式でメモ管理' },
         backup: { title: 'バックアップ', desc: 'データの保護と復元' },
@@ -353,6 +354,7 @@ export function MainMenu({ onNavigate }: MainMenuProps) {
         diary: { title: 'Study Diary', desc: 'Record and reflect' },
         insights: { title: 'Insights', desc: 'Statistical analysis' },
         weaknessAnalysis: { title: 'Weakness Analysis', desc: 'Auto-detect weak areas' },
+        spacedRepetitionManager: { title: 'Spaced Repetition', desc: 'Memory retention with SM-2' },
         goalManager: { title: 'Goal Management', desc: 'Set learning goals' },
         noteManager: { title: 'Study Notes', desc: 'Markdown note management' },
         backup: { title: 'Backup', desc: 'Data protection' },
@@ -375,7 +377,7 @@ export function MainMenu({ onNavigate }: MainMenuProps) {
       items: [
         { id: 'quiz' as View, icon: BookOpen, color: 'from-blue-500 to-blue-600', ...translations.items.quiz },
         { id: 'exam' as View, icon: GraduationCap, color: 'from-red-500 to-red-600', ...translations.items.exam },
-        { id: 'spacedRepetition' as View, icon: Brain, color: 'from-purple-500 to-purple-600', ...translations.items.spacedRepetition },
+        { id: 'spacedRepetitionManager' as View, icon: Brain, color: 'from-purple-500 to-purple-600', ...translations.items.spacedRepetitionManager },
         { id: 'editor' as View, icon: Plus, color: 'from-green-500 to-green-600', ...translations.items.editor },
         { id: 'problemEdit' as View, icon: FileEdit, color: 'from-orange-500 to-orange-600', ...translations.items.problemEdit },
       ]

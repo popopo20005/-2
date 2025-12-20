@@ -1,16 +1,17 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { getResponseTimeStatistics } from '../services/responseTimeService';
 import { createPortal } from 'react-dom';
 import { resetDatabase } from '../lib/database';
 import { demonstrateLearningStateEstimation } from '../lib/learningStateDemo';
 
 interface SettingsProps {
   onBack: () => void;
-  onToggleDarkMode: () => void;
+  onToggleDarkMode?: () => void;
   isDarkMode: boolean;
   language?: 'ja' | 'en';
 }
 
-export function Settings({ onBack, onToggleDarkMode, isDarkMode, language: propsLanguage }: SettingsProps) {
+export function Settings({ onBack, isDarkMode, language: propsLanguage }: SettingsProps) {
   const [language, setLanguage] = useState(propsLanguage || localStorage.getItem('language') || 'ja');
   const [showHelp, setShowHelp] = useState(false);
   const [showUsage, setShowUsage] = useState(false);
@@ -19,6 +20,46 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode, language: props
     const saved = localStorage.getItem('subjective-feedback-enabled');
     return saved === null ? true : saved === 'true'; // デフォルトで有効
   });
+
+  // ユーザー名設定
+  const [userName, setUserName] = useState(() => {
+    return localStorage.getItem('userName') || '田中 太郎';
+  });
+
+  // 解答時間設定
+  const [tfTimePerQuestion, setTfTimePerQuestion] = useState(() => {
+    return parseInt(localStorage.getItem('tfTimePerQuestion') || '10');
+  });
+  const [mcTimePerQuestion, setMcTimePerQuestion] = useState(() => {
+    return parseInt(localStorage.getItem('mcTimePerQuestion') || '120');
+  });
+  const [autoAdjustTime, setAutoAdjustTime] = useState(() => {
+    return localStorage.getItem('autoAdjustTime') === 'true';
+  });
+
+  // 解答時間統計
+  const [responseTimeStats, setResponseTimeStats] = useState<{
+    tfCount: number;
+    tfAverage: number;
+    mcCount: number;
+    mcAverage: number;
+    canAutoPersonalize: boolean;
+  } | null>(null);
+
+  // 統計情報を取得
+  useEffect(() => {
+    const loadStats = async () => {
+      const stats = await getResponseTimeStatistics();
+      setResponseTimeStats({
+        tfCount: stats.stats.tfCount,
+        tfAverage: Math.round(stats.stats.tfAverageMs / 1000),
+        mcCount: stats.stats.mcCount,
+        mcAverage: Math.round(stats.stats.mcAverageMs / 1000),
+        canAutoPersonalize: stats.canAutoPersonalize
+      });
+    };
+    loadStats();
+  }, []);
 
 
   // 翻訳テキスト
@@ -29,10 +70,21 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode, language: props
       basicSettings: '🎨 基本設定',
       darkMode: 'ダークモード',
       darkModeDesc: 'アプリの外観を変更します',
+      userName: 'ユーザー名',
+      userNameDesc: 'ダッシュボードに表示される名前を設定します',
+      userNamePlaceholder: '名前を入力してください',
       language: '言語設定',
       languageDesc: 'アプリの表示言語を選択してください',
       subjectiveFeedback: '学習効果測定',
       subjectiveFeedbackDesc: '問題回答後に理解度を記録します（オン/オフ切り替え可能）',
+      timeSettings: '⏱️ 解答時間設定',
+      timeSettingsDesc: '問題タイプ別の推奨解答時間をカスタマイズ',
+      tfTime: '○×問題の解答時間',
+      tfTimeDesc: '1問あたりの目安時間（秒）',
+      mcTime: '選択問題の解答時間',
+      mcTimeDesc: '1問あたりの目安時間（秒）',
+      autoAdjust: '自動調整',
+      autoAdjustDesc: 'あなたの実際の解答時間から自動で調整（近日実装予定）',
       helpSupport: '📚 ヘルプ・サポート',
       homepage: {
         title: '🏠 公式ホームページ',
@@ -178,10 +230,21 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode, language: props
       basicSettings: '🎨 Basic Settings',
       darkMode: 'Dark Mode',
       darkModeDesc: 'Change the app appearance',
+      userName: 'User Name',
+      userNameDesc: 'Set the name displayed on the dashboard',
+      userNamePlaceholder: 'Enter your name',
       language: 'Language Settings',
       languageDesc: 'Select the display language for the app',
       subjectiveFeedback: 'Learning Assessment',
       subjectiveFeedbackDesc: 'Record understanding level after answering (ON/OFF toggle)',
+      timeSettings: '⏱️ Response Time Settings',
+      timeSettingsDesc: 'Customize recommended response time by question type',
+      tfTime: 'True/False Question Time',
+      tfTimeDesc: 'Target time per question (seconds)',
+      mcTime: 'Multiple Choice Question Time',
+      mcTimeDesc: 'Target time per question (seconds)',
+      autoAdjust: 'Auto-adjust',
+      autoAdjustDesc: 'Automatically adjust from your actual response time',
       helpSupport: '📚 Help & Support',
       homepage: {
         title: '🏠 Official Homepage',
@@ -344,6 +407,23 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode, language: props
     alert(t[newLanguage as keyof typeof t].languageChanged);
   };
 
+  // 解答時間設定のハンドラー
+  const handleTfTimeChange = (value: number) => {
+    setTfTimePerQuestion(value);
+    localStorage.setItem('tfTimePerQuestion', value.toString());
+  };
+
+  const handleMcTimeChange = (value: number) => {
+    setMcTimePerQuestion(value);
+    localStorage.setItem('mcTimePerQuestion', value.toString());
+  };
+
+  const handleAutoAdjustToggle = () => {
+    const newValue = !autoAdjustTime;
+    setAutoAdjustTime(newValue);
+    localStorage.setItem('autoAdjustTime', newValue.toString());
+  };
+
   const handleSubjectiveFeedbackToggle = () => {
     const newValue = !subjectiveFeedbackEnabled;
     console.log('Toggling subjective feedback:', {
@@ -356,6 +436,12 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode, language: props
     console.log('After toggle:', {
       localStorage_after: localStorage.getItem('subjective-feedback-enabled')
     });
+  };
+
+  // ユーザー名変更ハンドラー
+  const handleUserNameChange = (newName: string) => {
+    setUserName(newName);
+    localStorage.setItem('userName', newName);
   };
 
 
@@ -380,7 +466,24 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode, language: props
             </h2>
             
             <div className="space-y-6">
-              {/* ダークモード切り替えは常時有効化のため削除 */}
+              {/* ユーザー名設定 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-900 dark:text-white mb-2">
+                  {t[currentLang].userName}
+                </label>
+                <p className="text-sm text-gray-500 dark:text-gray-200 mb-3">
+                  {t[currentLang].userNameDesc}
+                </p>
+                <input
+                  type="text"
+                  value={userName}
+                  onChange={(e) => handleUserNameChange(e.target.value)}
+                  placeholder={t[currentLang].userNamePlaceholder}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+
+              <hr className="border-gray-200 dark:border-gray-700" />
 
               <div className="flex items-center justify-between">
                 <div>
@@ -455,6 +558,128 @@ export function Settings({ onBack, onToggleDarkMode, isDarkMode, language: props
                 >
                   {t[currentLang].learningStateEstimation.testButton}
                 </button>
+              </div>
+
+              <hr className="border-gray-200 dark:border-gray-700" />
+
+              {/* ⏱️ 解答時間設定 */}
+              <div>
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+                  {t[currentLang].timeSettings}
+                </h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                  {t[currentLang].timeSettingsDesc}
+                </p>
+
+                {/* ○×問題の解答時間 */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    {t[currentLang].tfTime}
+                  </label>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                    {t[currentLang].tfTimeDesc}
+                  </p>
+                  <div className="flex items-center gap-4">
+                    <input
+                      type="range"
+                      min="5"
+                      max="30"
+                      step="1"
+                      value={tfTimePerQuestion}
+                      onChange={(e) => handleTfTimeChange(parseInt(e.target.value))}
+                      className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
+                    />
+                    <span className="text-lg font-semibold text-gray-900 dark:text-white min-w-[60px] text-right">
+                      {tfTimePerQuestion}秒
+                    </span>
+                  </div>
+                </div>
+
+                {/* 選択問題の解答時間 */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    {t[currentLang].mcTime}
+                  </label>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                    {t[currentLang].mcTimeDesc}
+                  </p>
+                  <div className="flex items-center gap-4">
+                    <input
+                      type="range"
+                      min="30"
+                      max="300"
+                      step="10"
+                      value={mcTimePerQuestion}
+                      onChange={(e) => handleMcTimeChange(parseInt(e.target.value))}
+                      className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
+                    />
+                    <span className="text-lg font-semibold text-gray-900 dark:text-white min-w-[60px] text-right">
+                      {mcTimePerQuestion}秒
+                    </span>
+                  </div>
+                </div>
+
+                {/* 自動調整 */}
+                <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-900 dark:text-white">
+                        🤖 自動調整
+                      </label>
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                        あなたの実際の解答時間から自動で最適化
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                        ※ 適当回答除外: ○×1秒未満・選択3秒未満は計算対象外
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleAutoAdjustToggle}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        autoAdjustTime
+                          ? 'bg-blue-600'
+                          : 'bg-gray-300 dark:bg-gray-600'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          autoAdjustTime ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* 統計情報の表示 */}
+                  {responseTimeStats && (
+                    <div className="text-xs space-y-1 text-gray-600 dark:text-gray-400 border-t border-blue-200 dark:border-blue-800 pt-2">
+                      <div className="flex justify-between">
+                        <span>○×問題:</span>
+                        <span className="font-semibold">
+                          {responseTimeStats.tfCount > 0
+                            ? `平均 ${responseTimeStats.tfAverage}秒 (${responseTimeStats.tfCount}問のデータ)`
+                            : 'データなし'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>選択問題:</span>
+                        <span className="font-semibold">
+                          {responseTimeStats.mcCount > 0
+                            ? `平均 ${responseTimeStats.mcAverage}秒 (${responseTimeStats.mcCount}問のデータ)`
+                            : 'データなし'}
+                        </span>
+                      </div>
+                      {responseTimeStats.canAutoPersonalize ? (
+                        <p className="text-green-600 dark:text-green-400 mt-2">
+                          ✅ 十分なデータがあります。自動調整が有効です。
+                        </p>
+                      ) : (
+                        <p className="text-orange-600 dark:text-orange-400 mt-2">
+                          ⚠️ データが不足しています。10問以上解答すると自動調整が有効になります。
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <hr className="border-gray-200 dark:border-gray-700" />

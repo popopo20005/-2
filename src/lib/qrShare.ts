@@ -1,20 +1,20 @@
 import QRCode from 'qrcode';
 import * as LZString from 'lz-string';
-import type { Problem, QuizSet } from '../types';
+import type { Problem, QuizSet, SharedCardList } from '../types';
 
 export interface ShareData {
   version: string;
-  type: 'problem' | 'quizSet';
+  type: 'problem' | 'quizSet' | 'cardList';
   timestamp: number;
   author: string;
-  data: Problem | QuizSet;
+  data: Problem | QuizSet | SharedCardList;
 }
 
 export const qrShareService = {
   // QRコードを生成
   async generateQRCode(
-    data: Problem | QuizSet, 
-    type: 'problem' | 'quizSet',
+    data: Problem | QuizSet | SharedCardList,
+    type: 'problem' | 'quizSet' | 'cardList',
     author: string = 'Anonymous'
   ): Promise<string> {
     try {
@@ -100,17 +100,26 @@ export const qrShareService = {
         if (!quizSet.name || !Array.isArray(quizSet.problemIds)) {
           throw new Error('問題集データが不完全です');
         }
+      } else if (shareData.type === 'cardList') {
+        const cardList = shareData.data as SharedCardList;
+        if (!cardList.name || !Array.isArray(cardList.problemIds)) {
+          throw new Error('カードリストデータが不完全です');
+        }
+        if (cardList.problemIds.length === 0) {
+          throw new Error('カードリストが空です');
+        }
       }
 
       return shareData;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('QRデータ解析エラー:', error);
-      throw new Error('QRコードの読み取りに失敗しました: ' + (error?.message || '不明なエラー'));
+      const message = error instanceof Error ? error.message : '不明なエラー';
+      throw new Error('QRコードの読み取りに失敗しました: ' + message);
     }
   },
 
   // データサイズを計算（QRコードの制限チェック用）
-  calculateDataSize(data: Problem | QuizSet, type: 'problem' | 'quizSet'): number {
+  calculateDataSize(data: Problem | QuizSet | SharedCardList, type: 'problem' | 'quizSet' | 'cardList'): number {
     const shareData: ShareData = {
       version: '1.0.0',
       type,

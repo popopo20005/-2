@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 import { categoryService, problemService, quizSetService } from '../lib/database';
 import type { Problem } from '../types';
+import { ProblemPreview } from './ProblemPreview';
+import { CSVPreview } from './CSVPreview';
+import { exportToCSV, downloadCSV, downloadTemplate, type ProblemCSV } from '../lib/csvUtils';
+import { ProblemEditorGuide } from './ProblemEditorGuide';
 
 interface ProblemEditorProps {
   onBack: () => void;
@@ -24,7 +28,9 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
     answer: true,
     explanation: '',
     options: ['', '', '', ''],
-    correctAnswer: 0
+    correctAnswer: 0,
+    userNotes: '',
+    noteTags: [] as string[]
   });
   
   // フィルター状態
@@ -43,6 +49,23 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
   const [createQuizSet, setCreateQuizSet] = useState(false);
   const [quizSetName, setQuizSetName] = useState('');
 
+  // プレビュー機能の状態
+  const [hoveredProblem, setHoveredProblem] = useState<Problem | null>(null);
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+
+  // CSV プレビュー状態
+  const [showCsvPreview, setShowCsvPreview] = useState(false);
+  const [csvPreviewData, setCsvPreviewData] = useState<ProblemCSV[]>([]);
+  const [csvErrors, setCsvErrors] = useState<string[]>([]);
+  const [csvWarnings, setCsvWarnings] = useState<string[]>([]);
+  const [parsedProblems, setParsedProblems] = useState<Omit<Problem, 'id'>[]>([]);
+
+  // ガイド表示状態
+  const [showGuide, setShowGuide] = useState(false);
+
+  // インポート・エクスポートヘルプの表示状態
+  const [showImportHelp, setShowImportHelp] = useState(false);
+
   useEffect(() => {
     loadData();
   }, []);
@@ -50,6 +73,14 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
   useEffect(() => {
     filterProblems();
   }, [problems, categoryFilter, searchFilter]);
+
+  // 初回訪問時にガイドを表示
+  useEffect(() => {
+    const hasSeenGuide = localStorage.getItem('problemEditorGuideShown');
+    if (!hasSeenGuide) {
+      setShowGuide(true);
+    }
+  }, []);
 
   // Language change detection
   useEffect(() => {
@@ -362,10 +393,18 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
         };
       }
 
+      // メモフィールドを追加
+      const problemDataWithNotes = {
+        ...problemData,
+        userNotes: formData.userNotes,
+        noteTags: formData.noteTags,
+        noteUpdatedAt: formData.userNotes ? new Date() : undefined
+      };
+
       if (editingProblem?.id) {
-        await problemService.update({ ...problemData, id: editingProblem.id });
+        await problemService.update({ ...problemDataWithNotes, id: editingProblem.id });
       } else {
-        await problemService.add(problemData);
+        await problemService.add(problemDataWithNotes);
       }
       
       await loadData();
@@ -384,7 +423,9 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
       answer: problem.answer !== undefined ? problem.answer : true,
       explanation: problem.explanation,
       options: problem.options || ['', '', '', ''],
-      correctAnswer: problem.correctAnswer || 0
+      correctAnswer: problem.correctAnswer || 0,
+      userNotes: problem.userNotes || '',
+      noteTags: problem.noteTags || []
     });
   };
 
@@ -408,8 +449,15 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
       answer: true,
       explanation: '',
       options: ['', '', '', ''],
-      correctAnswer: 0
+      correctAnswer: 0,
+      userNotes: '',
+      noteTags: []
     });
+  };
+
+  const handleCloseGuide = () => {
+    setShowGuide(false);
+    localStorage.setItem('problemEditorGuideShown', 'true');
   };
 
   const handleFileImport = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -673,40 +721,208 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
   };
 
   const handleExportCsv = () => {
-    if (problems.length === 0) {
-      alert(t[currentLang].messages.noProblemsToExport);
+    // テキストエリアに内容がない場合はエラー
+    if (!csvText.trim()) {
+      alert('下のテキストエリアに問題データを入力してください。\n\n入力後に「CSV形式でエクスポート」ボタンを押すと、入力した問題のみがCSVファイルとしてエクスポートされます。');
       return;
     }
 
-    const csvHeader = 'category,question,answer,explanation,option1,option2,option3,option4\n';
-    const csvRows = problems.map(problem => {
-      const category = `"${problem.category.replace(/"/g, '""')}"`;
-      const question = `"${problem.question.replace(/"/g, '""')}"`;
-      const explanation = `"${problem.explanation.replace(/"/g, '""')}"`;
-      
-      if (problem.type === 'multiple-choice' && problem.options) {
-        const answer = problem.correctAnswer?.toString() || '0';
-        const options = problem.options.map(opt => `"${opt.replace(/"/g, '""')}"`);
-        while (options.length < 4) options.push('""');
-        return `${category},${question},${answer},${explanation},${options.join(',')}`;
-      } else {
-        const answer = problem.answer ? 'TRUE' : 'FALSE';
-        return `${category},${question},${answer},${explanation},"","","",""`;
-      }
-    });
+    // テキストエリアの内容を解析してエクスポート
+    try {
+      console.log('📝 Exporting from text area content');
+      const quizData = parseTextToQuizData(csvText);
 
-    const csvContent = csvHeader + csvRows.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    
-    if (link.download !== undefined) {
-      const url = URL.createObjectURL(blob);
-      link.setAttribute('href', url);
-      link.setAttribute('download', `minguella_problems_${new Date().toISOString().split('T')[0]}.csv`);
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      if (quizData.length === 0) {
+        alert('テキストエリアから有効な問題データが見つかりませんでした。フォーマットを確認してください。');
+        return;
+      }
+
+      // クイズデータをProblem型に変換
+      const problemsToExport: Problem[] = quizData.map(quiz => {
+        const hasOptions = quiz.option1 || quiz.option2 || quiz.option3 || quiz.option4;
+        const isMultipleChoice = Boolean(hasOptions);
+
+        if (isMultipleChoice) {
+          // 多択問題の場合: correctAnswerフィールドを使用
+          return {
+            category: quiz.category,
+            question: quiz.question,
+            correctAnswer: parseInt(quiz.answer),
+            explanation: quiz.explanation,
+            options: [quiz.option1, quiz.option2, quiz.option3, quiz.option4].filter(opt => opt),
+            type: 'multiple-choice' as const
+          };
+        } else {
+          // ○×問題の場合: answerフィールドを使用
+          return {
+            category: quiz.category,
+            question: quiz.question,
+            answer: quiz.answer === 'TRUE',
+            explanation: quiz.explanation,
+            type: 'true-false' as const
+          };
+        }
+      });
+
+      // ファイル名を入力してもらう
+      const defaultFilename = `minguella_problems_${new Date().toISOString().split('T')[0]}`;
+      const userFilename = prompt('CSVファイル名を入力してください（拡張子なし）:', defaultFilename);
+
+      // キャンセルされた場合は中止
+      if (userFilename === null) {
+        console.log('CSV export cancelled by user');
+        return;
+      }
+
+      // ファイル名が空の場合はデフォルト名を使用
+      const filename = (userFilename.trim() || defaultFilename) + '.csv';
+
+      const csvContent = exportToCSV(problemsToExport);
+      downloadCSV(csvContent, filename);
+      alert(`${problemsToExport.length}個の問題を「${filename}」としてエクスポートしました`);
+    } catch (error) {
+      console.error('Export from text error:', error);
+      alert('CSVエクスポートに失敗しました');
+    }
+  };
+
+  const handleDownloadTemplate = () => {
+    downloadTemplate();
+    alert('CSVテンプレートをダウンロードしました');
+  };
+
+  const handleCsvPreview = () => {
+    if (!csvText.trim()) {
+      alert('テキストを入力してください');
+      return;
+    }
+
+    console.log('=== Preview Debug ===');
+    console.log('Text length:', csvText.length);
+    console.log('First 200 chars:', csvText.substring(0, 200));
+
+    try {
+      // テキスト形式を解析
+      const quizData = parseTextToQuizData(csvText);
+
+      if (quizData.length === 0) {
+        alert('有効な問題データが見つかりませんでした。フォーマットを確認してください。');
+        return;
+      }
+
+      // ProblemCSV形式に変換
+      const previewData: ProblemCSV[] = quizData.map(quiz => ({
+        category: quiz.category,
+        question: quiz.question,
+        answer: quiz.answer,
+        explanation: quiz.explanation,
+        option1: quiz.option1 || '',
+        option2: quiz.option2 || '',
+        option3: quiz.option3 || '',
+        option4: quiz.option4 || '',
+        type: (quiz.option1 || quiz.option2 || quiz.option3 || quiz.option4) ? 'multiple-choice' : 'true-false'
+      }));
+
+      // Problem型に変換
+      const problems: Omit<Problem, 'id'>[] = quizData.map(quiz => {
+        const hasOptions = quiz.option1 || quiz.option2 || quiz.option3 || quiz.option4;
+        const isMultipleChoice = Boolean(hasOptions);
+
+        if (isMultipleChoice) {
+          // 多択問題の場合: correctAnswerフィールドを使用
+          return {
+            category: quiz.category,
+            question: quiz.question,
+            correctAnswer: parseInt(quiz.answer),
+            explanation: quiz.explanation,
+            options: [quiz.option1, quiz.option2, quiz.option3, quiz.option4].filter(opt => opt),
+            type: 'multiple-choice' as const
+          };
+        } else {
+          // ○×問題の場合: answerフィールドを使用
+          return {
+            category: quiz.category,
+            question: quiz.question,
+            answer: quiz.answer === 'TRUE',
+            explanation: quiz.explanation,
+            type: 'true-false' as const
+          };
+        }
+      });
+
+      console.log('Parse result:', {
+        problemsCount: problems.length,
+        previewCount: previewData.length
+      });
+      console.log('Preview data:', previewData);
+
+      setCsvPreviewData(previewData);
+      setCsvErrors([]);
+      setCsvWarnings([]);
+      setParsedProblems(problems);
+      setShowCsvPreview(true);
+    } catch (error) {
+      console.error('Parse error:', error);
+      alert(`データの解析中にエラーが発生しました: ${(error as Error).message}`);
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    setShowCsvPreview(false);
+
+    try {
+      console.log('=== Import Start ===');
+      console.log('Parsed problems count:', parsedProblems.length);
+      console.log('Parsed problems:', parsedProblems);
+
+      const addedProblemIds: number[] = [];
+
+      for (let i = 0; i < parsedProblems.length; i++) {
+        const problem = parsedProblems[i];
+        console.log(`Processing problem ${i + 1}:`, problem);
+        if (problem.options) {
+          console.log(`  Options for problem ${i + 1}:`, problem.options);
+        }
+
+        // カテゴリーを自動追加
+        try {
+          await categoryService.add(problem.category);
+        } catch (error) {
+          // カテゴリーが既に存在する場合は無視
+          console.log('Category add error (ignored):', error);
+        }
+
+        try {
+          const problemId = await problemService.add(problem);
+          addedProblemIds.push(problemId);
+          console.log(`Problem ${i + 1} added with ID:`, problemId);
+        } catch (error) {
+          console.error(`Failed to add problem ${i + 1}:`, error);
+          console.error('Error message:', (error as Error).message);
+          console.error('Error details:', error);
+          throw error;
+        }
+      }
+
+      // 問題集作成オプション
+      if (createQuizSet && quizSetName.trim() && addedProblemIds.length > 0) {
+        const quizSetData = {
+          name: quizSetName.trim(),
+          problemIds: addedProblemIds,
+          subjects: [],
+          subjectMap: {}
+        };
+        await quizSetService.save(quizSetData);
+      }
+
+      alert(`${addedProblemIds.length}個の問題をインポートしました${createQuizSet ? `\n問題集「${quizSetName}」を作成しました` : ''}`);
+      setCsvText('');
+      setQuizSetName('');
+      setCreateQuizSet(false);
+      await loadData();
+    } catch (error) {
+      console.error('Import error:', error);
+      alert('インポート中にエラーが発生しました');
     }
   };
 
@@ -942,21 +1158,34 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
       return `${category},${question},${answer},${explanation},${option1},${option2},${option3},${option4}`;
     });
 
+    // ファイル名を入力してもらう
+    const defaultFilename = `generated_problems_${new Date().toISOString().split('T')[0]}`;
+    const userFilename = prompt('CSVファイル名を入力してください（拡張子なし）:', defaultFilename);
+
+    // キャンセルされた場合は中止
+    if (userFilename === null) {
+      console.log('CSV generation cancelled by user');
+      return;
+    }
+
+    // ファイル名が空の場合はデフォルト名を使用
+    const filename = (userFilename.trim() || defaultFilename) + '.csv';
+
     const csvContent = csvHeader + csvRows.join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
-    
+
     if (link.download !== undefined) {
       const url = URL.createObjectURL(blob);
       link.setAttribute('href', url);
-      link.setAttribute('download', `generated_problems_${new Date().toISOString().split('T')[0]}.csv`);
+      link.setAttribute('download', filename);
       link.style.visibility = 'hidden';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
     }
-    
-    alert(`${quizData.length}個の問題をCSVファイルに変換しました。`);
+
+    alert(`${quizData.length}個の問題を「${filename}」として変換しました。`);
   };
 
   const copyToClipboard = (text: string, type: string) => {
@@ -1064,12 +1293,24 @@ ________________________________________
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-8">
       <div className="max-w-6xl mx-auto">
         <header className="mb-8">
-          <button
-            onClick={onBack}
-            className="quiz-action-button mb-4 px-4 py-2 rounded-lg transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm"
-          >
-            {t[currentLang].buttons.backToMenu}
-          </button>
+          <div className="flex items-center justify-between mb-4">
+            <button
+              onClick={onBack}
+              className="quiz-action-button px-4 py-2 rounded-lg transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm"
+            >
+              {t[currentLang].buttons.backToMenu}
+            </button>
+            <button
+              onClick={() => setShowGuide(true)}
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-all shadow-md hover:shadow-lg transform hover:scale-105"
+              title="ガイドを表示"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>使い方ガイド</span>
+            </button>
+          </div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{t[currentLang].pageTitle}</h1>
         </header>
 
@@ -1087,7 +1328,7 @@ ________________________________________
                   value={newCategoryName}
                   onChange={(e) => setNewCategoryName(e.target.value)}
                   placeholder={t[currentLang].labels.newCategoryName}
-                  className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                  className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
                 <button
                   onClick={handleAddCategory}
@@ -1132,7 +1373,7 @@ ________________________________________
                 <select
                   value={formData.category}
                   onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 >
                   <option value="">{t[currentLang].labels.selectCategory}</option>
                   {categories.map((category) => (
@@ -1148,7 +1389,7 @@ ________________________________________
                 <select
                   value={formData.type}
                   onChange={(e) => setFormData({ ...formData, type: e.target.value as 'true-false' | 'multiple-choice' })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 >
                   <option value="true-false">{t[currentLang].labels.trueFalse}</option>
                   <option value="multiple-choice">{t[currentLang].labels.multipleChoice}</option>
@@ -1163,7 +1404,7 @@ ________________________________________
                   value={formData.question}
                   onChange={(e) => setFormData({ ...formData, question: e.target.value })}
                   rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   placeholder={t[currentLang].labels.questionPlaceholder}
                 />
               </div>
@@ -1216,7 +1457,7 @@ ________________________________________
                             setFormData({ ...formData, options: newOptions });
                           }}
                           placeholder={`${t[currentLang].labels.optionPlaceholder} ${index + 1}`}
-                          className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                          className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                         />
                       </div>
                     ))}
@@ -1232,7 +1473,7 @@ ________________________________________
                   value={formData.explanation}
                   onChange={(e) => setFormData({ ...formData, explanation: e.target.value })}
                   rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   placeholder={t[currentLang].labels.explanationPlaceholder}
                 />
               </div>
@@ -1257,10 +1498,194 @@ ________________________________________
 
         {/* インポート・エクスポート */}
         <div className="mt-8 bg-gradient-to-br from-purple-50 to-violet-50 dark:from-purple-900/20 dark:to-violet-900/20 border border-purple-200 dark:border-purple-800 rounded-lg shadow-md p-6">
-          <h2 className="text-xl font-semibold text-purple-900 dark:text-purple-100 mb-4">
-            {t[currentLang].sections.importExport}
-          </h2>
-          
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold text-purple-900 dark:text-purple-100">
+              {t[currentLang].sections.importExport}
+            </h2>
+            <button
+              onClick={() => setShowImportHelp(!showImportHelp)}
+              className="flex items-center space-x-2 px-3 py-2 bg-purple-100 dark:bg-purple-900/40 hover:bg-purple-200 dark:hover:bg-purple-800/60 text-purple-900 dark:text-purple-100 rounded-lg transition-all"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="text-sm font-medium">{showImportHelp ? '使い方を閉じる' : '使い方を見る'}</span>
+            </button>
+          </div>
+
+          {/* 使い方ヘルプセクション */}
+          {showImportHelp && (
+            <div className="mb-6 bg-white dark:bg-gray-800 rounded-lg border-2 border-purple-300 dark:border-purple-700 p-6 space-y-6">
+              {/* AIツール用プロンプト */}
+              <div className="space-y-3">
+                <h3 className="text-lg font-bold text-purple-900 dark:text-purple-100 flex items-center space-x-2">
+                  <span>🤖</span>
+                  <span>AIツールで問題を生成</span>
+                </h3>
+                <p className="text-sm text-gray-700 dark:text-gray-300">
+                  ChatGPT、Claude、Geminiなどに以下のプロンプトを送信して、問題データを生成できます：
+                </p>
+                <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg border border-gray-300 dark:border-gray-600">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-gray-600 dark:text-gray-400">プロンプト例</span>
+                    <button
+                      onClick={() => {
+                        const promptText = `以下の形式で、日本史の問題を5問作成してください：
+
+カテゴリー: [カテゴリー名]
+問題: [問題文]
+正解: [TRUE または FALSE、または選択肢番号 0-3]
+解説: [解説文]
+
+○×問題の場合：
+- 正解は TRUE（正しい）または FALSE（誤り）
+
+多択問題の場合：
+- 選択肢1: [選択肢]
+- 選択肢2: [選択肢]
+- 選択肢3: [選択肢]
+- 選択肢4: [選択肢]
+- 正解: [0-3の番号（0=1番目、1=2番目、2=3番目、3=4番目）]`;
+                        navigator.clipboard.writeText(promptText);
+                        alert('プロンプトをクリップボードにコピーしました！');
+                      }}
+                      className="text-xs px-2 py-1 bg-purple-500 hover:bg-purple-600 text-white rounded transition-all"
+                    >
+                      📋 コピー
+                    </button>
+                  </div>
+                  <pre className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap font-mono">
+{`以下の形式で、日本史の問題を5問作成してください：
+
+カテゴリー: [カテゴリー名]
+問題: [問題文]
+正解: [TRUE または FALSE、または選択肢番号 0-3]
+解説: [解説文]
+
+○×問題の場合：
+- 正解は TRUE（正しい）または FALSE（誤り）
+
+多択問題の場合：
+- 選択肢1: [選択肢]
+- 選択肢2: [選択肢]
+- 選択肢3: [選択肢]
+- 選択肢4: [選択肢]
+- 正解: [0-3の番号（0=1番目、1=2番目、2=3番目、3=4番目）]`}
+                  </pre>
+                </div>
+              </div>
+
+              {/* ○×問題の例 */}
+              <div className="space-y-3">
+                <h3 className="text-lg font-bold text-green-900 dark:text-green-100 flex items-center space-x-2">
+                  <span>⭕</span>
+                  <span>○×問題の形式</span>
+                </h3>
+                <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border border-green-300 dark:border-green-700">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-green-700 dark:text-green-300">例</span>
+                    <button
+                      onClick={() => {
+                        const example = `カテゴリー: 日本史
+問題: 徳川家康は江戸幕府を開いた
+正解: TRUE
+解説: 1603年に徳川家康が江戸幕府を開きました`;
+                        navigator.clipboard.writeText(example);
+                        alert('例をクリップボードにコピーしました！');
+                      }}
+                      className="text-xs px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded transition-all"
+                    >
+                      📋 コピー
+                    </button>
+                  </div>
+                  <pre className="text-sm font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
+{`カテゴリー: 日本史
+問題: 徳川家康は江戸幕府を開いた
+正解: TRUE
+解説: 1603年に徳川家康が江戸幕府を開きました`}
+                  </pre>
+                  <p className="text-xs text-green-700 dark:text-green-300 mt-2">
+                    💡 正解は <code className="bg-green-200 dark:bg-green-800 px-1 rounded">TRUE</code>（正しい）または <code className="bg-green-200 dark:bg-green-800 px-1 rounded">FALSE</code>（誤り）
+                  </p>
+                </div>
+              </div>
+
+              {/* 多択問題の例 */}
+              <div className="space-y-3">
+                <h3 className="text-lg font-bold text-blue-900 dark:text-blue-100 flex items-center space-x-2">
+                  <span>🔢</span>
+                  <span>多択問題の形式</span>
+                </h3>
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-300 dark:border-blue-700">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">例</span>
+                    <button
+                      onClick={() => {
+                        const example = `カテゴリー: 世界史
+問題: 第一次世界大戦が始まったのは何年か？
+選択肢1: 1912年
+選択肢2: 1914年
+選択肢3: 1916年
+選択肢4: 1918年
+正解: 1
+解説: 1914年にサラエボ事件をきっかけに開戦`;
+                        navigator.clipboard.writeText(example);
+                        alert('例をクリップボードにコピーしました！');
+                      }}
+                      className="text-xs px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded transition-all"
+                    >
+                      📋 コピー
+                    </button>
+                  </div>
+                  <pre className="text-sm font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
+{`カテゴリー: 世界史
+問題: 第一次世界大戦が始まったのは何年か？
+選択肢1: 1912年
+選択肢2: 1914年
+選択肢3: 1916年
+選択肢4: 1918年
+正解: 1
+解説: 1914年にサラエボ事件をきっかけに開戦`}
+                  </pre>
+                  <p className="text-xs text-blue-700 dark:text-blue-300 mt-2">
+                    💡 正解は選択肢の番号：<code className="bg-blue-200 dark:bg-blue-800 px-1 rounded">0</code>=1番目、<code className="bg-blue-200 dark:bg-blue-800 px-1 rounded">1</code>=2番目、<code className="bg-blue-200 dark:bg-blue-800 px-1 rounded">2</code>=3番目、<code className="bg-blue-200 dark:bg-blue-800 px-1 rounded">3</code>=4番目
+                  </p>
+                </div>
+              </div>
+
+              {/* インポート手順 */}
+              <div className="space-y-3">
+                <h3 className="text-lg font-bold text-orange-900 dark:text-orange-100 flex items-center space-x-2">
+                  <span>📥</span>
+                  <span>インポート手順</span>
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="bg-orange-50 dark:bg-orange-900/20 p-3 rounded-lg border border-orange-300 dark:border-orange-700">
+                    <div className="flex items-center space-x-2 mb-2">
+                      <div className="w-6 h-6 bg-orange-500 rounded-full flex items-center justify-center text-white text-xs font-bold">1</div>
+                      <span className="font-semibold text-sm text-gray-900 dark:text-white">貼り付け</span>
+                    </div>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">下のテキストエリアにAI生成データを貼り付け</p>
+                  </div>
+                  <div className="bg-orange-50 dark:bg-orange-900/20 p-3 rounded-lg border border-orange-300 dark:border-orange-700">
+                    <div className="flex items-center space-x-2 mb-2">
+                      <div className="w-6 h-6 bg-orange-500 rounded-full flex items-center justify-center text-white text-xs font-bold">2</div>
+                      <span className="font-semibold text-sm text-gray-900 dark:text-white">プレビュー</span>
+                    </div>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">「プレビュー」ボタンで内容確認</p>
+                  </div>
+                  <div className="bg-orange-50 dark:bg-orange-900/20 p-3 rounded-lg border border-orange-300 dark:border-orange-700">
+                    <div className="flex items-center space-x-2 mb-2">
+                      <div className="w-6 h-6 bg-orange-500 rounded-full flex items-center justify-center text-white text-xs font-bold">3</div>
+                      <span className="font-semibold text-sm text-gray-900 dark:text-white">インポート</span>
+                    </div>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">問題なければ「インポート」実行</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* 問題集作成オプション */}
           <div className="mb-6 bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
             <div className="flex items-center space-x-3 mb-3">
@@ -1282,7 +1707,7 @@ ________________________________________
                   value={quizSetName}
                   onChange={(e) => setQuizSetName(e.target.value)}
                   placeholder={t[currentLang].importExport.quizSetNamePlaceholder}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
                 />
               </div>
             )}
@@ -1318,12 +1743,20 @@ ________________________________________
                 )}
               </div>
               
-              <button
-                onClick={handleExportCsv}
-                className="quiz-action-button w-full px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm"
-              >
-                {t[currentLang].buttons.export}
-              </button>
+              <div className="space-y-2">
+                <button
+                  onClick={handleExportCsv}
+                  className="quiz-action-button w-full px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm"
+                >
+                  {t[currentLang].buttons.export}
+                </button>
+                <button
+                  onClick={handleDownloadTemplate}
+                  className="w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-all shadow-md hover:shadow-lg"
+                >
+                  📥 CSVテンプレートをダウンロード
+                </button>
+              </div>
             </div>
 
             {/* テキストからCSV生成 */}
@@ -1343,31 +1776,39 @@ ________________________________________
                   e.stopPropagation();
                 }}
                 rows={8}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white selection:bg-blue-200 selection:text-gray-900 dark:selection:bg-blue-700 dark:selection:text-white"
                 placeholder={t[currentLang].importExport.csvDataPlaceholder}
               />
               
-              <div className="flex space-x-2">
+              <div className="space-y-2">
                 <button
-                  onClick={() => {
-                    console.log('インポートボタンクリック');
-                    console.log('createQuizSet:', createQuizSet);
-                    console.log('quizSetName:', quizSetName);
-                    console.log('csvText length:', csvText.length);
-                    handleCsvTextImport();
-                  }}
-                  disabled={createQuizSet && !quizSetName.trim()}
-                  className="quiz-action-button flex-1 px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm disabled:bg-gray-400 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
-                  title={createQuizSet && !quizSetName.trim() ? t[currentLang].messages.quizSetNameRequired : ""}
+                  onClick={handleCsvPreview}
+                  className="w-full px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-all shadow-md hover:shadow-lg"
                 >
-                  {t[currentLang].buttons.import}
+                  👁️ CSVプレビュー（検証付き）
                 </button>
-                <button
-                  onClick={generateCsvFromText}
-                  className="quiz-action-button flex-1 px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm"
-                >
-                  {t[currentLang].buttons.generateCsv}
-                </button>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => {
+                      console.log('インポートボタンクリック');
+                      console.log('createQuizSet:', createQuizSet);
+                      console.log('quizSetName:', quizSetName);
+                      console.log('csvText length:', csvText.length);
+                      handleCsvTextImport();
+                    }}
+                    disabled={createQuizSet && !quizSetName.trim()}
+                    className="quiz-action-button flex-1 px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm disabled:bg-gray-400 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
+                    title={createQuizSet && !quizSetName.trim() ? t[currentLang].messages.quizSetNameRequired : ""}
+                  >
+                    {t[currentLang].buttons.import}
+                  </button>
+                  <button
+                    onClick={generateCsvFromText}
+                    className="quiz-action-button flex-1 px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm"
+                  >
+                    {t[currentLang].buttons.generateCsv}
+                  </button>
+                </div>
               </div>
 
               {/* AIツール用プロンプト表示 */}
@@ -1423,11 +1864,11 @@ ________________________________________
         <div className="mt-8 bg-gradient-to-br from-orange-50 to-red-50 dark:from-orange-900/20 dark:to-red-900/20 border border-orange-200 dark:border-orange-800 rounded-lg shadow-md p-6">
           <h2 className="text-xl font-semibold text-orange-900 dark:text-orange-100 mb-4">{t[currentLang].sections.problemList}</h2>
           
-          <div className="mb-4 flex space-x-4">
+          <div className="mb-4 grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4">
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
             >
               <option value="">{t[currentLang].labels.allCategories}</option>
               {categories.map((category) => (
@@ -1439,7 +1880,7 @@ ________________________________________
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               placeholder={t[currentLang].labels.searchPlaceholder}
-              className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
             />
           </div>
 
@@ -1455,7 +1896,20 @@ ________________________________________
               </thead>
               <tbody>
                 {filteredProblems.map((problem) => (
-                  <tr key={problem.id} className="border-b border-gray-100 dark:border-gray-700">
+                  <tr
+                    key={problem.id}
+                    className="border-b border-gray-100 dark:border-gray-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors cursor-pointer"
+                    onMouseEnter={(e) => {
+                      setHoveredProblem(problem);
+                      setMousePosition({ x: e.clientX + 15, y: e.clientY + 15 });
+                    }}
+                    onMouseLeave={() => setHoveredProblem(null)}
+                    onMouseMove={(e) => {
+                      if (hoveredProblem?.id === problem.id) {
+                        setMousePosition({ x: e.clientX + 15, y: e.clientY + 15 });
+                      }
+                    }}
+                  >
                     <td className="py-2 px-4 text-gray-900 dark:text-white">{problem.category}</td>
                     <td className="py-2 px-4 text-gray-900 dark:text-white">
                       {problem.question.length > 50 ? problem.question.substring(0, 50) + '...' : problem.question}
@@ -1492,6 +1946,32 @@ ________________________________________
           </div>
         </div>
       </div>
+
+      {/* プレビュー機能 */}
+      {hoveredProblem && (
+        <ProblemPreview
+          problem={hoveredProblem}
+          language={language as 'ja' | 'en'}
+          position={mousePosition}
+        />
+      )}
+
+      {/* CSV プレビューモーダル */}
+      {showCsvPreview && (
+        <CSVPreview
+          data={csvPreviewData}
+          errors={csvErrors}
+          warnings={csvWarnings}
+          onClose={() => setShowCsvPreview(false)}
+          onConfirm={handleConfirmImport}
+          language={language as 'ja' | 'en'}
+        />
+      )}
+
+      {/* 問題作成ガイド */}
+      {showGuide && (
+        <ProblemEditorGuide onClose={handleCloseGuide} />
+      )}
     </div>
   );
 }
