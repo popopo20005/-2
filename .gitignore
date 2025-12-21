@@ -40,4 +40,10 @@ logs
 
 # Temporary files
 *.tmp
-*.temp
+*.tempnul
+Lib/
+Scripts/
+SuperClaude_Framework/
+
+# Unwanted public files
+public/ダウンロード/
