@@ -1159,8 +1159,9 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
         if (isMultipleChoice) {
           // 多択問題の場合: correctAnswerフィールドを使用
           // quiz.correctAnswerがある場合はそのまま（0-indexed）、なければanswerから変換
-          const correctAnswerIndex = quiz.correctAnswer !== undefined
-            ? quiz.correctAnswer
+          const quizWithAnswer = quiz as any;
+          const correctAnswerIndex = quizWithAnswer.correctAnswer !== undefined
+            ? quizWithAnswer.correctAnswer
             : parseInt(quiz.answer) - 1; // 1-indexed→0-indexedに変換
           return {
             category: quiz.category,
@@ -1255,8 +1256,9 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
         if (isMultipleChoice) {
           // 多択問題の場合: correctAnswerフィールドを使用
           // quiz.correctAnswerがある場合はそのまま（0-indexed）、なければanswerから変換
-          const correctAnswerIndex = quiz.correctAnswer !== undefined
-            ? quiz.correctAnswer
+          const quizWithAnswer = quiz as any;
+          const correctAnswerIndex = quizWithAnswer.correctAnswer !== undefined
+            ? quizWithAnswer.correctAnswer
             : parseInt(quiz.answer) - 1; // 1-indexed→0-indexedに変換
           return {
             category: quiz.category,
