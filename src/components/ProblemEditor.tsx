@@ -1,10 +1,31 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import toast from 'react-hot-toast';
 import { categoryService, problemService, quizSetService } from '../lib/database';
 import type { Problem } from '../types';
-import { ProblemPreview } from './ProblemPreview';
 import { CSVPreview } from './CSVPreview';
 import { exportToCSV, downloadCSV, downloadTemplate, type ProblemCSV } from '../lib/csvUtils';
 import { ProblemEditorGuide } from './ProblemEditorGuide';
+import { useTags } from '../hooks/useTags';
+import { TagManager } from './TagManager';
+import { NoteEditor } from './NoteEditor';
+import { actionHistoryService } from '../services/actionHistoryService';
+import { UndoToast } from './UndoToast';
+import { checkDuplicate, type DuplicateCheckResult } from '../lib/duplicateDetection';
+import { DuplicateWarningModal } from './DuplicateWarningModal';
+import { DuplicateResolveModal } from './DuplicateResolveModal';
+import { SelectionManager } from '../lib/selectionManager';
+import { BulkSelectionToolbar } from './BulkSelectionToolbar';
+import { BulkActionModal } from './BulkActionModal';
+import { KeyboardShortcutManager } from '../lib/keyboardShortcuts';
+import { QuickActionMenu, type QuickAction } from './QuickActionMenu';
+import { ShortcutHelpModal } from './ShortcutHelpModal';
+import {
+  Edit2,
+  Copy,
+  Trash2,
+  Share2,
+  Star
+} from 'lucide-react';
 
 interface ProblemEditorProps {
   onBack: () => void;
@@ -13,7 +34,6 @@ interface ProblemEditorProps {
 export function ProblemEditor({ onBack }: ProblemEditorProps) {
   const [categories, setCategories] = useState<string[]>([]);
   const [problems, setProblems] = useState<Problem[]>([]);
-  const [filteredProblems, setFilteredProblems] = useState<Problem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
   // Language state management
@@ -27,10 +47,11 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
     type: 'true-false' as 'true-false' | 'multiple-choice',
     answer: true,
     explanation: '',
-    options: ['', '', '', ''],
+    options: ['', ''],
     correctAnswer: 0,
     userNotes: '',
-    noteTags: [] as string[]
+    noteTags: [] as string[],
+    tags: [] as string[]
   });
   
   // フィルター状態
@@ -42,6 +63,16 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
   
   // インポート・エクスポート状態
   const [csvText, setCsvText] = useState('');
+
+  // 重複チェック状態（保存時）
+  const [duplicateCheckResult, setDuplicateCheckResult] = useState<DuplicateCheckResult | null>(null);
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [forceSave, setForceSave] = useState(false);
+
+  // 問題一覧での重複検出状態
+  const [duplicateProblemsMap, setDuplicateProblemsMap] = useState<Map<number, Problem[]>>(new Map());
+  const [showDuplicateResolveModal, setShowDuplicateResolveModal] = useState(false);
+  const [selectedDuplicateProblem, setSelectedDuplicateProblem] = useState<Problem | null>(null);
   const [showCsvFormat, setShowCsvFormat] = useState(false);
   const [showPrompts, setShowPrompts] = useState(false);
   
@@ -49,9 +80,9 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
   const [createQuizSet, setCreateQuizSet] = useState(false);
   const [quizSetName, setQuizSetName] = useState('');
 
-  // プレビュー機能の状態
-  const [hoveredProblem, setHoveredProblem] = useState<Problem | null>(null);
-  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+  // 問題詳細モーダルの状態
+  const [showProblemDetailModal, setShowProblemDetailModal] = useState(false);
+  const [selectedProblemDetail, setSelectedProblemDetail] = useState<Problem | null>(null);
 
   // CSV プレビュー状態
   const [showCsvPreview, setShowCsvPreview] = useState(false);
@@ -66,13 +97,30 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
   // インポート・エクスポートヘルプの表示状態
   const [showImportHelp, setShowImportHelp] = useState(false);
 
+  // 一括選択状態
+  const [selectionManager] = useState(() => new SelectionManager());
+  const [selectedCount, setSelectedCount] = useState(0);
+  const [showBulkActionModal, setShowBulkActionModal] = useState(false);
+  const [quizSets, setQuizSets] = useState<any[]>([]);
+
+  // クイックアクションメニュー状態
+  const [contextMenu, setContextMenu] = useState<{
+    position: { x: number; y: number };
+    problemId: number;
+  } | null>(null);
+  const [shortcutManager] = useState(() => new KeyboardShortcutManager());
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+
+  // タッチ長押し用のref
+  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const touchPositionRef = useRef<{ x: number; y: number } | null>(null);
+
+  // タグリフレッシュ用のフック
+  const { refreshTags } = useTags();
+
   useEffect(() => {
     loadData();
   }, []);
-
-  useEffect(() => {
-    filterProblems();
-  }, [problems, categoryFilter, searchFilter]);
 
   // 初回訪問時にガイドを表示
   useEffect(() => {
@@ -103,6 +151,74 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
       clearInterval(interval);
     };
   }, [language]);
+
+  // Register keyboard shortcuts
+  useEffect(() => {
+    // Edit shortcut (E key)
+    shortcutManager.register('edit', {
+      key: 'e',
+      description: language === 'ja' ? '選択した問題を編集' : 'Edit selected problem',
+      category: language === 'ja' ? '編集操作' : 'Edit Operations',
+      action: () => {
+        const selected = selectionManager.getSelectedIds();
+        if (selected.length === 1) {
+          const problem = problems.find(p => p.id === selected[0]);
+          if (problem) {
+            handleEditProblem(problem);
+          }
+        } else if (contextMenu && contextMenu.problemId) {
+          const problem = problems.find(p => p.id === contextMenu.problemId);
+          if (problem) {
+            handleEditProblem(problem);
+          }
+        }
+      }
+    });
+
+    // Delete shortcut (Delete/Backspace key)
+    shortcutManager.register('delete', {
+      key: 'Delete',
+      description: language === 'ja' ? '選択した問題を削除' : 'Delete selected problems',
+      category: language === 'ja' ? '編集操作' : 'Edit Operations',
+      action: () => {
+        const selected = selectionManager.getSelectedIds();
+        if (selected.length > 0) {
+          selected.forEach(id => handleDeleteProblem(id));
+        } else if (contextMenu && contextMenu.problemId) {
+          handleDeleteProblem(contextMenu.problemId);
+        }
+      },
+      preventDefault: true
+    });
+
+    // Duplicate shortcut (D key)
+    shortcutManager.register('duplicate', {
+      key: 'd',
+      description: language === 'ja' ? '問題を複製' : 'Duplicate problem',
+      category: language === 'ja' ? '編集操作' : 'Edit Operations',
+      action: () => {
+        if (contextMenu && contextMenu.problemId) {
+          const problem = problems.find(p => p.id === contextMenu.problemId);
+          if (problem) {
+            handleDuplicateProblem(problem);
+          }
+        }
+      }
+    });
+
+    // Help shortcut (? key)
+    shortcutManager.register('help', {
+      key: '?',
+      shift: true,
+      description: language === 'ja' ? 'ショートカットヘルプを表示' : 'Show keyboard shortcuts',
+      category: language === 'ja' ? '表示操作' : 'View Operations',
+      action: () => setShowShortcutHelp(true)
+    });
+
+    return () => {
+      shortcutManager.destroy();
+    };
+  }, [language, problems, contextMenu, selectionManager]);
 
   // Translation objects
   const t = {
@@ -304,12 +420,17 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
 
   const loadData = async () => {
     try {
-      const [categoriesData, problemsData] = await Promise.all([
+      const [categoriesData, problemsData, quizSetsData] = await Promise.all([
         categoryService.getAll(),
-        problemService.getAll()
+        problemService.getAll(),
+        quizSetService.getAll()
       ]);
       setCategories(categoriesData);
       setProblems(problemsData);
+      setQuizSets(quizSetsData);
+
+      // 重複検出は手動実行のみ（ボタンクリック時）
+      // 自動実行は無効化しました（パフォーマンス改善のため）
     } catch (error) {
       console.error('データ読み込みエラー:', error);
     } finally {
@@ -317,21 +438,53 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
     }
   };
 
-  const filterProblems = () => {
+  // バックグラウンドで重複を検出（UIをブロックしないようにする）
+  const detectDuplicatesInBackground = (problemsData: Problem[]) => {
+    console.log(`🔍 重複検出開始: ${problemsData.length}件の問題を検査中...`);
+    toast.loading('重複問題を検出中...', { id: 'duplicate-detection' });
+
+    setTimeout(async () => {
+      try {
+        const duplicatesMap = new Map<number, Problem[]>();
+
+        for (const problem of problemsData) {
+          if (!problem.id) continue;
+
+          // この問題と重複している問題を検索
+          const result = await checkDuplicate(problem.question, problem.id, 90);
+
+          if (result.isDuplicate && result.duplicates.length > 0) {
+            duplicatesMap.set(problem.id, result.duplicates);
+            console.log(`⚠️ 重複発見: "${problem.question.substring(0, 30)}..." (類似度: ${result.similarity}%)`);
+          }
+        }
+
+        setDuplicateProblemsMap(duplicatesMap);
+        console.log(`✅ 重複検出完了: ${duplicatesMap.size}件の重複問題を発見`);
+        toast.success(`重複検出完了: ${duplicatesMap.size}件の重複を発見`, { id: 'duplicate-detection' });
+      } catch (error) {
+        console.error('❌ 重複検出エラー:', error);
+        toast.error('重複検出に失敗しました', { id: 'duplicate-detection' });
+      }
+    }, 100);
+  };
+
+  // useMemoでフィルタリングを最適化（再レンダリング時に不要な計算を防ぐ）
+  const filteredProblems = useMemo(() => {
     let filtered = problems;
-    
+
     if (categoryFilter) {
       filtered = filtered.filter(p => p.category === categoryFilter);
     }
-    
+
     if (searchFilter) {
-      filtered = filtered.filter(p => 
+      filtered = filtered.filter(p =>
         p.question.toLowerCase().includes(searchFilter.toLowerCase())
       );
     }
-    
-    setFilteredProblems(filtered);
-  };
+
+    return filtered;
+  }, [problems, categoryFilter, searchFilter]);
 
   const handleAddCategory = async () => {
     if (!newCategoryName.trim()) return;
@@ -371,6 +524,23 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
       }
     }
 
+    // 重複チェック（forceSaveフラグが立っていない場合のみ）
+    if (!forceSave) {
+      const result = await checkDuplicate(
+        formData.question,
+        editingProblem?.id,
+        90 // 類似度閾値90%
+      );
+
+      if (result.isDuplicate) {
+        // 重複が検出された場合、警告モーダルを表示
+        setDuplicateCheckResult(result);
+        setShowDuplicateModal(true);
+        return;
+      }
+    }
+
+    // 重複チェックをパスした場合、または強制保存の場合
     try {
       let problemData: Omit<Problem, 'id'>;
       
@@ -393,12 +563,14 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
         };
       }
 
-      // メモフィールドを追加
+      // メモフィールドとタグを追加
       const problemDataWithNotes = {
         ...problemData,
         userNotes: formData.userNotes,
         noteTags: formData.noteTags,
-        noteUpdatedAt: formData.userNotes ? new Date() : undefined
+        noteUpdatedAt: formData.userNotes ? new Date() : undefined,
+        tags: formData.tags,
+        taggedAt: formData.tags.length > 0 ? new Date() : undefined
       };
 
       if (editingProblem?.id) {
@@ -406,11 +578,15 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
       } else {
         await problemService.add(problemDataWithNotes);
       }
-      
+
       await loadData();
       clearForm();
+
+      // 保存後、強制保存フラグをリセット
+      setForceSave(false);
     } catch (error) {
       console.error('問題保存エラー:', error);
+      setForceSave(false);
     }
   };
 
@@ -422,22 +598,259 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
       type: problem.type || 'true-false',
       answer: problem.answer !== undefined ? problem.answer : true,
       explanation: problem.explanation,
-      options: problem.options || ['', '', '', ''],
+      options: problem.options && problem.options.length > 0 ? problem.options : ['', ''],
       correctAnswer: problem.correctAnswer || 0,
       userNotes: problem.userNotes || '',
-      noteTags: problem.noteTags || []
+      noteTags: problem.noteTags || [],
+      tags: problem.tags || []
     });
+
+    // Scroll to the top of the page to show the edit form
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleDeleteProblem = async (problemId: number) => {
-    if (!confirm(t[currentLang].messages.confirmDeleteProblem)) return;
-    
+    const problem = problems.find(p => p.id === problemId);
+    if (!problem) return;
+
     try {
+      // アクション記録（ロールバック用）
+      const actionId = actionHistoryService.recordAction('delete', 'problem', problem);
+
+      // 削除実行
       await problemService.delete(problemId);
       await loadData();
+
+      // カスタムトースト表示
+      toast.custom((t) => (
+        <UndoToast
+          message={`問題「${problem.question.substring(0, 30)}...」を削除しました`}
+          onUndo={async () => {
+            try {
+              await actionHistoryService.rollback(actionId);
+              await loadData();
+              toast.success('削除を取り消しました', { position: 'top-center' });
+            } catch (error) {
+              console.error('Rollback failed:', error);
+              toast.error('元に戻せませんでした', { position: 'top-center' });
+            }
+          }}
+          onDismiss={() => toast.dismiss(t.id)}
+        />
+      ), {
+        duration: 5000,
+        position: 'bottom-center'
+      });
     } catch (error) {
       console.error('問題削除エラー:', error);
+      toast.error('削除に失敗しました', { position: 'top-center' });
     }
+  };
+
+  const handleDuplicateProblem = async (problem: Problem) => {
+    try {
+      // 問題のコピーを作成（IDを除く）
+      const duplicatedProblem = {
+        category: problem.category,
+        question: problem.question + ' (コピー)',
+        type: problem.type,
+        answer: problem.answer,
+        explanation: problem.explanation,
+        options: problem.options,
+        correctAnswer: problem.correctAnswer,
+        userNotes: problem.userNotes,
+        noteTags: problem.noteTags,
+        tags: problem.tags
+      };
+
+      // アクション記録
+      const actionId = actionHistoryService.recordAction('create', 'problem', duplicatedProblem);
+
+      // 新規問題として追加
+      await problemService.add(duplicatedProblem);
+      await loadData();
+
+      toast.custom((t) => (
+        <UndoToast
+          message={`問題を複製しました`}
+          onUndo={async () => {
+            try {
+              await actionHistoryService.rollback(actionId);
+              await loadData();
+              toast.success('複製を取り消しました', { position: 'top-center' });
+            } catch (error) {
+              console.error('Rollback failed:', error);
+              toast.error('元に戻せませんでした', { position: 'top-center' });
+            }
+          }}
+          onDismiss={() => toast.dismiss(t.id)}
+        />
+      ), {
+        duration: 5000,
+        position: 'bottom-center'
+      });
+    } catch (error) {
+      console.error('問題複製エラー:', error);
+      toast.error('複製に失敗しました', { position: 'top-center' });
+    }
+  };
+
+  // コンテキストメニューハンドラー
+  const handleContextMenu = (event: React.MouseEvent, problemId: number) => {
+    event.preventDefault();
+    setContextMenu({
+      position: { x: event.clientX, y: event.clientY },
+      problemId
+    });
+  };
+
+  // タッチ長押しハンドラー
+  const handleTouchStart = (event: React.TouchEvent, problemId: number) => {
+    const touch = event.touches[0];
+    touchPositionRef.current = { x: touch.clientX, y: touch.clientY };
+
+    // 1秒後にコンテキストメニューを表示
+    longPressTimerRef.current = setTimeout(() => {
+      if (touchPositionRef.current) {
+        setContextMenu({
+          position: touchPositionRef.current,
+          problemId
+        });
+        // 振動フィードバック（対応デバイスのみ）
+        if ('vibrate' in navigator) {
+          navigator.vibrate(50);
+        }
+      }
+    }, 1000);
+  };
+
+  const handleTouchMove = () => {
+    // タッチが移動したらタイマーをキャンセル
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleTouchEnd = () => {
+    // タッチが終了したらタイマーをキャンセル
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    touchPositionRef.current = null;
+  };
+
+  // クイックアクション一覧を生成
+  const getQuickActions = (problemId: number): QuickAction[] => {
+    const problem = problems.find(p => p.id === problemId);
+    if (!problem) return [];
+
+    const currentLang = language as 'ja' | 'en';
+
+    return [
+      {
+        id: 'edit',
+        label: currentLang === 'ja' ? '編集' : 'Edit',
+        icon: Edit2,
+        shortcut: 'E',
+        action: () => handleEditProblem(problem)
+      },
+      {
+        id: 'duplicate',
+        label: currentLang === 'ja' ? '複製' : 'Duplicate',
+        icon: Copy,
+        shortcut: 'D',
+        action: () => handleDuplicateProblem(problem)
+      },
+      {
+        id: 'favorite',
+        label: problem.isFavorite
+          ? (currentLang === 'ja' ? 'お気に入り解除' : 'Unfavorite')
+          : (currentLang === 'ja' ? 'お気に入り' : 'Favorite'),
+        icon: Star,
+        shortcut: 'F',
+        color: problem.isFavorite ? 'warning' as const : 'default' as const,
+        action: async () => {
+          if (problem.id) {
+            try {
+              const updatedProblem = {
+                ...problem,
+                isFavorite: !problem.isFavorite
+              };
+              await problemService.update(updatedProblem);
+              setProblems(problems.map(p => p.id === problem.id ? updatedProblem : p));
+              toast.success(
+                updatedProblem.isFavorite
+                  ? (currentLang === 'ja' ? 'お気に入りに追加しました' : 'Added to favorites')
+                  : (currentLang === 'ja' ? 'お気に入りから削除しました' : 'Removed from favorites'),
+                { position: 'top-center' }
+              );
+            } catch (error) {
+              console.error('Failed to toggle favorite:', error);
+              toast.error(currentLang === 'ja' ? '更新に失敗しました' : 'Failed to update', { position: 'top-center' });
+            }
+          }
+        }
+      },
+      {
+        id: 'share',
+        label: currentLang === 'ja' ? '共有' : 'Share',
+        icon: Share2,
+        shortcut: 'S',
+        action: async () => {
+          try {
+            const shareText = `【問題】${problem.question}\n\n【カテゴリー】${problem.category}\n\n【解説】${problem.explanation || 'なし'}`;
+            await navigator.clipboard.writeText(shareText);
+            toast.success(currentLang === 'ja' ? 'クリップボードにコピーしました' : 'Copied to clipboard', { position: 'top-center' });
+          } catch (error) {
+            console.error('Failed to copy:', error);
+            toast.error(currentLang === 'ja' ? 'コピーに失敗しました' : 'Failed to copy', { position: 'top-center' });
+          }
+        },
+        divider: true
+      },
+      {
+        id: 'delete',
+        label: currentLang === 'ja' ? '削除' : 'Delete',
+        icon: Trash2,
+        shortcut: 'Del',
+        color: 'danger' as const,
+        action: () => {
+          if (problem.id) {
+            handleDeleteProblem(problem.id);
+          }
+        }
+      }
+    ];
+  };
+
+  // 一括選択関連の関数
+  const handleSelectAll = () => {
+    const problemIds = filteredProblems.map(p => p.id!).filter(id => id !== undefined);
+    selectionManager.selectAll(problemIds);
+    setSelectedCount(selectionManager.getSelectedCount());
+  };
+
+  const handleDeselectAll = () => {
+    selectionManager.deselectAll();
+    setSelectedCount(0);
+  };
+
+  const handleToggleSelection = (problemId: number) => {
+    selectionManager.toggle(problemId);
+    setSelectedCount(selectionManager.getSelectedCount());
+  };
+
+  const handleFilterSelect = (filter: any) => {
+    selectionManager.selectByFilter(filteredProblems, filter);
+    setSelectedCount(selectionManager.getSelectedCount());
+  };
+
+  const handleBulkActionComplete = async () => {
+    selectionManager.deselectAll();
+    setSelectedCount(0);
+    await loadData();
   };
 
   const clearForm = () => {
@@ -451,7 +864,8 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
       options: ['', '', '', ''],
       correctAnswer: 0,
       userNotes: '',
-      noteTags: []
+      noteTags: [],
+      tags: []
     });
   };
 
@@ -672,7 +1086,7 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
             explanation: quiz.explanation,
             ...(isMultipleChoice && {
               options: [quiz.option1, quiz.option2, quiz.option3, quiz.option4].filter(opt => opt),
-              correctAnswer: parseInt(quiz.answer) || 0
+              correctAnswer: (parseInt(quiz.answer) - 1) || 0 // 1-indexed→0-indexedに変換
             })
           };
 
@@ -739,17 +1153,21 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
 
       // クイズデータをProblem型に変換
       const problemsToExport: Problem[] = quizData.map(quiz => {
-        const hasOptions = quiz.option1 || quiz.option2 || quiz.option3 || quiz.option4;
+        const hasOptions = quiz.option1 || quiz.option2 || quiz.option3 || quiz.option4 || quiz.option5 || quiz.option6 || quiz.option7 || quiz.option8 || quiz.option9 || quiz.option10;
         const isMultipleChoice = Boolean(hasOptions);
 
         if (isMultipleChoice) {
           // 多択問題の場合: correctAnswerフィールドを使用
+          // quiz.correctAnswerがある場合はそのまま（0-indexed）、なければanswerから変換
+          const correctAnswerIndex = quiz.correctAnswer !== undefined
+            ? quiz.correctAnswer
+            : parseInt(quiz.answer) - 1; // 1-indexed→0-indexedに変換
           return {
             category: quiz.category,
             question: quiz.question,
-            correctAnswer: parseInt(quiz.answer),
+            correctAnswer: correctAnswerIndex,
             explanation: quiz.explanation,
-            options: [quiz.option1, quiz.option2, quiz.option3, quiz.option4].filter(opt => opt),
+            options: [quiz.option1, quiz.option2, quiz.option3, quiz.option4, quiz.option5, quiz.option6, quiz.option7, quiz.option8, quiz.option9, quiz.option10].filter(opt => opt),
             type: 'multiple-choice' as const
           };
         } else {
@@ -820,22 +1238,32 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
         option2: quiz.option2 || '',
         option3: quiz.option3 || '',
         option4: quiz.option4 || '',
-        type: (quiz.option1 || quiz.option2 || quiz.option3 || quiz.option4) ? 'multiple-choice' : 'true-false'
+        option5: quiz.option5 || '',
+        option6: quiz.option6 || '',
+        option7: quiz.option7 || '',
+        option8: quiz.option8 || '',
+        option9: quiz.option9 || '',
+        option10: quiz.option10 || '',
+        type: (quiz.option1 || quiz.option2 || quiz.option3 || quiz.option4 || quiz.option5 || quiz.option6 || quiz.option7 || quiz.option8 || quiz.option9 || quiz.option10) ? 'multiple-choice' : 'true-false'
       }));
 
       // Problem型に変換
       const problems: Omit<Problem, 'id'>[] = quizData.map(quiz => {
-        const hasOptions = quiz.option1 || quiz.option2 || quiz.option3 || quiz.option4;
+        const hasOptions = quiz.option1 || quiz.option2 || quiz.option3 || quiz.option4 || quiz.option5 || quiz.option6 || quiz.option7 || quiz.option8 || quiz.option9 || quiz.option10;
         const isMultipleChoice = Boolean(hasOptions);
 
         if (isMultipleChoice) {
           // 多択問題の場合: correctAnswerフィールドを使用
+          // quiz.correctAnswerがある場合はそのまま（0-indexed）、なければanswerから変換
+          const correctAnswerIndex = quiz.correctAnswer !== undefined
+            ? quiz.correctAnswer
+            : parseInt(quiz.answer) - 1; // 1-indexed→0-indexedに変換
           return {
             category: quiz.category,
             question: quiz.question,
-            correctAnswer: parseInt(quiz.answer),
+            correctAnswer: correctAnswerIndex,
             explanation: quiz.explanation,
-            options: [quiz.option1, quiz.option2, quiz.option3, quiz.option4].filter(opt => opt),
+            options: [quiz.option1, quiz.option2, quiz.option3, quiz.option4, quiz.option5, quiz.option6, quiz.option7, quiz.option8, quiz.option9, quiz.option10].filter(opt => opt),
             type: 'multiple-choice' as const
           };
         } else {
@@ -926,7 +1354,140 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
     }
   };
 
+  // JSON形式からクイズデータへの変換
+  // 対応する構造:
+  //   1. { category, problems: [...] }
+  //   2. { problems: [{ category, ... }, ...] }
+  //   3. [ { category, problems: [...] }, ... ]  （複数カテゴリーの配列）
+  //   4. [ { category, question, options, ... }, ... ]  （フラット）
+  const parseJSONToQuizData = (jsonData: any) => {
+    type QuizRow = {
+      category: string;
+      question: string;
+      answer: string;
+      explanation: string;
+      correctAnswer?: number; // 追加: 0-indexedの正解インデックス
+      option1: string;
+      option2: string;
+      option3: string;
+      option4: string;
+      option5: string;
+      option6: string;
+      option7: string;
+      option8: string;
+      option9: string;
+      option10: string;
+    };
+    const quizData: QuizRow[] = [];
+
+    if (!jsonData) {
+      throw new Error('Invalid JSON structure');
+    }
+
+    // 配列ルートの場合: 再帰的に各要素を処理
+    if (Array.isArray(jsonData)) {
+      jsonData.forEach((entry) => {
+        quizData.push(...parseJSONToQuizData(entry));
+      });
+      return quizData;
+    }
+
+    if (typeof jsonData !== 'object') {
+      throw new Error('Invalid JSON structure');
+    }
+
+    // ルートにcategoryがあれば全体のデフォルトとして使う
+    const rootCategory: string = (jsonData.category && typeof jsonData.category === 'string')
+      ? jsonData.category
+      : '';
+
+    // problems配列がある場合（構造1または2）
+    if (Array.isArray(jsonData.problems)) {
+      jsonData.problems.forEach((problem: any, index: number) => {
+        if (!problem || !problem.question || !Array.isArray(problem.options) || typeof problem.correctAnswer !== 'number') {
+          console.warn(`Problem ${index + 1} has invalid structure, skipping`);
+          return;
+        }
+
+        // 選択肢を10個の配列に展開
+        const options = ['', '', '', '', '', '', '', '', '', ''];
+        for (let i = 0; i < Math.min(problem.options.length, 10); i++) {
+          options[i] = problem.options[i] || '';
+        }
+
+        // correctAnswerを1-indexedの文字列に変換（0 → "1", 1 → "2", etc.）
+        const answerIndex = problem.correctAnswer + 1;
+
+        // 個別problem.categoryを優先、なければrootCategoryを使う
+        const resolvedCategory: string =
+          (problem.category && typeof problem.category === 'string' && problem.category.trim())
+            ? problem.category.trim()
+            : (rootCategory || 'その他');
+
+        quizData.push({
+          category: resolvedCategory,
+          question: problem.question,
+          answer: answerIndex.toString(),
+          correctAnswer: problem.correctAnswer, // 追加: 0-indexedの正解インデックスを保持
+          explanation: problem.explanation || '',
+          option1: options[0],
+          option2: options[1],
+          option3: options[2],
+          option4: options[3],
+          option5: options[4],
+          option6: options[5],
+          option7: options[6],
+          option8: options[7],
+          option9: options[8],
+          option10: options[9],
+        });
+      });
+      return quizData;
+    }
+
+    // problems配列がなく、ルートオブジェクトがそのまま問題 (構造4のフラット要素)
+    if (jsonData.question && Array.isArray(jsonData.options) && typeof jsonData.correctAnswer === 'number') {
+      const options = ['', '', '', '', '', '', '', '', '', ''];
+      for (let i = 0; i < Math.min(jsonData.options.length, 10); i++) {
+        options[i] = jsonData.options[i] || '';
+      }
+      const answerIndex = jsonData.correctAnswer + 1;
+      quizData.push({
+        category: (rootCategory && rootCategory.trim()) || 'その他',
+        question: jsonData.question,
+        answer: answerIndex.toString(),
+        correctAnswer: jsonData.correctAnswer, // 追加: 0-indexedの正解インデックスを保持
+        explanation: jsonData.explanation || '',
+        option1: options[0],
+        option2: options[1],
+        option3: options[2],
+        option4: options[3],
+        option5: options[4],
+        option6: options[5],
+        option7: options[6],
+        option8: options[7],
+        option9: options[8],
+        option10: options[9],
+      });
+      return quizData;
+    }
+
+    throw new Error('problems must be an array');
+  };
+
   const parseTextToQuizData = (text: string) => {
+    // JSON形式の検出と処理
+    const trimmedText = text.trim();
+    if (trimmedText.startsWith('{') || trimmedText.startsWith('[')) {
+      try {
+        const jsonData = JSON.parse(trimmedText);
+        return parseJSONToQuizData(jsonData);
+      } catch (error) {
+        console.error('JSON parsing error:', error);
+        // JSON形式ではないか、無効なJSONの場合は通常のテキスト解析にフォールバック
+      }
+    }
+
     const lines = text.split('\n').map(line => line.trim()).filter(line => line);
     const quizData: Array<{
       category: string;
@@ -937,6 +1498,12 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
       option2: string;
       option3: string;
       option4: string;
+      option5: string;
+      option6: string;
+      option7: string;
+      option8: string;
+      option9: string;
+      option10: string;
     }> = [];
 
     let currentCategory = '';
@@ -951,14 +1518,15 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
       const line = lines[i];
       
       // 区切り線を検出（次の行がカテゴリーの可能性）
-      if (line.match(/^_{10,}/) || line.match(/^-{10,}/) || line.match(/^={10,}/)) {
+      // アンダースコア/ハイフン/イコールが3つ以上、または空行が連続する場合
+      if (line.match(/^_{3,}/) || line.match(/^-{3,}/) || line.match(/^={3,}/) || (line.trim() === '' && i > 0 && lines[i-1].trim() === '')) {
         // 前の問題を保存（区切り線前に）
         if (currentQuestion && currentAnswer !== '' && currentExplanation) {
-          const options = ['', '', '', ''];
-          for (let j = 0; j < Math.min(currentOptions.length, 4); j++) {
+          const options = ['', '', '', '', '', '', '', '', '', ''];
+          for (let j = 0; j < Math.min(currentOptions.length, 10); j++) {
             options[j] = currentOptions[j];
           }
-          
+
           quizData.push({
             category: currentCategory || 'その他',
             question: currentQuestion,
@@ -967,7 +1535,13 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
             option1: options[0],
             option2: options[1],
             option3: options[2],
-            option4: options[3]
+            option4: options[3],
+            option5: options[4],
+            option6: options[5],
+            option7: options[6],
+            option8: options[7],
+            option9: options[8],
+            option10: options[9]
           });
           
           // 問題データをリセット
@@ -982,22 +1556,49 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
       }
       
       // カテゴリー検出（区切り線直後 または 行頭の明確なパターン）
-      const isClearCategoryPattern = line.match(/^第\d+章\s+.+/) || 
-                                    line.match(/^Chapter\s+\d+/) || 
+      const isExplicitCategoryPattern = line.match(/^第\d+章\s+.+/) ||
+                                    line.match(/^Chapter\s+\d+/) ||
                                     line.match(/^[#]+\s*.+/) ||
                                     line.match(/^小テスト\d*[：:]\s*.+/) ||
                                     line.match(/^テスト\d*[：:]\s*.+/) ||
                                     line.match(/^Quiz\s*\d*[：:]\s*.+/) ||
                                     (line.match(/^\d+\.\s*.+/) && afterSeparator);
-                                    
-      if (isClearCategoryPattern && (afterSeparator || i === 0 || lines[i-1].trim() === '')) {
+
+      // プロンプト生成テンプレート互換: 次の非空行が「問題N」なら、この行は
+      // 単体のカテゴリー名（例: "数学", "臨床栄養学"）とみなす
+      const nextLine = lines[i + 1];
+      const isNextLineProblem = nextLine && (
+        nextLine.match(/^問題\d+/) ||
+        nextLine.match(/^Question\s*\d+/i)
+      );
+      const isPlainCategoryName = isNextLineProblem &&
+        !line.match(/^問題/) &&
+        !line.match(/^Question/i) &&
+        !line.match(/^(10|[1-9])\.\s/) &&
+        !line.match(/^[ABCDEFGHIJ]\.\s/) &&
+        !line.match(/^[（(](10|[1-9])[）)]/) &&
+        !line.startsWith('正解') &&
+        !line.startsWith('答え') &&
+        !line.startsWith('Answer') &&
+        !line.startsWith('解説') &&
+        !line.startsWith('説明') &&
+        !line.startsWith('Explanation') &&
+        !line.match(/^_{3,}/) &&
+        !line.match(/^-{3,}/) &&
+        !line.match(/^={3,}/) &&
+        line.length > 0 &&
+        line.length <= 100; // カテゴリー名は短い想定
+
+      const isClearCategoryPattern = isExplicitCategoryPattern || isPlainCategoryName;
+
+      if (isClearCategoryPattern && (afterSeparator || i === 0 || lines[i-1].trim() === '' || isPlainCategoryName)) {
         // 前の問題を保存（カテゴリー変更前に）
         if (currentQuestion && currentAnswer !== '' && currentExplanation) {
-          const options = ['', '', '', ''];
-          for (let j = 0; j < Math.min(currentOptions.length, 4); j++) {
+          const options = ['', '', '', '', '', '', '', '', '', ''];
+          for (let j = 0; j < Math.min(currentOptions.length, 10); j++) {
             options[j] = currentOptions[j];
           }
-          
+
           quizData.push({
             category: currentCategory || 'その他',
             question: currentQuestion,
@@ -1006,7 +1607,13 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
             option1: options[0],
             option2: options[1],
             option3: options[2],
-            option4: options[3]
+            option4: options[3],
+            option5: options[4],
+            option6: options[5],
+            option7: options[6],
+            option8: options[7],
+            option9: options[8],
+            option10: options[9]
           });
         }
         
@@ -1038,11 +1645,11 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
       if (line.match(/^問題\d+/) || line.match(/^Question\s*\d+/) || line.match(/^\d+\)/)) {
         if (currentQuestion && currentAnswer !== '' && currentExplanation) {
           // 前の問題を保存
-          const options = ['', '', '', ''];
-          for (let j = 0; j < Math.min(currentOptions.length, 4); j++) {
+          const options = ['', '', '', '', '', '', '', '', '', ''];
+          for (let j = 0; j < Math.min(currentOptions.length, 10); j++) {
             options[j] = currentOptions[j];
           }
-          
+
           quizData.push({
             category: currentCategory || 'その他',
             question: currentQuestion,
@@ -1051,7 +1658,13 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
             option1: options[0],
             option2: options[1],
             option3: options[2],
-            option4: options[3]
+            option4: options[3],
+            option5: options[4],
+            option6: options[5],
+            option7: options[6],
+            option8: options[7],
+            option9: options[8],
+            option10: options[9]
           });
         }
         // 新しい問題の開始
@@ -1063,9 +1676,9 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
         continue;
       }
       
-      // 選択肢検出
-      if (line.match(/^[1-5]\.\s+.+/) || line.match(/^[ABCDE]\.\s+.+/) || line.match(/^[（(][1-5][）)]\s+.+/)) {
-        const optionText = line.replace(/^[1-5ABCDE（(][1-5）)]*\.\s*/, '').replace(/^[（(][1-5][）)]\s*/, '').trim();
+      // 選択肢検出（1～10対応）
+      if (line.match(/^(10|[1-9])\.\s+.+/) || line.match(/^[ABCDEFGHIJ]\.\s+.+/) || line.match(/^[（(](10|[1-9])[）)]\s+.+/)) {
+        const optionText = line.replace(/^(10|[1-9]|[ABCDEFGHIJ]|[（(](10|[1-9])[）)])\.\s*/, '').replace(/^[（(](10|[1-9])[）)]\s*/, '').trim();
         currentOptions.push(optionText);
         inQuestion = false;
         continue;
@@ -1081,7 +1694,7 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
         } else {
           // 数字の場合（多択問題）
           const numAnswer = parseInt(answerText);
-          if (!isNaN(numAnswer) && numAnswer >= 1 && numAnswer <= 5) {
+          if (!isNaN(numAnswer) && numAnswer >= 1 && numAnswer <= 10) {
             currentAnswer = (numAnswer - 1).toString(); // 0-indexedに変換
           } else {
             currentAnswer = answerText;
@@ -1109,11 +1722,11 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
     
     // 最後の問題を保存
     if (currentQuestion && currentAnswer !== '' && currentExplanation) {
-      const options = ['', '', '', ''];
-      for (let j = 0; j < Math.min(currentOptions.length, 4); j++) {
+      const options = ['', '', '', '', '', '', '', '', '', ''];
+      for (let j = 0; j < Math.min(currentOptions.length, 10); j++) {
         options[j] = currentOptions[j];
       }
-      
+
       quizData.push({
         category: currentCategory || 'その他',
         question: currentQuestion,
@@ -1122,7 +1735,13 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
         option1: options[0],
         option2: options[1],
         option3: options[2],
-        option4: options[3]
+        option4: options[3],
+        option5: options[4],
+        option6: options[5],
+        option7: options[6],
+        option8: options[7],
+        option9: options[8],
+        option10: options[9]
       });
     }
     
@@ -1144,7 +1763,7 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
     }
 
     // CSVフォーマットに変換
-    const csvHeader = 'category,question,answer,explanation,option1,option2,option3,option4\n';
+    const csvHeader = 'category,question,answer,explanation,option1,option2,option3,option4,option5,option6,option7,option8,option9,option10\n';
     const csvRows = quizData.map(quiz => {
       const category = `"${quiz.category.replace(/"/g, '""')}"`;
       const question = `"${quiz.question.replace(/"/g, '""')}"`;
@@ -1154,8 +1773,14 @@ export function ProblemEditor({ onBack }: ProblemEditorProps) {
       const option2 = `"${quiz.option2.replace(/"/g, '""')}"`;
       const option3 = `"${quiz.option3.replace(/"/g, '""')}"`;
       const option4 = `"${quiz.option4.replace(/"/g, '""')}"`;
-      
-      return `${category},${question},${answer},${explanation},${option1},${option2},${option3},${option4}`;
+      const option5 = `"${quiz.option5.replace(/"/g, '""')}"`;
+      const option6 = `"${quiz.option6.replace(/"/g, '""')}"`;
+      const option7 = `"${quiz.option7.replace(/"/g, '""')}"`;
+      const option8 = `"${quiz.option8.replace(/"/g, '""')}"`;
+      const option9 = `"${quiz.option9.replace(/"/g, '""')}"`;
+      const option10 = `"${quiz.option10.replace(/"/g, '""')}"`;
+
+      return `${category},${question},${answer},${explanation},${option1},${option2},${option3},${option4},${option5},${option6},${option7},${option8},${option9},${option10}`;
     });
 
     // ファイル名を入力してもらう
@@ -1278,6 +1903,233 @@ ________________________________________
 
 提供されたテキストをこの形式で変換してください。区切り線を忘れずに各問題の最後に追加することが重要です。`;
 
+  const jsonFormatPrompt = `# クイズ問題作成指示（JSON形式）
+
+以下の**JSON形式**に従って、クイズ問題を作成してください。
+
+## 📋 JSON出力フォーマット（厳守）
+
+\`\`\`json
+{
+  "category": "カテゴリ名",
+  "problems": [
+    {
+      "question": "問題文",
+      "options": [
+        "選択肢1の内容",
+        "選択肢2の内容",
+        "選択肢3の内容",
+        "選択肢4の内容",
+        "選択肢5の内容"
+      ],
+      "correctAnswer": 2,
+      "explanation": "1.(×) 選択肢1の解説\n2.(×) 選択肢2の解説\n3.(✓) 選択肢3の解説（正解）\n4.(×) 選択肢4の解説\n5.(×) 選択肢5の解説"
+    }
+  ]
+}
+\`\`\`
+
+## ⚠️ 最重要ルール（必ず守ること）
+
+### 1. correctAnswerは0始まりのインデックス番号
+- **0** = options配列の最初の要素（選択肢1）
+- **1** = options配列の2番目の要素（選択肢2）
+- **2** = options配列の3番目の要素（選択肢3）
+- **3** = options配列の4番目の要素（選択肢4）
+- **4** = options配列の5番目の要素（選択肢5）
+
+### 2. optionsは必ず正確に5要素の配列
+- 要素数が4つ以下、または6つ以上は**エラー**になります
+- 不足する場合は「該当なし」などで埋めてください
+
+### 3. カテゴリーは必ず指定
+- 空文字や省略は避けてください
+- 例: "第1章 基礎知識"、"一般常識"、"歴史"など
+
+### 4. explanationには全ての選択肢に対する解説を番号付きリスト形式で含める
+- **形式**: 各選択肢を「番号.(マーク) 解説文」の形式で記載
+  - 正解には **(✓)** を付ける
+  - 不正解には **(×)** を付ける
+  - 各選択肢は **改行（\\n）** で区切る
+- **例**: \`"1.(×) 解説1\\n2.(✓) 解説2（正解）\\n3.(×) 解説3\\n4.(×) 解説4\\n5.(×) 解説5"\`
+- **目的**: 学習者が各選択肢の正誤とその理由を明確に理解できるようにする
+
+## ✅ 正しい例（複数パターン）
+
+### 例1: 正解が1番目の選択肢の場合
+\`\`\`json
+{
+  "category": "理科・生物",
+  "problems": [
+    {
+      "question": "光合成を行う細胞内の器官は何か",
+      "options": [
+        "葉緑体",
+        "ミトコンドリア",
+        "核",
+        "液胞",
+        "細胞壁"
+      ],
+      "correctAnswer": 0,
+      "explanation": "1.(✓) 葉緑体は光エネルギーを使って二酸化炭素と水から糖を合成します（光合成）。\n2.(×) ミトコンドリアはエネルギー（ATP）を産生する器官です。\n3.(×) 核は遺伝情報（DNA）を保管・管理する器官です。\n4.(×) 液胞は水分や栄養分を貯蔵する器官です。\n5.(×) 細胞壁は植物細胞を保護し形を保つ構造です。"
+    }
+  ]
+}
+\`\`\`
+
+### 例2: 正解が3番目の選択肢の場合
+\`\`\`json
+{
+  "category": "数学・算数",
+  "problems": [
+    {
+      "question": "円周率πの近似値として最も正確なものはどれか",
+      "options": [
+        "3.00",
+        "3.10",
+        "3.14",
+        "3.20",
+        "3.50"
+      ],
+      "correctAnswer": 2,
+      "explanation": "1.(×) 3.00は円周率の整数部分のみで、誤差が大きすぎます。\n2.(×) 3.10も誤差が大きく、円周率の近似値として不適切です。\n3.(✓) 円周率πは約3.14159...なので、小数第2位までの3.14が最も正確です。\n4.(×) 3.20は円周率より大きく、明らかに不正確です。\n5.(×) 3.50は円周率の値から大きく外れています。"
+    }
+  ]
+}
+\`\`\`
+
+### 例3: 正解が5番目の選択肢の場合
+\`\`\`json
+{
+  "category": "日本史",
+  "problems": [
+    {
+      "question": "江戸幕府が開かれた年は",
+      "options": [
+        "1500年",
+        "1550年",
+        "1600年",
+        "1603年",
+        "1650年"
+      ],
+      "correctAnswer": 3,
+      "explanation": "1.(×) 1500年は室町時代後期で、江戸幕府とは関係ありません。\n2.(×) 1550年頃は戦国時代真っ只中です。\n3.(×) 1600年は関ヶ原の戦いの年ですが、幕府開府はまだです。\n4.(✓) 1603年に徳川家康が征夷大将軍に任命され、江戸幕府を開きました。\n5.(×) 1650年は江戸幕府成立後の時代です。"
+    }
+  ]
+}
+\`\`\`
+
+### 例4: 複数問題を含む場合
+\`\`\`json
+{
+  "category": "一般科学",
+  "problems": [
+    {
+      "question": "水の化学式は何か",
+      "options": [
+        "H2O",
+        "CO2",
+        "O2",
+        "N2",
+        "CH4"
+      ],
+      "correctAnswer": 0,
+      "explanation": "1.(✓) H2Oは水の化学式で、水素原子2つと酸素原子1つから構成されます。\n2.(×) CO2は二酸化炭素の化学式です。\n3.(×) O2は酸素分子の化学式です。\n4.(×) N2は窒素分子の化学式です。\n5.(×) CH4はメタン（天然ガスの主成分）の化学式です。"
+    },
+    {
+      "question": "二酸化炭素の化学式は何か",
+      "options": [
+        "H2O",
+        "CO2",
+        "O2",
+        "N2",
+        "CH4"
+      ],
+      "correctAnswer": 1,
+      "explanation": "1.(×) H2Oは水の化学式です。\n2.(✓) CO2は二酸化炭素の化学式で、炭素原子1つと酸素原子2つから構成されます。\n3.(×) O2は酸素分子の化学式です。\n4.(×) N2は窒素分子の化学式です。\n5.(×) CH4はメタン（天然ガスの主成分）の化学式です。"
+    }
+  ]
+}
+\`\`\`
+
+## ❌ よくある間違い例
+
+### 間違い1: correctAnswerが1始まりになっている
+\`\`\`json
+// ❌ 間違い
+{
+  "correctAnswer": 1  // これは2番目の選択肢を指す（1始まりではない！）
+}
+
+// ✅ 正しい（1番目の選択肢を指定したい場合）
+{
+  "correctAnswer": 0  // 0始まりなので、0が1番目
+}
+\`\`\`
+
+### 間違い2: 選択肢が4つしかない
+\`\`\`json
+// ❌ 間違い
+{
+  "options": [
+    "選択肢1",
+    "選択肢2",
+    "選択肢3",
+    "選択肢4"
+  ]
+}
+
+// ✅ 正しい（必ず5つ）
+{
+  "options": [
+    "選択肢1",
+    "選択肢2",
+    "選択肢3",
+    "選択肢4",
+    "該当なし"
+  ]
+}
+\`\`\`
+
+### 間違い3: explanationに正解しか書かれていない
+\`\`\`json
+// ❌ 間違い（正解の説明のみ）
+{
+  "explanation": "正解は「ミトコンドリア」です。ミトコンドリアは酸素を取り入れて、細胞の活動に必要なエネルギーを生成します。"
+}
+
+// ✅ 正しい（全選択肢を番号付きリスト形式で解説）
+{
+  "explanation": "1.(×) リボソームはタンパク質を合成する器官です。\n2.(✓) ミトコンドリアは酸素を取り入れてエネルギー（ATP）を産生します。\n3.(×) ゴルジ体は物質の輸送と分泌を担当します。\n4.(×) 中心体は細胞分裂時に重要な役割を果たします。\n5.(×) 核は遺伝情報（DNA）を保管・管理します。"
+}
+\`\`\`
+
+### 間違い4: 番号付きリスト形式を使っていない
+\`\`\`json
+// ❌ 間違い（文章形式）
+{
+  "explanation": "正解は「水素」です。原子番号1番の水素は宇宙の質量の約75%を占めます。ヘリウムは2番目に多く約24%です。"
+}
+
+// ✅ 正しい（番号付きリスト形式）
+{
+  "explanation": "1.(×) ヘリウムは宇宙で2番目に多い元素（約24%）です。\n2.(×) リチウムは原子番号3番の元素です。\n3.(×) 酸素は地球上では多いですが、宇宙全体では少数派です。\n4.(✓) 水素は原子番号1番で、宇宙の質量の約75%を占める最も多い元素です。\n5.(×) 炭素は生命に重要ですが、宇宙全体では少数派です。"
+}
+\`\`\`
+
+## 🎯 出力時の最終チェック
+
+出力前に以下を確認してください：
+- [ ] correctAnswerが0-4の範囲内
+- [ ] optionsが正確に5要素
+- [ ] correctAnswerと実際の正解選択肢が一致
+- [ ] categoryが空でない
+- [ ] explanationに正解の選択肢名が含まれている
+- [ ] **explanationに全ての選択肢（正解＋不正解）の解説が含まれている**
+- [ ] JSON形式として有効（カンマ、クォートの位置）
+
+上記JSON形式に**完全に従って**出力してください。`;
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
@@ -1370,16 +2222,39 @@ ________________________________________
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   {t[currentLang].labels.category}
                 </label>
-                <select
-                  value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                >
-                  <option value="">{t[currentLang].labels.selectCategory}</option>
-                  {categories.map((category) => (
-                    <option key={category} value={category}>{category}</option>
-                  ))}
-                </select>
+                <div className="flex gap-2">
+                  <select
+                    value={formData.category}
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  >
+                    <option value="">{t[currentLang].labels.selectCategory}</option>
+                    {categories.map((category) => (
+                      <option key={category} value={category}>{category}</option>
+                    ))}
+                  </select>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      placeholder={currentLang === 'ja' ? '新カテゴリー' : 'New category'}
+                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white w-32"
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!newCategoryName.trim()) return;
+                        await handleAddCategory();
+                        setFormData({ ...formData, category: newCategoryName.trim() });
+                      }}
+                      className="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-md transition-colors font-medium"
+                      title={currentLang === 'ja' ? 'カテゴリーを追加' : 'Add category'}
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div>
@@ -1447,6 +2322,7 @@ ________________________________________
                           type="radio"
                           checked={formData.correctAnswer === index}
                           onChange={() => setFormData({ ...formData, correctAnswer: index })}
+                          title={currentLang === 'ja' ? '正解として選択' : 'Select as correct answer'}
                         />
                         <input
                           type="text"
@@ -1459,9 +2335,38 @@ ________________________________________
                           placeholder={`${t[currentLang].labels.optionPlaceholder} ${index + 1}`}
                           className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                         />
+                        {formData.options.length > 2 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newOptions = formData.options.filter((_, i) => i !== index);
+                              const newCorrectAnswer = formData.correctAnswer === index
+                                ? 0
+                                : formData.correctAnswer > index
+                                  ? formData.correctAnswer - 1
+                                  : formData.correctAnswer;
+                              setFormData({ ...formData, options: newOptions, correctAnswer: newCorrectAnswer });
+                            }}
+                            className="px-3 py-2 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                            title={currentLang === 'ja' ? '選択肢を削除' : 'Remove option'}
+                          >
+                            ✕
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
+                  {formData.options.length < 10 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormData({ ...formData, options: [...formData.options, ''] });
+                      }}
+                      className="mt-2 px-4 py-2 text-sm bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-md hover:bg-blue-200 dark:hover:bg-blue-800"
+                    >
+                      + {currentLang === 'ja' ? '選択肢を追加' : 'Add option'} ({formData.options.length}/10)
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -1477,6 +2382,44 @@ ________________________________________
                   placeholder={t[currentLang].labels.explanationPlaceholder}
                 />
               </div>
+
+              {/* タグ管理 */}
+              {editingProblem?.id && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    タグ
+                  </label>
+                  <TagManager
+                    problemId={editingProblem.id}
+                    currentTags={formData.tags}
+                    onTagsChange={async (tags) => {
+                      setFormData({ ...formData, tags });
+                      await refreshTags(); // TagFilterを即座に更新
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* 学習メモ */}
+              {editingProblem?.id && (
+                <div>
+                  <NoteEditor
+                    problemId={editingProblem.id}
+                    initialNote={formData.userNotes}
+                    initialTags={formData.noteTags}
+                    onSave={async (note, tags) => {
+                      setFormData({ ...formData, userNotes: note, noteTags: tags });
+                      // 即座に保存
+                      await problemService.update({
+                        ...editingProblem,
+                        userNotes: note,
+                        noteTags: tags,
+                        noteUpdatedAt: new Date()
+                      });
+                    }}
+                  />
+                </div>
+              )}
 
               <div className="flex space-x-2">
                 <button
@@ -1812,17 +2755,61 @@ ________________________________________
               </div>
 
               {/* AIツール用プロンプト表示 */}
-              <div className="mt-4">
+              <div className="mt-4 space-y-2">
+                <div className="text-sm text-gray-700 dark:text-gray-300 bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-200 dark:border-blue-700">
+                  <strong className="text-blue-900 dark:text-blue-100">💡 外部AIで問題を一括作成</strong>
+                  <p className="mt-1 text-xs">
+                    ChatGPT、Claude、Gemini等の外部AIにプロンプトをコピーして、問題を自動生成できます。
+                    <span className="inline-block mt-1 px-2 py-0.5 bg-purple-500 text-white text-xs rounded-full font-bold">JSON形式（推奨）</span>が最も高精度です。
+                  </p>
+                </div>
                 <button
                   onClick={() => setShowPrompts(!showPrompts)}
                   className="quiz-action-button w-full px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm"
                 >
-                  {t[currentLang].buttons.showPrompts}
+                  {showPrompts ? '🔼 AIプロンプトを閉じる' : '🔽 AIプロンプトを表示'}
                 </button>
               </div>
 
               {showPrompts && (
                 <div className="mt-4 space-y-4">
+                  {/* 使い方ガイド */}
+                  <div className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 border-2 border-indigo-300 dark:border-indigo-700 rounded-lg p-4">
+                    <h4 className="text-md font-bold text-indigo-900 dark:text-indigo-100 mb-3 flex items-center space-x-2">
+                      <span>📖</span>
+                      <span>使い方（3ステップ）</span>
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="bg-white dark:bg-gray-800 p-3 rounded-lg border border-indigo-200 dark:border-indigo-700">
+                        <div className="flex items-center space-x-2 mb-2">
+                          <div className="w-6 h-6 bg-indigo-500 rounded-full flex items-center justify-center text-white text-xs font-bold">1</div>
+                          <span className="font-semibold text-sm text-gray-900 dark:text-white">コピー</span>
+                        </div>
+                        <p className="text-xs text-gray-600 dark:text-gray-300">
+                          下のプロンプトから1つ選び、「📋 コピー」ボタンでクリップボードにコピー
+                        </p>
+                      </div>
+                      <div className="bg-white dark:bg-gray-800 p-3 rounded-lg border border-indigo-200 dark:border-indigo-700">
+                        <div className="flex items-center space-x-2 mb-2">
+                          <div className="w-6 h-6 bg-indigo-500 rounded-full flex items-center justify-center text-white text-xs font-bold">2</div>
+                          <span className="font-semibold text-sm text-gray-900 dark:text-white">生成</span>
+                        </div>
+                        <p className="text-xs text-gray-600 dark:text-gray-300">
+                          ChatGPT/Claude/Gemini等にプロンプトを貼り付けて問題を生成
+                        </p>
+                      </div>
+                      <div className="bg-white dark:bg-gray-800 p-3 rounded-lg border border-indigo-200 dark:border-indigo-700">
+                        <div className="flex items-center space-x-2 mb-2">
+                          <div className="w-6 h-6 bg-indigo-500 rounded-full flex items-center justify-center text-white text-xs font-bold">3</div>
+                          <span className="font-semibold text-sm text-gray-900 dark:text-white">インポート</span>
+                        </div>
+                        <p className="text-xs text-gray-600 dark:text-gray-300">
+                          生成された問題を上のテキストエリアに貼り付け→「インポート」
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* ○×問題用プロンプト */}
                   <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
                     <div className="flex justify-between items-center mb-2">
@@ -1839,12 +2826,12 @@ ________________________________________
                     </pre>
                   </div>
 
-                  {/* 多択問題用プロンプト */}
+                  {/* 多択問題用プロンプト（テキスト形式） */}
                   <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
                     <div className="flex justify-between items-center mb-2">
-                      <h4 className="text-md font-medium text-green-900 dark:text-green-100">多択問題用プロンプト</h4>
+                      <h4 className="text-md font-medium text-green-900 dark:text-green-100">多択問題用プロンプト（テキスト形式）</h4>
                       <button
-                        onClick={() => copyToClipboard(multipleChoicePrompt, '多択問題用')}
+                        onClick={() => copyToClipboard(multipleChoicePrompt, '多択問題用（テキスト形式）')}
                         className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
                       >
                         {t[currentLang].buttons.copyPrompt}
@@ -1852,6 +2839,36 @@ ________________________________________
                     </div>
                     <pre className="text-xs text-green-800 dark:text-green-200 whitespace-pre-wrap bg-white dark:bg-gray-800 p-3 rounded border max-h-40 overflow-y-auto">
                       {multipleChoicePrompt}
+                    </pre>
+                  </div>
+
+                  {/* JSON形式プロンプト（推奨・高精度） */}
+                  <div className="bg-purple-50 dark:bg-purple-900/20 border-2 border-purple-300 dark:border-purple-700 rounded-lg p-4">
+                    <div className="flex justify-between items-center mb-2">
+                      <div className="flex items-center space-x-2">
+                        <h4 className="text-md font-medium text-purple-900 dark:text-purple-100">JSON形式プロンプト</h4>
+                        <span className="px-2 py-1 bg-purple-500 text-white text-xs font-bold rounded-full">推奨</span>
+                        <span className="px-2 py-1 bg-yellow-500 text-white text-xs font-bold rounded-full">高精度</span>
+                      </div>
+                      <button
+                        onClick={() => copyToClipboard(jsonFormatPrompt, 'JSON形式')}
+                        className="px-3 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700"
+                      >
+                        {t[currentLang].buttons.copyPrompt}
+                      </button>
+                    </div>
+                    <div className="mb-2 text-xs text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-800/30 p-2 rounded">
+                      ✨ <strong>なぜJSON形式が優れているか：</strong>
+                      <ul className="ml-4 mt-1 list-disc">
+                        <li>構造的強制：JSON構文エラーで即座にミス検出</li>
+                        <li>型の保証：正解番号は必ず数値（0-4）</li>
+                        <li>配列の明示性：選択肢は必ず5要素の配列</li>
+                        <li>曖昧性ゼロ：番号付けや区切り文字の解釈ミスなし</li>
+                        <li>AI出力精度：テキスト形式70-80% → JSON形式90-95%+</li>
+                      </ul>
+                    </div>
+                    <pre className="text-xs text-purple-800 dark:text-purple-200 whitespace-pre-wrap bg-white dark:bg-gray-800 p-3 rounded border max-h-60 overflow-y-auto">
+                      {jsonFormatPrompt}
                     </pre>
                   </div>
                 </div>
@@ -1862,8 +2879,25 @@ ________________________________________
 
         {/* 問題一覧 */}
         <div className="mt-8 bg-gradient-to-br from-orange-50 to-red-50 dark:from-orange-900/20 dark:to-red-900/20 border border-orange-200 dark:border-orange-800 rounded-lg shadow-md p-6">
-          <h2 className="text-xl font-semibold text-orange-900 dark:text-orange-100 mb-4">{t[currentLang].sections.problemList}</h2>
-          
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <h2 className="text-xl font-semibold text-orange-900 dark:text-orange-100">{t[currentLang].sections.problemList}</h2>
+              {duplicateProblemsMap.size > 0 && (
+                <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                  ⚠️ {duplicateProblemsMap.size}件の重複問題を検出
+                </p>
+              )}
+            </div>
+            <button
+              onClick={() => detectDuplicatesInBackground(problems)}
+              disabled={problems.length === 0}
+              className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg transition-colors font-medium shadow-md hover:shadow-lg transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed disabled:transform-none"
+              title={currentLang === 'ja' ? '重複問題を手動で検出' : 'Manually detect duplicates'}
+            >
+              {currentLang === 'ja' ? '🔍 重複検出' : '🔍 Detect Duplicates'}
+            </button>
+          </div>
+
           <div className="mb-4 grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4">
             <select
               value={categoryFilter}
@@ -1884,10 +2918,23 @@ ________________________________________
             />
           </div>
 
+          {/* 一括選択ツールバー */}
+          <BulkSelectionToolbar
+            selectedCount={selectedCount}
+            totalCount={filteredProblems.length}
+            onSelectAll={handleSelectAll}
+            onDeselectAll={handleDeselectAll}
+            onBulkAction={() => setShowBulkActionModal(true)}
+            categories={categories}
+            onFilterSelect={handleFilterSelect}
+            language={currentLang}
+          />
+
           <div className="overflow-x-auto">
             <table className="w-full table-auto">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-gray-700">
+                  <th className="w-12 py-2 px-4"></th>
                   <th className="text-left py-2 px-4 text-gray-900 dark:text-white">{t[currentLang].labels.tableHeaders.category}</th>
                   <th className="text-left py-2 px-4 text-gray-900 dark:text-white">{t[currentLang].labels.tableHeaders.question}</th>
                   <th className="text-left py-2 px-4 text-gray-900 dark:text-white">{t[currentLang].labels.tableHeaders.type}</th>
@@ -1898,20 +2945,50 @@ ________________________________________
                 {filteredProblems.map((problem) => (
                   <tr
                     key={problem.id}
-                    className="border-b border-gray-100 dark:border-gray-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors cursor-pointer"
-                    onMouseEnter={(e) => {
-                      setHoveredProblem(problem);
-                      setMousePosition({ x: e.clientX + 15, y: e.clientY + 15 });
-                    }}
-                    onMouseLeave={() => setHoveredProblem(null)}
-                    onMouseMove={(e) => {
-                      if (hoveredProblem?.id === problem.id) {
-                        setMousePosition({ x: e.clientX + 15, y: e.clientY + 15 });
-                      }
-                    }}
+                    className={`border-b border-gray-100 dark:border-gray-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors ${
+                      problem.id && selectionManager.isSelected(problem.id) ? 'bg-purple-50 dark:bg-purple-900/20' : ''
+                    }`}
+                    onContextMenu={(e) => problem.id && handleContextMenu(e, problem.id)}
+                    onTouchStart={(e) => problem.id && handleTouchStart(e, problem.id)}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={handleTouchEnd}
                   >
-                    <td className="py-2 px-4 text-gray-900 dark:text-white">{problem.category}</td>
+                    <td className="py-2 px-4">
+                      <input
+                        type="checkbox"
+                        checked={problem.id ? selectionManager.isSelected(problem.id) : false}
+                        onChange={() => problem.id && handleToggleSelection(problem.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-5 h-5 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+                      />
+                    </td>
                     <td className="py-2 px-4 text-gray-900 dark:text-white">
+                      <div className="flex items-center gap-2">
+                        <span>{problem.category}</span>
+                        {problem.id && duplicateProblemsMap.has(problem.id) && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedDuplicateProblem(problem);
+                              setShowDuplicateResolveModal(true);
+                            }}
+                            className="px-2 py-1 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-xs font-bold hover:bg-red-200 dark:hover:bg-red-800 transition-colors"
+                            title={currentLang === 'ja' ? `${duplicateProblemsMap.get(problem.id!)?.length}件の重複` : `${duplicateProblemsMap.get(problem.id!)?.length} duplicates`}
+                          >
+                            {currentLang === 'ja' ? '重複' : 'Duplicate'}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                    <td
+                      className="py-2 px-4 text-gray-900 dark:text-white cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedProblemDetail(problem);
+                        setShowProblemDetailModal(true);
+                      }}
+                      title={currentLang === 'ja' ? 'クリックして詳細を表示' : 'Click to show details'}
+                    >
                       {problem.question.length > 50 ? problem.question.substring(0, 50) + '...' : problem.question}
                     </td>
                     <td className="py-2 px-4 text-gray-900 dark:text-white">
@@ -1920,13 +2997,40 @@ ________________________________________
                     <td className="py-2 px-4">
                       <div className="flex space-x-2">
                         <button
-                          onClick={() => handleEditProblem(problem)}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (problem.id) {
+                              try {
+                                const updatedProblem = {
+                                  ...problem,
+                                  isFavorite: !problem.isFavorite
+                                };
+                                await problemService.update(updatedProblem);
+                                setProblems(problems.map(p => p.id === problem.id ? updatedProblem : p));
+                              } catch (error) {
+                                console.error('Failed to toggle favorite:', error);
+                              }
+                            }
+                          }}
+                          className="px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded hover:bg-yellow-200 dark:hover:bg-yellow-800 text-lg"
+                        >
+                          {problem.isFavorite ? '⭐' : '☆'}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            console.log('Edit button clicked', problem);
+                            handleEditProblem(problem);
+                          }}
                           className="quiz-action-button text-sm px-2 py-1 rounded transition-all"
                         >
                           {t[currentLang].buttons.edit}
                         </button>
                         <button
-                          onClick={() => problem.id && handleDeleteProblem(problem.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            problem.id && handleDeleteProblem(problem.id);
+                          }}
                           className="text-red-500 hover:text-red-700 text-sm hover:bg-red-50 dark:hover:bg-red-900/20 rounded px-2 py-1 transition-all"
                         >
                           {t[currentLang].buttons.delete}
@@ -1947,13 +3051,108 @@ ________________________________________
         </div>
       </div>
 
-      {/* プレビュー機能 */}
-      {hoveredProblem && (
-        <ProblemPreview
-          problem={hoveredProblem}
-          language={language as 'ja' | 'en'}
-          position={mousePosition}
-        />
+      {/* 問題詳細モーダル */}
+      {showProblemDetailModal && selectedProblemDetail && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setShowProblemDetailModal(false)}>
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="sticky top-0 bg-gradient-to-r from-blue-500 to-purple-600 text-white p-4 rounded-t-lg flex justify-between items-center">
+              <h3 className="text-xl font-bold">📋 問題詳細</h3>
+              <button
+                onClick={() => setShowProblemDetailModal(false)}
+                className="text-white hover:bg-white hover:bg-opacity-20 rounded-full p-2 transition-all"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              {/* カテゴリ */}
+              <div>
+                <label className="text-sm font-semibold text-gray-600 dark:text-gray-400">カテゴリ</label>
+                <p className="mt-1 text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700 p-3 rounded-lg">
+                  {selectedProblemDetail.category}
+                </p>
+              </div>
+
+              {/* 問題文 */}
+              <div>
+                <label className="text-sm font-semibold text-gray-600 dark:text-gray-400">問題文</label>
+                <p className="mt-1 text-gray-900 dark:text-white bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border-l-4 border-blue-500 whitespace-pre-wrap">
+                  {selectedProblemDetail.question}
+                </p>
+              </div>
+
+              {/* 選択肢（多択問題の場合） */}
+              {selectedProblemDetail.type === 'multiple-choice' && selectedProblemDetail.options && (
+                <div>
+                  <label className="text-sm font-semibold text-gray-600 dark:text-gray-400">選択肢</label>
+                  <div className="mt-1 space-y-2">
+                    {selectedProblemDetail.options.map((option, index) => (
+                      <div
+                        key={index}
+                        className={`p-3 rounded-lg border-l-4 ${
+                          index === selectedProblemDetail.correctAnswer
+                            ? 'bg-green-50 dark:bg-green-900/20 border-green-500 text-green-900 dark:text-green-100'
+                            : 'bg-gray-50 dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white'
+                        }`}
+                      >
+                        <span className="font-semibold">{index + 1}. </span>
+                        {option}
+                        {index === selectedProblemDetail.correctAnswer && (
+                          <span className="ml-2 text-green-600 dark:text-green-400 font-bold">✓ 正解</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 正解（○×問題の場合） */}
+              {selectedProblemDetail.type === 'true-false' && (
+                <div>
+                  <label className="text-sm font-semibold text-gray-600 dark:text-gray-400">正解</label>
+                  <p className="mt-1 text-gray-900 dark:text-white bg-green-50 dark:bg-green-900/20 p-3 rounded-lg border-l-4 border-green-500">
+                    {selectedProblemDetail.answer ? '○ 正しい' : '✕ 誤り'}
+                  </p>
+                </div>
+              )}
+
+              {/* 解説 */}
+              <div>
+                <label className="text-sm font-semibold text-gray-600 dark:text-gray-400">解説</label>
+                <p className="mt-1 text-gray-900 dark:text-white bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg border-l-4 border-purple-500 whitespace-pre-wrap">
+                  {selectedProblemDetail.explanation}
+                </p>
+              </div>
+
+              {/* タグ */}
+              {selectedProblemDetail.tags && selectedProblemDetail.tags.length > 0 && (
+                <div>
+                  <label className="text-sm font-semibold text-gray-600 dark:text-gray-400">タグ</label>
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    {selectedProblemDetail.tags.map((tag, index) => (
+                      <span
+                        key={index}
+                        className="px-3 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded-full text-sm"
+                      >
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ユーザーノート */}
+              {selectedProblemDetail.userNotes && (
+                <div>
+                  <label className="text-sm font-semibold text-gray-600 dark:text-gray-400">📝 ユーザーノート</label>
+                  <p className="mt-1 text-gray-900 dark:text-white bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg border-l-4 border-yellow-500 whitespace-pre-wrap">
+                    {selectedProblemDetail.userNotes}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* CSV プレビューモーダル */}
@@ -1971,6 +3170,79 @@ ________________________________________
       {/* 問題作成ガイド */}
       {showGuide && (
         <ProblemEditorGuide onClose={handleCloseGuide} />
+      )}
+
+      {/* 重複警告モーダル */}
+      {showDuplicateModal && duplicateCheckResult && (
+        <DuplicateWarningModal
+          duplicates={duplicateCheckResult.duplicates}
+          similarity={duplicateCheckResult.similarity}
+          onEdit={() => {
+            setShowDuplicateModal(false);
+            setDuplicateCheckResult(null);
+            // フォームに戻る（問題文入力欄にフォーカスを当てる）
+          }}
+          onSaveAnyway={() => {
+            setShowDuplicateModal(false);
+            setDuplicateCheckResult(null);
+            setForceSave(true);
+            // 強制保存フラグを立てて再度保存処理を実行
+            setTimeout(() => handleSaveProblem(), 0);
+          }}
+          onCancel={() => {
+            setShowDuplicateModal(false);
+            setDuplicateCheckResult(null);
+          }}
+        />
+      )}
+
+      {/* 一括操作モーダル */}
+      {showBulkActionModal && (
+        <BulkActionModal
+          selectedProblemIds={selectionManager.getSelectedIds()}
+          onClose={() => setShowBulkActionModal(false)}
+          onComplete={handleBulkActionComplete}
+          categories={categories}
+          quizSets={quizSets}
+          language={currentLang}
+        />
+      )}
+
+      {/* クイックアクションメニュー */}
+      {contextMenu && (
+        <QuickActionMenu
+          position={contextMenu.position}
+          actions={getQuickActions(contextMenu.problemId)}
+          onClose={() => setContextMenu(null)}
+          language={language as 'ja' | 'en'}
+        />
+      )}
+
+      {/* ショートカットヘルプモーダル */}
+      <ShortcutHelpModal
+        isOpen={showShortcutHelp}
+        onClose={() => setShowShortcutHelp(false)}
+        shortcutManager={shortcutManager}
+        language={language as 'ja' | 'en'}
+      />
+
+      {/* 重複解消モーダル */}
+      {showDuplicateResolveModal && selectedDuplicateProblem && selectedDuplicateProblem.id && (
+        <DuplicateResolveModal
+          problem={selectedDuplicateProblem}
+          duplicates={duplicateProblemsMap.get(selectedDuplicateProblem.id) || []}
+          onDeleteProblem={async (problemId) => {
+            await handleDeleteProblem(problemId);
+            // モーダルを閉じる
+            setShowDuplicateResolveModal(false);
+            setSelectedDuplicateProblem(null);
+          }}
+          onClose={() => {
+            setShowDuplicateResolveModal(false);
+            setSelectedDuplicateProblem(null);
+          }}
+          language={currentLang}
+        />
       )}
     </div>
   );
