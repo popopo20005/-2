@@ -17,6 +17,19 @@ export interface Problem {
   userNotes?: string;
   noteUpdatedAt?: Date;
   noteTags?: string[];
+  // お気に入り機能
+  isFavorite?: boolean;
+  favoritedAt?: Date;
+  // タグ機能
+  tags?: string[];
+  taggedAt?: Date;
+  // サブトピック重要度 (頻出度分析)
+  subtopic?: string;
+  importanceScore?: number;       // 1.0-2.0
+  importanceSource?: 'preset' | 'ai' | 'manual';
+  // 過去問出典情報
+  sourceExamYear?: number;
+  sourceExamName?: string;
 }
 
 export interface SubjectiveFeedbackData {
@@ -330,6 +343,16 @@ export interface StudyTimeSession {
   createdAt: Date;
 }
 
+// Undo/Redo Action History (Phase 1, Task 1.2)
+export interface ActionHistory {
+  id: string; // UUID
+  type: 'delete' | 'edit' | 'create';
+  entity: 'quizSet' | 'problem' | 'category';
+  data: any; // 削除されたオブジェクト全体
+  timestamp: Date;
+  expiresAt: Date; // timestamp + 5秒
+}
+
 // API response types
 export interface ApiResponse<T> {
   success: boolean;
@@ -338,7 +361,7 @@ export interface ApiResponse<T> {
 }
 
 // View types
-export type View = 'menu' | 'quiz' | 'editor' | 'quizSets' | 'stats' | 'history' | 'settings' | 'migration' | 'backup' | 'share' | 'qrShare' | 'exam' | 'categoryQuiz' | 'problemEdit' | 'quizSetStats' | 'diary' | 'insights' | 'recommendations' | 'sessionSettings' | 'reminderSettings' | 'difficultySettings' | 'spacedRepetition' | 'spacedRepetitionManager' | 'spacedRepetitionReview' | 'guide' | 'pomodoro' | 'weaknessAnalysis' | 'goalManager' | 'noteManager';
+export type View = 'menu' | 'quiz' | 'podcast' | 'editor' | 'quizSets' | 'stats' | 'history' | 'settings' | 'migration' | 'backup' | 'advancedBackup' | 'share' | 'qrShare' | 'exam' | 'categoryQuiz' | 'problemEdit' | 'quizSetStats' | 'diary' | 'insights' | 'recommendations' | 'sessionSettings' | 'reminderSettings' | 'difficultySettings' | 'spacedRepetition' | 'spacedRepetitionManager' | 'spacedRepetitionReview' | 'guide' | 'pomodoro' | 'weaknessAnalysis' | 'goalManager' | 'noteManager' | 'favorites' | 'templateManager' | 'allFeatures' | 'studyPlan' | 'studyPlanDashboard' | 'aiGenerator' | 'promptGenerator' | 'pricing' | 'paymentSuccess' | 'paymentCancel' | 'pastExamAnalysis' | 'badges' | 'smartNotes' | 'subtopicAnalysis' | 'pdcaCycle' | 'create' | 'review' | 'more' | 'promptWizard' | 'aiHandoff';
 
 export interface QuizParams {
   quizSetId?: number;
@@ -349,3 +372,45 @@ export interface QuizParams {
   problemIds?: number[];
   sessionId?: string;
 }
+
+// Note Template types
+export interface NoteTemplate {
+  id?: number;
+  name: string;
+  emoji?: string;
+  content: string;
+  category?: 'learning' | 'error' | 'solution' | 'reference' | 'custom';
+  isDefault?: boolean;
+  createdAt: Date;
+  updatedAt?: Date;
+}
+
+// Notebook template types
+export type NotebookTemplateType = 'standard' | 'review' | 'exam' | 'flashcard' | 'diary';
+
+export interface NotebookTemplate {
+  type: NotebookTemplateType;
+  name: string;
+  emoji: string;
+  description: string;
+}
+
+// Podcast Playlist types
+export interface PodcastPlaylist {
+  id?: number;
+  name: string;
+  description?: string;
+  emoji?: string;
+  quizSetIds: number[]; // 問題セットIDの配列
+  totalProblems?: number; // 合計問題数（キャッシュ）
+  createdAt: Date;
+  updatedAt?: Date;
+  lastPlayedAt?: Date;
+  playCount?: number; // 再生回数
+}
+
+// Notification types
+export * from './notification';
+
+// Study Plan types (Phase 1: 試験日ベース学習プランナー)
+export * from './studyPlan';

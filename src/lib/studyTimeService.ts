@@ -4,6 +4,7 @@
  */
 
 import { db } from './database';
+import { updateAllGoalProgress } from '../services/goalService';
 import type { StudyTimeSession } from '../types';
 
 /**
@@ -127,6 +128,11 @@ export async function endSession(
     correctCount,
     isPaused: false,
     pausedDuration: activeSession.totalPausedDuration,
+  });
+
+  // 目標進捗を自動更新
+  updateAllGoalProgress().catch(error => {
+    console.error('[StudyTimeService] Goal progress update failed:', error);
   });
 
   activeSession = null;

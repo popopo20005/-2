@@ -26,6 +26,7 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
   const [selectedItem, setSelectedItem] = useState<number | null>(null);
   const [availableItems, setAvailableItems] = useState<(Problem | QuizSet)[]>([]);
   const [authorName, setAuthorName] = useState('Anonymous');
+  const [customFileName, setCustomFileName] = useState('');
   const [isGeneratingQR, setIsGeneratingQR] = useState(false);
   const [generatedQR, setGeneratedQR] = useState<string | null>(null);
   
@@ -47,6 +48,11 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
   
   // ドラッグ＆ドロップ用の状態
   const [isDragOver, setIsDragOver] = useState(false);
+
+  // インポート進捗用の状態
+  const [importProgress, setImportProgress] = useState<{
+    current: number; total: number;
+  } | null>(null);
 
   // ヘルパー関数
   const formatDataSize = (bytes: number): string => {
@@ -73,25 +79,23 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
 
   // Language change detection
   useEffect(() => {
-    const handleStorageChange = () => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'language') {
+        setLanguage(e.newValue || 'ja');
+      }
+    };
+    const handleLangChange = () => {
       setLanguage(localStorage.getItem('language') || 'ja');
     };
 
     window.addEventListener('storage', handleStorageChange);
-    
-    // 定期的に言語設定をチェック
-    const interval = setInterval(() => {
-      const currentLang = localStorage.getItem('language') || 'ja';
-      if (currentLang !== language) {
-        setLanguage(currentLang);
-      }
-    }, 1000);
+    window.addEventListener('languageChange', handleLangChange);
 
     return () => {
       window.removeEventListener('storage', handleStorageChange);
-      clearInterval(interval);
+      window.removeEventListener('languageChange', handleLangChange);
     };
-  }, [language]);
+  }, []);
 
   // Translation objects
   const t = {
@@ -148,6 +152,9 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
         selectOption: '選択してください',
         authorName: '作成者名',
         authorPlaceholder: 'あなたの名前を入力',
+        fileName: 'ファイル名（オプション）',
+        fileNamePlaceholder: '例: my-quiz-set',
+        fileNameHint: '※ 空欄の場合は自動生成されます',
         dataSize: 'データサイズ:',
         problemCount: '📊 問題数:',
         valid: '✅ 共有可能',
@@ -255,6 +262,10 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
         fileImportFailed: 'ファイルのインポートに失敗しました:',
         fileDownloadFailed: 'ファイルのダウンロードに失敗しました:',
         invalidFileFormat: '無効なファイル形式です',
+        fileSizeTooLarge: 'ファイルサイズが大きすぎます（最大10MB）',
+        duplicateWarning: '同名の問題集が既に存在します。重複インポートしますか？',
+        importing: 'インポート中...',
+        importingProgress: '問をインポート中',
         qrReadButParseFailed: 'QRコードは読み取れましたが、データの解析に失敗しました:',
         qrReadFinalFailed: 'QRコードの読み取りに失敗しました:',
         progressReport: '問題作成進捗:'
@@ -321,6 +332,9 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
         selectOption: 'Please select',
         authorName: 'Author Name',
         authorPlaceholder: 'Enter your name',
+        fileName: 'File Name (Optional)',
+        fileNamePlaceholder: 'e.g., my-quiz-set',
+        fileNameHint: '※ Auto-generated if empty',
         dataSize: 'Data Size:',
         problemCount: '📊 Problem Count:',
         valid: '✅ Shareable',
@@ -428,6 +442,10 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
         fileImportFailed: 'File import failed:',
         fileDownloadFailed: 'File download failed:',
         invalidFileFormat: 'Invalid file format',
+        fileSizeTooLarge: 'File is too large (max 10MB)',
+        duplicateWarning: 'A quiz set with this name already exists. Import anyway?',
+        importing: 'Importing...',
+        importingProgress: ' problems importing',
         qrReadButParseFailed: 'QR code read successfully but data parsing failed:',
         qrReadFinalFailed: 'QR code reading failed:',
         progressReport: 'Problem creation progress:'
@@ -878,7 +896,12 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
     try {
       let exportData: any;
       let fileName: string;
-      
+
+      // カスタムファイル名のサニタイズ（安全な文字のみ許可）
+      const sanitizeFileName = (name: string): string => {
+        return name.replace(/[^\w\s-]/gi, '').replace(/\s+/g, '-').substring(0, 50);
+      };
+
       if (includeFullData) {
         // 完全なデータを含む
         if (type === 'problem') {
@@ -889,7 +912,12 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
             author: authorName || 'Anonymous',
             data: item
           };
-          fileName = `problem-${(item as Problem).question.substring(0, 20).replace(/[^\w\s]/gi, '')}-${Date.now()}.minguella`;
+          // カスタムファイル名が指定されている場合はそれを使用
+          if (customFileName.trim()) {
+            fileName = `${sanitizeFileName(customFileName)}.minguella`;
+          } else {
+            fileName = `problem-${(item as Problem).question.substring(0, 20).replace(/[^\w\s]/gi, '')}-${Date.now()}.minguella`;
+          }
         } else {
           const quizSet = item as QuizSet;
           // 問題集の場合は実際の問題も含める
@@ -904,7 +932,12 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
               problems: problems
             }
           };
-          fileName = `quizset-${quizSet.name.substring(0, 20).replace(/[^\w\s]/gi, '')}-${Date.now()}.minguella`;
+          // カスタムファイル名が指定されている場合はそれを使用
+          if (customFileName.trim()) {
+            fileName = `${sanitizeFileName(customFileName)}.minguella`;
+          } else {
+            fileName = `quizset-${quizSet.name.substring(0, 20).replace(/[^\w\s]/gi, '')}-${Date.now()}.minguella`;
+          }
         }
       } else {
         // 軽量版（問題集はIDのみ）
@@ -915,11 +948,17 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
           author: authorName || 'Anonymous',
           data: item
         };
-        fileName = `${type}-light-${Date.now()}.minguella`;
+        // カスタムファイル名が指定されている場合はそれを使用
+        if (customFileName.trim()) {
+          fileName = `${sanitizeFileName(customFileName)}-light.minguella`;
+        } else {
+          fileName = `${type}-light-${Date.now()}.minguella`;
+        }
       }
       
       const jsonString = JSON.stringify(exportData, null, 2);
-      const blob = new Blob([jsonString], { type: 'application/json' });
+      // iOS対応: application/octet-streamを使用してファイルとして正しく扱われるようにする
+      const blob = new Blob([jsonString], { type: 'application/octet-stream' });
       const url = URL.createObjectURL(blob);
       
       const link = document.createElement('a');
@@ -941,14 +980,51 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    // 改善2: ファイルサイズバリデーション (10MB上限)
+    const MAX_FILE_SIZE = 10 * 1024 * 1024;
+    if (file.size > MAX_FILE_SIZE) {
+      alert(`❌ ${t[currentLang].messages.fileSizeTooLarge}`);
+      event.target.value = '';
+      return;
+    }
+
     try {
       console.log('ファイル読み込み開始:', file.name, file.size);
-      
+
       const text = await file.text();
-      const importData = JSON.parse(text);
-      
+      let importData = JSON.parse(text);
+
       console.log('インポートデータ:', importData);
-      
+
+      // シンプルな形式 { category: "...", problems: [...] } を自動認識
+      if (importData.category && importData.problems && Array.isArray(importData.problems)) {
+        console.log('シンプルな問題セット形式を検出:', importData.category);
+
+        // 標準フォーマットに変換
+        importData = {
+          version: '1.0',
+          type: 'quizSet-full',
+          data: {
+            quizSet: {
+              name: importData.category,
+              problemIds: [],
+              createdAt: new Date()
+            },
+            problems: importData.problems.map((p: any) => ({
+              category: importData.category,
+              question: p.question,
+              type: 'multiple-choice',
+              options: p.options || [],
+              correctAnswer: p.correctAnswer || 0,
+              explanation: p.explanation || '',
+              answer: false
+            }))
+          }
+        };
+
+        console.log('変換後のデータ:', importData);
+      }
+
       if (!importData.version || !importData.type || !importData.data) {
         throw new Error(t[currentLang].messages.invalidFileFormat);
       }
@@ -977,27 +1053,51 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
         
       } else if (importData.type === 'quizSet') {
         const quizSet = importData.data;
+
+        // 改善3: 重複検出
+        const existingSets = await quizSetService.getAll();
+        const duplicate = existingSets.find(s => s.name === quizSet.name || s.name === `${quizSet.name} (インポート)`);
+        if (duplicate && !confirm(t[currentLang].messages.duplicateWarning)) {
+          event.target.value = '';
+          return;
+        }
+
         await quizSetService.save({
           name: `${quizSet.name} (インポート)`,
           problemIds: quizSet.problemIds,
           createdAt: new Date()
         });
         alert(`📚 ${t[currentLang].messages.quizSetImported}`);
-        
+
       } else if (importData.type === 'quizSet-full') {
         // 完全な問題集（問題も含む）
         const { quizSet, problems } = importData.data;
+
+        // 改善3: 重複検出
+        const existingSets = await quizSetService.getAll();
+        const duplicate = existingSets.find(s => s.name === quizSet.name || s.name === `${quizSet.name} (完全インポート)`);
+        if (duplicate && !confirm(t[currentLang].messages.duplicateWarning)) {
+          event.target.value = '';
+          return;
+        }
+
         const newProblemIds: number[] = [];
-        
+
+        // 改善5: 進捗表示
+        if (problems.length >= 10) {
+          setImportProgress({ current: 0, total: problems.length });
+        }
+
         // 問題を先にインポート
-        for (const problem of problems) {
+        for (let i = 0; i < problems.length; i++) {
+          const problem = problems[i];
           const newProblem: any = {
             category: problem.category,
             question: problem.question,
             type: problem.type,
             explanation: problem.explanation
           };
-          
+
           if (problem.type === 'multiple-choice') {
             newProblem.options = problem.options;
             newProblem.correctAnswer = problem.correctAnswer;
@@ -1007,18 +1107,26 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
             newProblem.options = [];
             newProblem.correctAnswer = 0;
           }
-          
+
           const problemId = await problemService.add(newProblem);
           newProblemIds.push(problemId);
+
+          // 進捗更新（10問ごと）
+          if (problems.length >= 10 && (i + 1) % 10 === 0) {
+            setImportProgress({ current: i + 1, total: problems.length });
+            await new Promise(r => setTimeout(r, 0)); // UIスレッド解放
+          }
         }
-        
+
+        setImportProgress(null);
+
         // 問題集をインポート
         await quizSetService.save({
           name: `${quizSet.name} (完全インポート)`,
           problemIds: newProblemIds,
           createdAt: new Date()
         });
-        
+
         alert(`${t[currentLang].messages.fullQuizSetImported}\n${t[currentLang].units.problems} ${problems.length}${t[currentLang].units.questions}\n問題集名: ${quizSet.name}`);
 
       } else if (importData.type === 'cardListFull') {
@@ -1032,9 +1140,16 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
 
         let addedCount = 0;
         const newProblemIds: number[] = [];
+        const totalCards = cardListFull.cards.length;
+
+        // 改善5: 進捗表示
+        if (totalCards >= 10) {
+          setImportProgress({ current: 0, total: totalCards });
+        }
 
         // 問題を先にインポート
-        for (const cardData of cardListFull.cards) {
+        for (let i = 0; i < totalCards; i++) {
+          const cardData = cardListFull.cards[i];
           const problem = cardData.problem;
           const newProblem: any = {
             category: problem.category,
@@ -1055,6 +1170,12 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
 
           const problemId = await problemService.add(newProblem);
           newProblemIds.push(problemId);
+
+          // 進捗更新（10問ごと）
+          if (totalCards >= 10 && (i + 1) % 10 === 0) {
+            setImportProgress({ current: i + 1, total: totalCards });
+            await new Promise(r => setTimeout(r, 0));
+          }
         }
 
         // 問題集を作成
@@ -1098,6 +1219,8 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
     } catch (error: unknown) {
       console.error('ファイルインポートエラー:', error);
       alert(`❌ ${t[currentLang].messages.fileImportFailed} ${getErrorMessage(error)}`);
+    } finally {
+      setImportProgress(null);
     }
 
     // ファイル入力をリセット
@@ -1105,7 +1228,27 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-6 bg-white dark:bg-gray-800 rounded-lg shadow-lg">
+    <div className="max-w-4xl mx-auto p-6 bg-white dark:bg-gray-800 rounded-lg shadow-lg relative">
+      {/* 改善5: インポート進捗オーバーレイ */}
+      {importProgress && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-2xl max-w-sm w-full mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+              {t[currentLang].messages.importing}
+            </h3>
+            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 mb-2">
+              <div
+                className="bg-blue-500 h-3 rounded-full transition-all duration-300"
+                style={{ width: `${Math.round((importProgress.current / importProgress.total) * 100)}%` }}
+              />
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              {importProgress.current}/{importProgress.total} {t[currentLang].messages.importingProgress}
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
           {t[currentLang].pageTitle}
@@ -1180,26 +1323,28 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
                 <li>• <strong>{t[currentLang].shareSection.limitations.estimate}</strong>: {t[currentLang].shareSection.limitations.estimateDesc}</li>
                 <li>• <strong>{t[currentLang].shareSection.limitations.note}</strong>: {t[currentLang].shareSection.limitations.noteDesc}</li>
               </ul>
-              <div className="space-y-2 mt-2">
-                <button
-                  onClick={createTestQuizSet}
-                  className="block w-full px-3 py-1 quiz-action-button rounded text-xs transition-colors"
-                >
-                  {t[currentLang].shareSection.testButtons.createTestSet}
-                </button>
-                <button
-                  onClick={() => createMegaTestQuizSet(1000)}
-                  className="block w-full px-3 py-1 quiz-action-button rounded text-xs transition-colors"
-                >
-                  {t[currentLang].shareSection.testButtons.createMegaSet}
-                </button>
-                <button
-                  onClick={() => createMegaTestQuizSet(5000)}
-                  className="block w-full px-3 py-1 quiz-action-button rounded text-xs transition-colors"
-                >
-                  {t[currentLang].shareSection.testButtons.createGigaSet}
-                </button>
-              </div>
+              {import.meta.env.DEV && (
+                <div className="space-y-2 mt-2">
+                  <button
+                    onClick={createTestQuizSet}
+                    className="block w-full px-3 py-1 quiz-action-button rounded text-xs transition-colors"
+                  >
+                    {t[currentLang].shareSection.testButtons.createTestSet}
+                  </button>
+                  <button
+                    onClick={() => createMegaTestQuizSet(1000)}
+                    className="block w-full px-3 py-1 quiz-action-button rounded text-xs transition-colors"
+                  >
+                    {t[currentLang].shareSection.testButtons.createMegaSet}
+                  </button>
+                  <button
+                    onClick={() => createMegaTestQuizSet(5000)}
+                    className="block w-full px-3 py-1 quiz-action-button rounded text-xs transition-colors"
+                  >
+                    {t[currentLang].shareSection.testButtons.createGigaSet}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1240,7 +1385,7 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
                 <select
                   value={selectedItem || ''}
                   onChange={(e) => setSelectedItem(e.target.value ? Number(e.target.value) : null)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 >
                   <option value="">{t[currentLang].form.selectOption}</option>
                   {availableItems.map((item: any) => (
@@ -1259,7 +1404,7 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
                   type="text"
                   value={authorName}
                   onChange={(e) => setAuthorName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   placeholder={t[currentLang].form.authorPlaceholder}
                 />
               </div>
@@ -1645,7 +1790,7 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
                 <select
                   value={selectedItem || ''}
                   onChange={(e) => setSelectedItem(e.target.value ? Number(e.target.value) : null)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 >
                   <option value="">{t[currentLang].form.selectOption}</option>
                   {availableItems.map((item: any) => (
@@ -1664,9 +1809,25 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
                   type="text"
                   value={authorName}
                   onChange={(e) => setAuthorName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   placeholder={t[currentLang].form.authorPlaceholder}
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  {t[currentLang].form.fileName}
+                </label>
+                <input
+                  type="text"
+                  value={customFileName}
+                  onChange={(e) => setCustomFileName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  placeholder={t[currentLang].form.fileNamePlaceholder}
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  {t[currentLang].form.fileNameHint}
+                </p>
               </div>
 
               {selectedItem && shareType === 'quizSet' && (
@@ -1738,7 +1899,7 @@ export function ShareCenter({ onBack }: ShareCenterProps) {
                     </h5>
                     <input
                       type="file"
-                      accept=".minguella,.json"
+                      accept=".minguella,.json,application/json,application/octet-stream,*/*"
                       onChange={handleFileImport}
                       className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100 dark:file:bg-green-900 dark:file:text-green-200"
                     />

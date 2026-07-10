@@ -15,7 +15,7 @@ export function InlineEditProblem({ problem, onSave, onCancel, language }: Inlin
     type: problem.type,
     answer: problem.answer,
     explanation: problem.explanation,
-    options: problem.options || ['', '', '', ''],
+    options: problem.options && problem.options.length > 0 ? problem.options : ['', ''],
     correctAnswer: problem.correctAnswer || 0
   });
 
@@ -33,7 +33,10 @@ export function InlineEditProblem({ problem, onSave, onCancel, language }: Inlin
       trueFalse: '○×問題',
       true: '○（正しい）',
       false: '×（誤り）',
-      option: '選択肢'
+      option: '選択肢',
+      addOption: '選択肢を追加',
+      removeOption: '削除',
+      minOptionsWarning: '最低2つの選択肢が必要です'
     },
     en: {
       category: 'Category',
@@ -48,11 +51,39 @@ export function InlineEditProblem({ problem, onSave, onCancel, language }: Inlin
       trueFalse: 'True/False',
       true: 'True',
       false: 'False',
-      option: 'Option'
+      option: 'Option',
+      addOption: 'Add Option',
+      removeOption: 'Remove',
+      minOptionsWarning: 'At least 2 options are required'
     }
   };
 
   const currentLang = language;
+
+  const handleAddOption = () => {
+    if (formData.options.length >= 10) {
+      alert(currentLang === 'ja' ? '選択肢は最大10個までです' : 'Maximum 10 options allowed');
+      return;
+    }
+    setFormData({
+      ...formData,
+      options: [...formData.options, '']
+    });
+  };
+
+  const handleRemoveOption = (index: number) => {
+    if (formData.options.length <= 2) {
+      alert(t[currentLang].minOptionsWarning);
+      return;
+    }
+    const newOptions = formData.options.filter((_, i) => i !== index);
+    setFormData({
+      ...formData,
+      options: newOptions,
+      // 正解が削除された選択肢だった場合は0にリセット
+      correctAnswer: formData.correctAnswer >= newOptions.length ? 0 : formData.correctAnswer
+    });
+  };
 
   const handleSave = () => {
     const updatedProblem: Problem = {
@@ -179,7 +210,8 @@ export function InlineEditProblem({ problem, onSave, onCancel, language }: Inlin
                       type="radio"
                       checked={formData.correctAnswer === index}
                       onChange={() => setFormData({ ...formData, correctAnswer: index })}
-                      className="form-radio text-green-600"
+                      className="form-radio text-green-600 flex-shrink-0"
+                      title={`${t[currentLang].option} ${index + 1}を正解にする`}
                     />
                     <input
                       type="text"
@@ -192,8 +224,27 @@ export function InlineEditProblem({ problem, onSave, onCancel, language }: Inlin
                       placeholder={`${t[currentLang].option} ${index + 1}`}
                       className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white"
                     />
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveOption(index)}
+                      disabled={formData.options.length <= 2}
+                      className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+                      title={t[currentLang].removeOption}
+                    >
+                      ✕
+                    </button>
                   </div>
                 ))}
+                <button
+                  type="button"
+                  onClick={handleAddOption}
+                  disabled={formData.options.length >= 10}
+                  className="mt-2 px-3 py-1.5 text-sm bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={formData.options.length >= 10 ? (currentLang === 'ja' ? '選択肢は最大10個まで' : 'Maximum 10 options') : ''}
+                >
+                  <span className="text-base">+</span>
+                  {t[currentLang].addOption} ({formData.options.length}/10)
+                </button>
               </div>
             </div>
           )}

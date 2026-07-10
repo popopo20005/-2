@@ -1,390 +1,516 @@
-import { Card, CardContent } from './ui/Card';
-import { Button } from './ui/Button';
+/**
+ * Guide - クイックスタートガイド
+ * 5ステップのチェックリスト形式
+ * ①プロンプト生成 ②問題インポート ③習熟度テスト ④学習プラン作成 ⑤クイズプレイ
+ */
+import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import {
-  BookOpen,
-  BarChart3,
-  Plus,
-  Edit2,
-  Clock,
-  Target,
-  Settings,
-  FileText,
-  Share2,
-  Calendar,
-  TrendingUp,
-  List,
-  Archive,
-  Bell,
-  Sliders,
   ArrowLeft,
-  Timer
+  FileText,
+  Download,
+  ClipboardCheck,
+  Map,
+  Play,
+  Check,
+  ChevronRight,
 } from 'lucide-react';
-import type { View } from '../types';
+import { problemService, quizSetService } from '../lib/database';
+import { LevelCheckQuiz } from './LevelCheckQuiz';
+import type { View, QuizSet } from '../types';
 
 interface GuideProps {
   onNavigate: (view: View) => void;
   language?: 'ja' | 'en';
 }
 
-/**
- * 総合案内コンポーネント
- * アプリの全機能をカテゴリー別に表示
- */
+interface StepStatus {
+  promptGenerated: boolean;
+  problemsImported: boolean;
+  levelChecked: boolean;
+  planCreated: boolean;
+  quizPlayed: boolean;
+}
+
 export function Guide({ onNavigate, language = 'ja' }: GuideProps) {
-  const translations = {
-    ja: {
-      title: '総合案内',
-      subtitle: 'アプリの機能一覧',
-      learning: '学習',
-      quiz: 'クイズ開始',
-      quizDesc: 'カテゴリー別に問題を解いて知識を定着させましょう。正解率や学習時間を記録して成長を実感できます。',
-      spacedRepetition: '間隔反復復習',
-      spacedRepetitionDesc: 'SM-2アルゴリズムによる科学的な復習スケジュール。忘却曲線に基づいて最適なタイミングで問題を復習できます。',
-      problemCreate: '問題作成',
-      problemCreateDesc: '○×問題や選択式問題を簡単に作成。カテゴリー分けや解説の追加で、オリジナルの学習教材を作りましょう。',
-      problemEdit: '問題編集',
-      problemEditDesc: '既存の問題を編集・削除・整理。問題の質を高めて学習効果を最大化しましょう。',
-      analysis: '分析',
-      stats: '統計表示',
-      statsDesc: '全体の正解率、カテゴリー別の成績、苦手な問題などを可視化。学習の進捗状況を一目で把握できます。',
-      history: '解答履歴',
-      historyDesc: '過去の全ての解答記録を確認。正解・不正解の履歴から学習パターンを分析して弱点を克服しましょう。',
-      diary: '学習日記',
-      diaryDesc: '日々の学習内容や気づき、達成したことを記録。振り返りによって学習の質を向上させることができます。',
-      insights: '学習インサイト',
-      insightsDesc: '学習データを詳細に分析して視覚化。時間帯別の正解率、学習パターン、成長曲線などを確認できます。',
-      management: '管理',
-      quizSets: '問題集管理',
-      quizSetsDesc: 'オリジナルの問題集を作成・管理。テーマ別や難易度別に問題をグループ化して効率的に学習できます。',
-      backup: 'バックアップ',
-      backupDesc: '問題、履歴、設定などのデータを安全にバックアップ。万が一のデータ損失に備えて定期的に保存しましょう。',
-      share: '共有センター',
-      shareDesc: 'QRコードやファイルで問題を共有。友達や仲間と問題を交換して学習の幅を広げましょう。',
-      settingsSection: '設定',
-      recommendations: '学習推薦',
-      recommendationsDesc: 'AIが学習データを分析して最適な学習方法を提案。苦手分野の克服や学習効率の向上をサポートします。',
-      pomodoro: 'ポモドーロタイマー',
-      pomodoroDesc: '25分集中＋5分休憩の時間管理術。タイマーで作業時間を区切り、高い集中力を維持しながら効率的に学習できます。',
-      sessionSettings: 'セッション設定',
-      sessionSettingsDesc: 'ポモドーロテクニックを活用した集中学習。作業時間と休憩時間を設定して生産性を高めましょう。',
-      reminderSettings: 'リマインダー',
-      reminderSettingsDesc: '学習時間の通知を設定。毎日の学習習慣を継続するためのリマインダーで学習を習慣化できます。',
-      difficultySettings: '難易度調整',
-      difficultySettingsDesc: '学習レベルに合わせて問題の難易度を自動調整。常に適切な難易度で効率的に学習できます。',
-      appSettings: '設定',
-      appSettingsDesc: 'ダークモード、言語設定、データ管理など、アプリ全体の設定をカスタマイズできます。',
-      backToDashboard: 'ダッシュボードに戻る'
-    },
-    en: {
-      title: 'Guide',
-      subtitle: 'All Features',
-      learning: 'Learning',
-      quiz: 'Start Quiz',
-      quizDesc: 'Answer questions by category to solidify your knowledge. Track your accuracy and study time to feel your growth.',
-      spacedRepetition: 'Spaced Repetition',
-      spacedRepetitionDesc: 'Scientific review scheduling using the SM-2 algorithm. Review problems at optimal intervals based on the forgetting curve.',
-      problemCreate: 'Create Problems',
-      problemCreateDesc: 'Easily create true/false and multiple choice questions. Build your own study materials with categories and explanations.',
-      problemEdit: 'Edit Problems',
-      problemEditDesc: 'Edit, delete, and organize existing problems. Improve question quality to maximize learning effectiveness.',
-      analysis: 'Analysis',
-      stats: 'Statistics',
-      statsDesc: 'Visualize overall accuracy, category performance, and weak areas. Get a clear view of your learning progress at a glance.',
-      history: 'Answer History',
-      historyDesc: 'Review all past answer records. Analyze your learning patterns from correct/incorrect history to overcome weaknesses.',
-      diary: 'Learning Diary',
-      diaryDesc: 'Record daily learning content, insights, and achievements. Improve learning quality through regular reflection.',
-      insights: 'Learning Insights',
-      insightsDesc: 'Analyze and visualize learning data in detail. Check accuracy by time of day, learning patterns, and growth curves.',
-      management: 'Management',
-      quizSets: 'Quiz Sets',
-      quizSetsDesc: 'Create and manage custom quiz sets. Group problems by theme or difficulty for efficient learning.',
-      backup: 'Backup',
-      backupDesc: 'Safely backup problems, history, and settings. Regularly save data to protect against potential data loss.',
-      share: 'Share Center',
-      shareDesc: 'Share problems via QR code or files. Exchange problems with friends and expand your learning resources.',
-      settingsSection: 'Settings',
-      recommendations: 'Recommendations',
-      recommendationsDesc: 'AI analyzes your learning data to suggest optimal study methods. Get help overcoming weak areas and improving efficiency.',
-      pomodoro: 'Pomodoro Timer',
-      pomodoroDesc: '25-minute focus + 5-minute break time management technique. Use timer to segment work time and maintain high concentration for efficient learning.',
-      sessionSettings: 'Session Settings',
-      sessionSettingsDesc: 'Focused learning with the Pomodoro Technique. Set work and break times to boost productivity.',
-      reminderSettings: 'Reminders',
-      reminderSettingsDesc: 'Set study time notifications. Build consistent study habits with daily learning reminders.',
-      difficultySettings: 'Difficulty',
-      difficultySettingsDesc: 'Automatically adjust problem difficulty to match your level. Always learn efficiently at the right difficulty.',
-      appSettings: 'Settings',
-      appSettingsDesc: 'Customize app-wide settings including dark mode, language, and data management.',
-      backToDashboard: 'Back to Dashboard'
-    }
+  const [stepStatus, setStepStatus] = useState<StepStatus>({
+    promptGenerated: false,
+    problemsImported: false,
+    levelChecked: false,
+    planCreated: false,
+    quizPlayed: false,
+  });
+  const [showLevelCheck, setShowLevelCheck] = useState(false);
+  const [showQuizSetPicker, setShowQuizSetPicker] = useState(false);
+  const [quizSets, setQuizSets] = useState<QuizSet[]>([]);
+  const [selectedProblemIds, setSelectedProblemIds] = useState<number[] | undefined>(undefined);
+  const [categories, setCategories] = useState<string[]>([]);
+
+  useEffect(() => {
+    checkStepStatus();
+  }, []);
+
+  const checkStepStatus = async () => {
+    try {
+      const promptGenerated = localStorage.getItem('promptGenerated') === 'true';
+      const planCreated = localStorage.getItem('studyPlanCreated') === 'true';
+      const quizPlayed = localStorage.getItem('quizPlayed') === 'true';
+      const levelChecked = localStorage.getItem('levelChecked') === 'true';
+
+      let problemsImported = false;
+      const cats: string[] = [];
+      try {
+        const problems = await problemService.getAll();
+        problemsImported = problems.length > 0;
+        // カテゴリー一覧を取得（習熟度テスト用）
+        const catSet = new Set<string>();
+        for (const p of problems) {
+          if (p.category) catSet.add(p.category);
+        }
+        cats.push(...catSet);
+      } catch { /* ignore */ }
+
+      // 問題集一覧を取得
+      try {
+        const sets = await quizSetService.getAll();
+        setQuizSets(sets);
+      } catch { /* ignore */ }
+
+      setCategories(cats);
+      setStepStatus({
+        promptGenerated,
+        problemsImported,
+        levelChecked,
+        planCreated,
+        quizPlayed,
+      });
+    } catch { /* ignore */ }
   };
 
-  const t = translations[language];
+  const handleLevelCheckComplete = (score: number) => {
+    console.log('習熟度テスト完了: スコア', score);
+    localStorage.setItem('levelChecked', 'true');
+    localStorage.setItem('levelCheckScore', String(score));
+    setShowLevelCheck(false);
+    setSelectedProblemIds(undefined);
+    setStepStatus(prev => ({ ...prev, levelChecked: true }));
+  };
 
-  // 学習セクション
-  const learningFeatures = [
-    {
-      icon: Target,
-      title: t.quiz,
-      desc: t.quizDesc,
-      color: 'from-blue-500 to-cyan-500',
-      bgColor: 'from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20',
-      borderColor: 'border-blue-500',
-      view: 'categoryQuiz' as View
-    },
-    {
-      icon: Clock,
-      title: t.spacedRepetition,
-      desc: t.spacedRepetitionDesc,
-      color: 'from-orange-500 to-red-500',
-      bgColor: 'from-orange-50 to-red-50 dark:from-orange-900/20 dark:to-red-900/20',
-      borderColor: 'border-orange-500',
-      view: 'spacedRepetition' as View
-    },
-    {
-      icon: Plus,
-      title: t.problemCreate,
-      desc: t.problemCreateDesc,
-      color: 'from-green-500 to-emerald-500',
-      bgColor: 'from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20',
-      borderColor: 'border-green-500',
-      view: 'editor' as View
-    },
-    {
-      icon: Edit2,
-      title: t.problemEdit,
-      desc: t.problemEditDesc,
-      color: 'from-purple-500 to-pink-500',
-      bgColor: 'from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20',
-      borderColor: 'border-purple-500',
-      view: 'problemEdit' as View
+  const handleLevelCheckSkip = () => {
+    localStorage.setItem('levelChecked', 'true');
+    setShowLevelCheck(false);
+    setSelectedProblemIds(undefined);
+    setStepStatus(prev => ({ ...prev, levelChecked: true }));
+  };
+
+  const handleStartLevelCheck = () => {
+    if (categories.length === 0) {
+      // 問題がない場合はスキップ扱い
+      handleLevelCheckSkip();
+      return;
     }
-  ];
-
-  // 分析セクション
-  const analysisFeatures = [
-    {
-      icon: BarChart3,
-      title: t.stats,
-      desc: t.statsDesc,
-      color: 'from-indigo-500 to-blue-500',
-      bgColor: 'from-indigo-50 to-blue-50 dark:from-indigo-900/20 dark:to-blue-900/20',
-      borderColor: 'border-indigo-500',
-      view: 'stats' as View
-    },
-    {
-      icon: List,
-      title: t.history,
-      desc: t.historyDesc,
-      color: 'from-teal-500 to-cyan-500',
-      bgColor: 'from-teal-50 to-cyan-50 dark:from-teal-900/20 dark:to-cyan-900/20',
-      borderColor: 'border-teal-500',
-      view: 'history' as View
-    },
-    {
-      icon: Calendar,
-      title: t.diary,
-      desc: t.diaryDesc,
-      color: 'from-pink-500 to-rose-500',
-      bgColor: 'from-pink-50 to-rose-50 dark:from-pink-900/20 dark:to-rose-900/20',
-      borderColor: 'border-pink-500',
-      view: 'diary' as View
-    },
-    {
-      icon: TrendingUp,
-      title: t.insights,
-      desc: t.insightsDesc,
-      color: 'from-violet-500 to-purple-500',
-      bgColor: 'from-violet-50 to-purple-50 dark:from-violet-900/20 dark:to-purple-900/20',
-      borderColor: 'border-violet-500',
-      view: 'insights' as View
+    // 問題集が1つもない場合は全問題で直接開始
+    if (quizSets.length === 0) {
+      setSelectedProblemIds(undefined);
+      setShowLevelCheck(true);
+      return;
     }
-  ];
+    setShowQuizSetPicker(true);
+  };
 
-  // 管理セクション
-  const managementFeatures = [
-    {
-      icon: BookOpen,
-      title: t.quizSets,
-      desc: t.quizSetsDesc,
-      color: 'from-amber-500 to-yellow-500',
-      bgColor: 'from-amber-50 to-yellow-50 dark:from-amber-900/20 dark:to-yellow-900/20',
-      borderColor: 'border-amber-500',
-      view: 'quizSets' as View
-    },
-    {
-      icon: Archive,
-      title: t.backup,
-      desc: t.backupDesc,
-      color: 'from-slate-500 to-gray-500',
-      bgColor: 'from-slate-50 to-gray-50 dark:from-slate-900/20 dark:to-gray-900/20',
-      borderColor: 'border-slate-500',
-      view: 'backup' as View
-    },
-    {
-      icon: Share2,
-      title: t.share,
-      desc: t.shareDesc,
-      color: 'from-emerald-500 to-teal-500',
-      bgColor: 'from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20',
-      borderColor: 'border-emerald-500',
-      view: 'share' as View
+  const handleSelectQuizSet = (quizSet: QuizSet | null) => {
+    if (quizSet) {
+      setSelectedProblemIds(quizSet.problemIds);
+    } else {
+      // 「全ての問題」を選択
+      setSelectedProblemIds(undefined);
     }
-  ];
+    setShowQuizSetPicker(false);
+    setShowLevelCheck(true);
+  };
 
-  // 設定セクション
-  const settingsFeatures = [
-    {
-      icon: FileText,
-      title: t.recommendations,
-      desc: t.recommendationsDesc,
-      color: 'from-sky-500 to-blue-500',
-      bgColor: 'from-sky-50 to-blue-50 dark:from-sky-900/20 dark:to-blue-900/20',
-      borderColor: 'border-sky-500',
-      view: 'recommendations' as View
-    },
-    {
-      icon: Timer,
-      title: t.pomodoro,
-      desc: t.pomodoroDesc,
-      color: 'from-red-500 to-red-600',
-      bgColor: 'from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-800/20',
-      borderColor: 'border-red-500',
-      view: 'pomodoro' as View
-    },
-    {
-      icon: Clock,
-      title: t.sessionSettings,
-      desc: t.sessionSettingsDesc,
-      color: 'from-fuchsia-500 to-pink-500',
-      bgColor: 'from-fuchsia-50 to-pink-50 dark:from-fuchsia-900/20 dark:to-pink-900/20',
-      borderColor: 'border-fuchsia-500',
-      view: 'sessionSettings' as View
-    },
-    {
-      icon: Bell,
-      title: t.reminderSettings,
-      desc: t.reminderSettingsDesc,
-      color: 'from-red-500 to-orange-500',
-      bgColor: 'from-red-50 to-orange-50 dark:from-red-900/20 dark:to-orange-900/20',
-      borderColor: 'border-red-500',
-      view: 'reminderSettings' as View
-    },
-    {
-      icon: Sliders,
-      title: t.difficultySettings,
-      desc: t.difficultySettingsDesc,
-      color: 'from-lime-500 to-green-500',
-      bgColor: 'from-lime-50 to-green-50 dark:from-lime-900/20 dark:to-green-900/20',
-      borderColor: 'border-lime-500',
-      view: 'difficultySettings' as View
-    },
-    {
-      icon: Settings,
-      title: t.appSettings,
-      desc: t.appSettingsDesc,
-      color: 'from-gray-500 to-gray-600',
-      bgColor: 'from-gray-50 to-gray-100 dark:from-gray-800/50 dark:to-gray-900/50',
-      borderColor: 'border-gray-500',
-      view: 'settings' as View
-    }
-  ];
-
-  const renderFeatureCard = (feature: typeof learningFeatures[0]) => {
-    const Icon = feature.icon;
+  // 問題集選択画面
+  if (showQuizSetPicker) {
     return (
-      <Card
-        key={feature.title}
-        hoverable
-        clickable
-        padding="none"
-        className={`border-l-4 ${feature.borderColor} overflow-hidden cursor-pointer hover:shadow-lg transition-all`}
-        onClick={() => onNavigate(feature.view)}
-      >
-        <CardContent className={`p-4 bg-gradient-to-br ${feature.bgColor}`}>
-          <div className="flex items-center gap-3">
-            <div className={`size-12 rounded-lg bg-gradient-to-br ${feature.color} flex items-center justify-center flex-shrink-0 shadow-md`}>
-              <Icon className="size-6 text-white" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-0.5 truncate">
-                {feature.title}
-              </h3>
-              <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
-                {feature.desc}
-              </p>
-            </div>
+      <div className="flex flex-col min-h-[calc(100vh-6rem)] max-w-md md:max-w-2xl lg:max-w-4xl mx-auto w-full">
+        <div className="flex items-center gap-3 mb-4">
+          <button
+            onClick={() => setShowQuizSetPicker(false)}
+            className="w-10 h-10 rounded-full flex items-center justify-center"
+            style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            <ArrowLeft size={18} className="text-[#94A3B8]" />
+          </button>
+          <div>
+            <h1 className="text-xl font-bold text-[#F8FAFC]">
+              {language === 'ja' ? '問題集を選択' : 'Select Quiz Set'}
+            </h1>
+            <p className="text-[12px] text-[#64748B]">
+              {language === 'ja' ? 'テストに使う問題集を選んでください' : 'Choose a quiz set for the test'}
+            </p>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+
+        <div className="flex flex-col gap-3">
+          {/* 全ての問題 */}
+          <motion.button
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+            onClick={() => handleSelectQuizSet(null)}
+            className="w-full text-left"
+          >
+            <div
+              className="rounded-[16px] p-4 px-5 flex items-center gap-4 transition-transform active:scale-[0.98]"
+              style={{
+                background: 'linear-gradient(135deg, rgba(30,58,138,0.3), rgba(22,78,99,0.3))',
+                border: '1px solid rgba(99,102,241,0.4)',
+              }}
+            >
+              <div
+                className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+                style={{ background: 'rgba(99,102,241,0.2)', border: '2px solid #6366F1' }}
+              >
+                <ClipboardCheck size={18} className="text-[#C7D2FE]" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <span className="text-[14px] font-bold text-[#F8FAFC]">
+                  {language === 'ja' ? 'すべての問題' : 'All Problems'}
+                </span>
+                <p className="text-[12px] text-[#94A3B8]">
+                  {language === 'ja'
+                    ? `全カテゴリーからランダムに出題（${categories.length}カテゴリー）`
+                    : `Random from all categories (${categories.length} categories)`}
+                </p>
+              </div>
+              <ChevronRight size={16} className="text-[#818CF8]" />
+            </div>
+          </motion.button>
+
+          {/* 各問題集 */}
+          {quizSets.map((qs, index) => (
+            <motion.button
+              key={qs.id}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: (index + 1) * 0.06, duration: 0.3 }}
+              onClick={() => handleSelectQuizSet(qs)}
+              className="w-full text-left"
+            >
+              <div
+                className="rounded-[16px] p-4 px-5 flex items-center gap-4 transition-transform active:scale-[0.98]"
+                style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}
+              >
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 text-[14px] font-bold"
+                  style={{ background: 'rgba(255,255,255,0.05)', border: '2px solid rgba(255,255,255,0.15)', color: '#94A3B8' }}
+                >
+                  {qs.problemIds.length}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <span className="text-[14px] font-bold text-[#F8FAFC]">{qs.name}</span>
+                  <p className="text-[12px] text-[#94A3B8]">
+                    {language === 'ja'
+                      ? `${qs.problemIds.length}問`
+                      : `${qs.problemIds.length} problems`}
+                    {qs.description && ` · ${qs.description}`}
+                  </p>
+                </div>
+                <ChevronRight size={16} className="text-[#64748B]" />
+              </div>
+            </motion.button>
+          ))}
+        </div>
+      </div>
     );
-  };
+  }
+
+  // 習熟度テスト表示中
+  if (showLevelCheck) {
+    return (
+      <div className="flex flex-col min-h-[calc(100vh-6rem)] max-w-md md:max-w-2xl lg:max-w-4xl mx-auto w-full">
+        <div className="flex items-center gap-3 mb-4">
+          <button
+            onClick={() => setShowLevelCheck(false)}
+            className="w-10 h-10 rounded-full flex items-center justify-center"
+            style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            <ArrowLeft size={18} className="text-[#94A3B8]" />
+          </button>
+          <div>
+            <h1 className="text-xl font-bold text-[#F8FAFC]">
+              {language === 'ja' ? '習熟度テスト' : 'Level Check'}
+            </h1>
+            <p className="text-[12px] text-[#64748B]">
+              {language === 'ja' ? 'ステップ 3/5' : 'Step 3/5'}
+            </p>
+          </div>
+        </div>
+        <LevelCheckQuiz
+          categories={categories}
+          problemIds={selectedProblemIds}
+          onComplete={handleLevelCheckComplete}
+          onSkip={handleLevelCheckSkip}
+          lang={language}
+        />
+      </div>
+    );
+  }
+
+  const steps = language === 'ja' ? [
+    {
+      number: 1,
+      title: 'プロンプトを生成する',
+      description: 'AIに渡すプロンプトを作成して、問題を自動生成しましょう。弱点データや履歴を自動反映できます。',
+      icon: FileText,
+      completed: stepStatus.promptGenerated,
+      action: () => onNavigate('promptWizard'),
+      actionLabel: 'プロンプトを作成',
+    },
+    {
+      number: 2,
+      title: '問題をインポートする',
+      description: 'AIが生成した問題をコピー＆ペーストで取り込みます。JSON/CSV/テキストに対応しています。',
+      icon: Download,
+      completed: stepStatus.problemsImported,
+      action: () => onNavigate('editor'),
+      actionLabel: 'インポートする',
+    },
+    {
+      number: 3,
+      title: '習熟度テストを受ける',
+      description: 'インポートした問題から10問出題し、現在の実力を判定します。結果に基づいて最適な学習プランを作成できます。',
+      icon: ClipboardCheck,
+      completed: stepStatus.levelChecked,
+      action: handleStartLevelCheck,
+      actionLabel: 'テストを受ける',
+    },
+    {
+      number: 4,
+      title: '学習プランを作成する',
+      description: '習熟度テストの結果をもとに、試験日や目標を設定してSM-2アルゴリズムに基づく学習計画を立てましょう。',
+      icon: Map,
+      completed: stepStatus.planCreated,
+      action: () => onNavigate('studyPlanDashboard'),
+      actionLabel: 'プランを作成',
+    },
+    {
+      number: 5,
+      title: 'クイズをプレイする',
+      description: '準備完了！学習プランの「今日のタスク」からクイズを開始しましょう。進捗がプランに自動反映されます。',
+      icon: Play,
+      completed: stepStatus.quizPlayed,
+      action: () => onNavigate('studyPlanDashboard'),
+      actionLabel: '学習プランへ',
+    },
+  ] : [
+    {
+      number: 1,
+      title: 'Generate a Prompt',
+      description: 'Create a prompt for AI to auto-generate problems. Weakness data and history are reflected automatically.',
+      icon: FileText,
+      completed: stepStatus.promptGenerated,
+      action: () => onNavigate('promptWizard'),
+      actionLabel: 'Create Prompt',
+    },
+    {
+      number: 2,
+      title: 'Import Problems',
+      description: 'Copy & paste AI-generated problems. Supports JSON, CSV, and text formats.',
+      icon: Download,
+      completed: stepStatus.problemsImported,
+      action: () => onNavigate('editor'),
+      actionLabel: 'Import',
+    },
+    {
+      number: 3,
+      title: 'Take a Level Check',
+      description: '10 questions from imported problems to assess your current level. The result helps create an optimal study plan.',
+      icon: ClipboardCheck,
+      completed: stepStatus.levelChecked,
+      action: handleStartLevelCheck,
+      actionLabel: 'Take Test',
+    },
+    {
+      number: 4,
+      title: 'Create a Study Plan',
+      description: 'Based on your level check results, set exam dates and goals to build an optimal plan with the SM-2 algorithm.',
+      icon: Map,
+      completed: stepStatus.planCreated,
+      action: () => onNavigate('studyPlanDashboard'),
+      actionLabel: 'Create Plan',
+    },
+    {
+      number: 5,
+      title: 'Play Quiz',
+      description: "All set! Start quizzes from your study plan's daily tasks. Progress is automatically tracked in your plan.",
+      icon: Play,
+      completed: stepStatus.quizPlayed,
+      action: () => onNavigate('studyPlanDashboard'),
+      actionLabel: 'Go to Plan',
+    },
+  ];
+
+  const completedCount = steps.filter(s => s.completed).length;
+  const progressPercent = Math.round((completedCount / steps.length) * 100);
+
+  // 次にやるべきステップを特定
+  const nextStepIndex = steps.findIndex(s => !s.completed);
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6 p-4 animate-fade-in">
-      {/* ヘッダー */}
-      <div className="flex items-center gap-4 mb-6">
-        <Button
-          variant="outline"
+    <div className="flex flex-col min-h-[calc(100vh-6rem)] max-w-md md:max-w-2xl lg:max-w-4xl mx-auto w-full">
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-6">
+        <button
           onClick={() => onNavigate('menu')}
-          className="flex items-center gap-2"
+          className="w-10 h-10 rounded-full flex items-center justify-center"
+          style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}
         >
-          <ArrowLeft className="size-4" />
-          {t.backToDashboard}
-        </Button>
+          <ArrowLeft size={18} className="text-[#94A3B8]" />
+        </button>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {t.title}
+          <h1 className="text-xl font-bold text-[#F8FAFC]">
+            {language === 'ja' ? 'クイックスタートガイド' : 'Quick Start Guide'}
           </h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            {t.subtitle}
+          <p className="text-[12px] text-[#64748B]">
+            {language === 'ja' ? '5つのステップでアプリをマスター' : 'Master the app in 5 steps'}
           </p>
         </div>
       </div>
 
-      {/* 学習セクション */}
-      <div>
-        <h2 className="text-xl font-bold mb-3 text-gray-900 dark:text-gray-100 flex items-center gap-2">
-          <Target className="size-5 text-blue-500" />
-          {t.learning}
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {learningFeatures.map(renderFeatureCard)}
+      {/* Progress Summary */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className="rounded-2xl p-5 mb-5"
+        style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}
+      >
+        <div className="flex justify-between items-center mb-3">
+          <span className="text-[14px] font-semibold text-[#F8FAFC]">
+            {language === 'ja' ? '進捗' : 'Progress'}
+          </span>
+          <span className="text-[14px] font-bold text-[#818CF8]">
+            {completedCount}/{steps.length} {language === 'ja' ? '完了' : 'done'}
+          </span>
         </div>
+        <div className="w-full h-[8px] rounded-full" style={{ background: 'rgba(255,255,255,0.08)' }}>
+          <motion.div
+            className="h-full rounded-full"
+            style={{
+              background: 'linear-gradient(90deg, #6366F1, #818CF8)',
+              boxShadow: '0 0 12px rgba(99,102,241,0.5)',
+            }}
+            initial={{ width: 0 }}
+            animate={{ width: `${progressPercent}%` }}
+            transition={{ duration: 0.8, ease: 'easeOut' }}
+          />
+        </div>
+        {completedCount === steps.length && (
+          <p className="text-[13px] text-[#34D399] mt-3 font-semibold text-center">
+            {language === 'ja' ? '全ステップ完了！おめでとうございます！' : 'All steps complete! Congratulations!'}
+          </p>
+        )}
+      </motion.div>
+
+      {/* Steps */}
+      <div className="flex-1 flex flex-col gap-3">
+        {steps.map((step, index) => {
+          const Icon = step.icon;
+          const isNext = index === nextStepIndex;
+          const isCompleted = step.completed;
+
+          return (
+            <motion.button
+              key={step.number}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.08, duration: 0.4 }}
+              onClick={step.action}
+              className="w-full text-left"
+            >
+              <div
+                className="rounded-[16px] p-4 px-5 flex items-start gap-4 transition-transform active:scale-[0.98]"
+                style={
+                  isNext
+                    ? {
+                        background: 'linear-gradient(135deg, rgba(30,58,138,0.3), rgba(22,78,99,0.3))',
+                        border: '1px solid rgba(99,102,241,0.4)',
+                        boxShadow: '0 0 20px rgba(99,102,241,0.15)',
+                      }
+                    : {
+                        background: 'rgba(30,41,59,0.7)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                      }
+                }
+              >
+                {/* Step number / Check */}
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 text-[14px] font-bold"
+                  style={
+                    isCompleted
+                      ? {
+                          background: 'rgba(16,185,129,0.2)',
+                          border: '2px solid #10B981',
+                          color: '#34D399',
+                        }
+                      : isNext
+                        ? {
+                            background: 'rgba(99,102,241,0.2)',
+                            border: '2px solid #6366F1',
+                            color: '#C7D2FE',
+                          }
+                        : {
+                            background: 'rgba(255,255,255,0.05)',
+                            border: '2px solid rgba(255,255,255,0.15)',
+                            color: '#64748B',
+                          }
+                  }
+                >
+                  {isCompleted ? <Check size={18} /> : step.number}
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon size={14} className={isCompleted ? 'text-[#34D399]' : isNext ? 'text-[#818CF8]' : 'text-[#64748B]'} />
+                    <span className={`text-[14px] font-bold ${isCompleted ? 'text-[#34D399]' : 'text-[#F8FAFC]'}`}>
+                      {step.title}
+                    </span>
+                    {isCompleted && (
+                      <span className="text-[10px] font-bold text-[#34D399] bg-[rgba(16,185,129,0.15)] rounded-full px-2 py-0.5">
+                        {language === 'ja' ? '完了' : 'Done'}
+                      </span>
+                    )}
+                    {isNext && (
+                      <span className="text-[10px] font-bold text-[#818CF8] bg-[rgba(99,102,241,0.15)] rounded-full px-2 py-0.5">
+                        {language === 'ja' ? '次のステップ' : 'Next'}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[12px] text-[#94A3B8] leading-relaxed">
+                    {step.description}
+                  </p>
+                  {isNext && (
+                    <div className="mt-2 flex items-center gap-1 text-[12px] font-bold text-[#818CF8]">
+                      {step.actionLabel}
+                      <ChevronRight size={14} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.button>
+          );
+        })}
       </div>
 
-      {/* 分析セクション */}
-      <div>
-        <h2 className="text-xl font-bold mb-3 text-gray-900 dark:text-gray-100 flex items-center gap-2">
-          <BarChart3 className="size-5 text-indigo-500" />
-          {t.analysis}
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {analysisFeatures.map(renderFeatureCard)}
-        </div>
-      </div>
-
-      {/* 管理セクション */}
-      <div>
-        <h2 className="text-xl font-bold mb-3 text-gray-900 dark:text-gray-100 flex items-center gap-2">
-          <Archive className="size-5 text-amber-500" />
-          {t.management}
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {managementFeatures.map(renderFeatureCard)}
-        </div>
-      </div>
-
-      {/* 設定セクション */}
-      <div>
-        <h2 className="text-xl font-bold mb-3 text-gray-900 dark:text-gray-100 flex items-center gap-2">
-          <Settings className="size-5 text-gray-500" />
-          {t.settingsSection}
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {settingsFeatures.map(renderFeatureCard)}
-        </div>
+      {/* Cycle explanation */}
+      <div className="mt-4 pt-4 pb-2 text-center" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+        <p className="text-[11px] text-[#64748B] leading-relaxed">
+          {language === 'ja'
+            ? 'つくる → 取り込む → 診断 → プラン → 学習 → 見直し（a-PDCAサイクル）'
+            : 'Create → Import → Diagnose → Plan → Study → Review (a-PDCA Cycle)'}
+        </p>
       </div>
     </div>
   );

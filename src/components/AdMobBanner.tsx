@@ -3,6 +3,7 @@ import { AdMob, BannerAdSize, BannerAdPosition } from '@capacitor-community/admo
 import type { BannerAdOptions } from '@capacitor-community/admob';
 import { isNativePlatform } from '../lib/platform';
 import { useAd } from '../contexts/AdContext';
+import { AdSenseResponsiveBanner } from './AdSenseBanner';
 
 interface AdMobBannerProps {
   /**
@@ -21,8 +22,9 @@ interface AdMobBannerProps {
 }
 
 /**
- * AdMobバナー広告コンポーネント
- * ネイティブプラットフォーム（Android/iOS）でのみバナー広告を表示します
+ * ユニバーサルバナー広告コンポーネント
+ * - ネイティブプラットフォーム（Android/iOS）: AdMob広告を表示
+ * - Webプラットフォーム（ブラウザ/PWA）: Google AdSense広告を表示
  */
 export function AdMobBanner({
   adUnitId = 'ca-app-pub-2625123042629219/2471496182', // 本番バナー広告ID
@@ -34,7 +36,7 @@ export function AdMobBanner({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Webプラットフォームでは何もしない
+    // Webプラットフォームでは何もしない（AdSenseが別途表示される）
     if (!isNativePlatform()) {
       return;
     }
@@ -95,11 +97,10 @@ export function AdMobBanner({
     };
   }, [adUnitId, adSize, position, shouldShowAd, isShowing]);
 
-  // このコンポーネントはUIを表示しない（バナーはネイティブレイヤーで表示される）
-  // ただし、Webプラットフォームでのプレースホルダーとして空のdivを返すことも可能
+  // プラットフォーム別に広告を表示
   if (!isNativePlatform()) {
-    // Webプラットフォームでは何も表示しない
-    return null;
+    // Webプラットフォーム（ブラウザ/PWA）: Google AdSense広告を表示
+    return <AdSenseResponsiveBanner />;
   }
 
   if (error) {
@@ -111,7 +112,7 @@ export function AdMobBanner({
     return null;
   }
 
-  // ネイティブプラットフォームではバナーの高さ分のスペースを確保
+  // ネイティブプラットフォーム: AdMobバナーの高さ分のスペースを確保
   return (
     <div
       style={{

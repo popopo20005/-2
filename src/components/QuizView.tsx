@@ -1,24 +1,47 @@
 import { useState, useEffect, useRef, memo } from 'react';
 import toast from 'react-hot-toast';
 import { categoryService, problemService, quizSetService, historyService, quizSessionService, statisticsService, spacedRepetitionService } from '../lib/database';
+import { updateAllGoalProgress } from '../services/goalService';
 import { AnalyticsManager, AnalyticsTracker } from '../lib/analyticsTracker';
 import { SubjectiveFeedback } from './SubjectiveFeedback';
 import { LevelUpModal } from './LevelUpModal';
 import { startSession, endSession } from '../lib/studyTimeService';
-import { updateCardAfterReview } from '../lib/sm2Algorithm';
+import { updateCardAfterReview, createNewCard } from '../lib/sm2Algorithm';
 import { autoPersonalizeSettings } from '../services/responseTimeService';
 import { recordCompletion } from '../services/quizCompletionService';
 import { debugLog } from '../utils/debug';
+import { PerformanceMonitor } from '../services/performanceOptimizer';
 import type { ReviewResult } from '../types';
-import { QuizProgress } from './quiz/QuizProgress';
+
+// Performance monitoring instance
+const performanceMonitor = new PerformanceMonitor();
+// QuizProgress moved inline into header
 import { QuizCard } from './quiz/QuizCard';
 import { AnswerButton } from './quiz/AnswerButton';
 import { NeumorphicButton } from './ui/NeumorphicButton';
 import { GlassCard } from './ui/GlassCard';
-import { RingChart } from './dashboard/RingChart';
-import { BookOpen, Layers, Target, Clock, Trash2, HelpCircle, Zap } from 'lucide-react';
+// RingChart removed - result screen now uses inline circle display
+import { FavoriteButton } from './FavoriteButton';
+import { favoritesService } from '../services/favoritesService';
+import { MarkdownPreview } from './MarkdownPreview';
+import { FlashcardView } from './FlashcardView';
+import { NoteEditor } from './NoteEditor';
+import { MistakeReasonTagger } from './MistakeReasonTagger';
+import { saveMistakeReason } from '../services/mistakeReasonService';
+import { recordQuizCompletion } from '../services/gamificationService';
+import { dailyGoalService, studyPlanService, mockExamService, db } from '../lib/database';
+import { recalculatePlanProgress } from '../services/studyPlanGenerator';
+import { performDailyAdjustment, performWeeklyRebalance, shouldAutoRebalance } from '../services/pdcaAdjustmentService';
+import { BadgeUnlockToast } from './gamification/BadgeUnlockToast';
+import { XPFloatAnimation } from './gamification/XPFloatAnimation';
+import { DifficultyGrading, type DifficultyGrade } from './quiz/DifficultyGrading';
+import type { BadgeDefinition } from '../types/gamification';
+import { BADGE_DEFINITIONS } from '../types/gamification';
+import type { MistakeReasonTag } from '../types/smartNote';
+import { BookOpen, Layers, Target, Clock, Trash2, HelpCircle, CreditCard, Grid3x3, Edit, Volume2, VolumeX, Play, Pause, SkipForward } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Problem, QuizSet, QuizSession, SubjectiveFeedbackData, QuizParams } from '../types';
+import { speechService, type SpeechState } from '../services/speechService';
 
 interface QuizViewProps {
   onBack: () => void;
@@ -27,11 +50,18 @@ interface QuizViewProps {
 
 type QuizMode = 'selection' | 'playing' | 'result';
 type QuizType = 'all' | 'category' | 'quizSet' | 'incorrect' | 'quizSetIncorrect' | 'quizSetWorstProblems';
+type DisplayMode = 'normal' | 'flashcard';
 
 const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
   const [mode, setMode] = useState<QuizMode>('selection');
   const [isLoading, setIsLoading] = useState(true);
   const [language, setLanguage] = useState(localStorage.getItem('language') || 'ja');
+  const [displayMode, setDisplayMode] = useState<DisplayMode>('normal');
+
+  // Speech (Quiz Mode Only)
+  const [speechEnabled, setSpeechEnabled] = useState(false);
+  const [speechState, setSpeechState] = useState<SpeechState>('idle');
+  const [waitingForAnswer, setWaitingForAnswer] = useState(false);
 
   // Data
   const [categories, setCategories] = useState<string[]>([]);
@@ -48,10 +78,13 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [score, setScore] = useState(0);
   const [userAnswers, setUserAnswers] = useState<(boolean | number)[]>([]);
+  const [strikethroughStates, setStrikethroughStates] = useState<boolean[][]>([]); // Track strikethrough for each question's options
   const [showFeedback, setShowFeedback] = useState(false);
   const [startTime, setStartTime] = useState<Date | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [questionStartTime, setQuestionStartTime] = useState<Date>(new Date()); // 各問題の開始時刻
+  // SM-2スナップショット: セッション開始時の各問題のSM-2状態（新規/復習の判定用）
+  const [sm2Snapshot, setSm2Snapshot] = useState<Map<number, { isNew: boolean; repetitions: number }>>(new Map());
 
   // Modals & Feedback
   const [showLevelUpModal, setShowLevelUpModal] = useState(false);
@@ -60,6 +93,11 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
     problemIndex: number;
     answer: boolean | number;
   } | null>(null);
+  const [showNoteEditor, setShowNoteEditor] = useState(false);
+  const [lastAnswerCorrect, setLastAnswerCorrect] = useState<boolean | null>(null);
+  const [showMistakeReason, setShowMistakeReason] = useState(true); // 不正解時に理由タグUIを表示
+  const [unlockedBadge, setUnlockedBadge] = useState<BadgeDefinition | null>(null); // バッジ解除通知
+  const [xpFloatTrigger, setXpFloatTrigger] = useState(0); // +XP animation trigger
 
   // Session Management
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -140,46 +178,68 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
 
   // Initial Params
   useEffect(() => {
-    debugLog('🎯 QuizView initialParams effect:', { initialParams, isLoading, processed: initialParamsProcessed.current });
+    // Check sessionStorage for pending params
+    const pendingParamsStr = sessionStorage.getItem('pendingQuizParams');
+    let effectiveParams = initialParams;
+
+    if (pendingParamsStr && !initialParamsProcessed.current) {
+      try {
+        const pendingParams = JSON.parse(pendingParamsStr);
+        debugLog('🔄 Found pending params in sessionStorage:', pendingParams);
+        effectiveParams = pendingParams;
+        // Don't clear sessionStorage yet - wait until we actually process the params
+      } catch (e) {
+        debugLog('❌ Failed to parse pending params from sessionStorage:', e);
+      }
+    }
+
+    debugLog('🎯 QuizView initialParams effect:', { initialParams, effectiveParams, isLoading, processed: initialParamsProcessed.current });
     debugLog('🔍 Detailed params check:', {
       hasInitialParams: !!initialParams,
-      mode: initialParams?.mode,
-      problemIds: initialParams?.problemIds,
-      problemIdsLength: initialParams?.problemIds?.length,
-      quizSetId: initialParams?.quizSetId,
+      hasEffectiveParams: !!effectiveParams,
+      mode: effectiveParams?.mode,
+      problemIds: effectiveParams?.problemIds,
+      problemIdsLength: effectiveParams?.problemIds?.length,
+      quizSetId: effectiveParams?.quizSetId,
     });
 
-    // Only process initialParams once
-    if (initialParams && !isLoading && !initialParamsProcessed.current) {
+    // Only process params once
+    if (effectiveParams && !isLoading && !initialParamsProcessed.current) {
       initialParamsProcessed.current = true;
-      debugLog('✅ Processing initialParams (first time only)');
+      debugLog('✅ Processing params (first time only)');
 
-      if (initialParams.mode === 'resume' && initialParams.sessionId) {
-        debugLog('📝 Resuming session:', initialParams.sessionId);
-        resumeSession(initialParams.sessionId);
-      } else if (initialParams.mode === 'quizSetWorstProblems' && initialParams.quizSetId) {
+      // Clear sessionStorage now that we're processing the params
+      if (pendingParamsStr) {
+        sessionStorage.removeItem('pendingQuizParams');
+        debugLog('🧹 Cleared pending params from sessionStorage');
+      }
+
+      if (effectiveParams.mode === 'resume' && effectiveParams.sessionId) {
+        debugLog('📝 Resuming session:', effectiveParams.sessionId);
+        resumeSession(effectiveParams.sessionId);
+      } else if (effectiveParams.mode === 'quizSetWorstProblems' && effectiveParams.quizSetId) {
         debugLog('📝 Starting quizSetWorstProblems mode');
-        debugLog('📊 Problem count:', initialParams.problemCount);
-        setSelectedQuizSet(initialParams.quizSetId);
-        if (initialParams.category) {
-          setSelectedCategory(initialParams.category);
-          startQuizSetCategoryWorstProblems(initialParams.quizSetId, initialParams.category, initialParams.useLatestOnly || true);
+        debugLog('📊 Problem count:', effectiveParams.problemCount);
+        setSelectedQuizSet(effectiveParams.quizSetId);
+        if (effectiveParams.category) {
+          setSelectedCategory(effectiveParams.category);
+          startQuizSetCategoryWorstProblems(effectiveParams.quizSetId, effectiveParams.category, effectiveParams.useLatestOnly || true);
         } else {
-          startQuizWithParams('quizSetWorstProblems', undefined, initialParams.quizSetId, initialParams.useLatestOnly || true, initialParams.problemCount);
+          startQuizWithParams('quizSetWorstProblems', undefined, effectiveParams.quizSetId, effectiveParams.useLatestOnly || true, effectiveParams.problemCount);
         }
-      } else if (initialParams.mode === 'categoryQuiz' && initialParams.category) {
+      } else if (effectiveParams.mode === 'categoryQuiz' && effectiveParams.category) {
         debugLog('📝 Starting categoryQuiz mode');
-        setSelectedCategory(initialParams.category);
-        if (initialParams.quizSetId) setSelectedQuizSet(initialParams.quizSetId);
-        startQuizWithParams('category', initialParams.category, initialParams.quizSetId);
-      } else if (initialParams.mode === 'review' && initialParams.problemIds && initialParams.problemIds.length > 0) {
-        debugLog('📝 Starting review mode with problemIds:', initialParams.problemIds.length);
-        startReviewQuiz(initialParams.problemIds);
-      } else if (initialParams.quizSetId && !initialParams.mode) {
-        debugLog('📝 Starting quizSet mode with ID:', initialParams.quizSetId);
-        setSelectedQuizSet(initialParams.quizSetId);
+        setSelectedCategory(effectiveParams.category);
+        if (effectiveParams.quizSetId) setSelectedQuizSet(effectiveParams.quizSetId);
+        startQuizWithParams('category', effectiveParams.category, effectiveParams.quizSetId);
+      } else if (effectiveParams.mode === 'review' && effectiveParams.problemIds && effectiveParams.problemIds.length > 0) {
+        debugLog('📝 Starting review mode with problemIds:', effectiveParams.problemIds.length);
+        startReviewQuiz(effectiveParams.problemIds);
+      } else if (effectiveParams.quizSetId && !effectiveParams.mode) {
+        debugLog('📝 Starting quizSet mode with ID:', effectiveParams.quizSetId);
+        setSelectedQuizSet(effectiveParams.quizSetId);
         // selectedQuizSetが更新されるまで待つために、直接IDを渡す
-        startQuizWithParams('quizSet', undefined, initialParams.quizSetId);
+        startQuizWithParams('quizSet', undefined, effectiveParams.quizSetId);
       }
     }
   }, [initialParams, isLoading]);
@@ -323,23 +383,33 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
 
   const loadData = async () => {
     try {
-      const [categoriesData, quizSetsData, problemsData] = await Promise.all([
-        categoryService.getAll(),
-        quizSetService.getAll(),
-        problemService.getAll()
-      ]);
+      const [categoriesData, quizSetsData, problemsData] = await performanceMonitor.measure('QuizView: Load Initial Data', () =>
+        Promise.all([
+          categoryService.getAll(),
+          quizSetService.getAll(),
+          problemService.getAll()
+        ])
+      );
       setCategories(categoriesData);
       setQuizSets(quizSetsData);
       setAllProblems(problemsData);
       try {
         // 既存の重複セッションをクリーンアップ
-        const deletedCount = await quizSessionService.cleanupDuplicateSessions();
+        const deletedCount = await performanceMonitor.measure('QuizView: Cleanup Duplicate Sessions', () =>
+          quizSessionService.cleanupDuplicateSessions()
+        );
         if (deletedCount > 0) {
           debugLog(`🧹 Cleaned up ${deletedCount} duplicate sessions`);
         }
 
-        const sessionsData = await quizSessionService.getActiveSessions();
+        const sessionsData = await performanceMonitor.measure('QuizView: Load Active Sessions', () =>
+          quizSessionService.getActiveSessions()
+        );
         setSavedSessions(sessionsData);
+
+        // Log performance summary
+        const summaryStats = performanceMonitor.getAllStats();
+        debugLog('📊 QuizView Performance Summary:', summaryStats);
       } catch (sessionError) {
         debugLog('Session data loading failed:', sessionError);
         setSavedSessions([]);
@@ -349,6 +419,107 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // ========================================
+  // 読み上げ機能関連
+  // ========================================
+
+  // 読み上げサービスの初期化
+  useEffect(() => {
+    speechService.loadSettings();
+    speechService.setMode('quiz'); // Always quiz mode
+    speechService.setCallbacks({
+      onStateChange: (state) => {
+        setSpeechState(state);
+      },
+      onWaitingAnswer: () => {
+        setWaitingForAnswer(true);
+      },
+      onQuestionEnd: () => {
+        // Quiz mode doesn't auto-advance
+      }
+    });
+
+    return () => {
+      speechService.stop();
+    };
+  }, []);
+
+  // 読み上げ開始（問題が変わったとき）
+  useEffect(() => {
+    if (!speechEnabled || mode !== 'playing' || !currentProblems[currentIndex]) return;
+
+    const currentProblem = currentProblems[currentIndex];
+
+    // 少し遅延を入れてUIが表示されてから読み上げ
+    const timer = setTimeout(() => {
+      if (currentProblem.type === 'multiple-choice') {
+        // クイズモード：問題と選択肢のみ読み上げ
+        speechService.speakProblemQuiz(
+          currentProblem.question,
+          currentProblem.options || [],
+          currentProblem.category
+        );
+      } else {
+        // ○×問題：問題のみ読み上げ
+        speechService.speakTrueFalseQuiz(
+          currentProblem.question,
+          currentProblem.category
+        );
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [speechEnabled, mode, currentIndex, currentProblems]);
+
+  // 解答後のフィードバック読み上げ（クイズモード）
+  useEffect(() => {
+    if (!speechEnabled || !waitingForAnswer || !showFeedback) return;
+
+    const currentProblem = currentProblems[currentIndex];
+    const userAnswer = userAnswers[currentIndex];
+
+    if (currentProblem.type === 'multiple-choice') {
+      const isCorrect = userAnswer === currentProblem.correctAnswer;
+      speechService.speakAnswerFeedback(
+        isCorrect,
+        currentProblem.correctAnswer || 0,
+        currentProblem.options || [],
+        currentProblem.explanation
+      );
+    } else {
+      const isCorrect = userAnswer === currentProblem.answer;
+      speechService.speakTrueFalseFeedback(
+        isCorrect,
+        currentProblem.answer ?? false,
+        currentProblem.explanation
+      );
+    }
+
+    setWaitingForAnswer(false);
+  }, [showFeedback, waitingForAnswer, speechEnabled, currentProblems, currentIndex, userAnswers]);
+
+  // 読み上げ制御関数
+  const toggleSpeech = () => {
+    if (speechEnabled) {
+      speechService.stop();
+      setSpeechEnabled(false);
+    } else {
+      setSpeechEnabled(true);
+    }
+  };
+
+  const pauseSpeech = () => {
+    if (speechState === 'speaking') {
+      speechService.pause();
+    } else if (speechState === 'paused') {
+      speechService.resume();
+    }
+  };
+
+  const skipSpeech = () => {
+    speechService.skipToNext();
   };
 
   const getIncorrectProblems = async (): Promise<Problem[]> => {
@@ -488,6 +659,9 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
       setCurrentIndex(0);
       setScore(0);
       setUserAnswers([]);
+      setStrikethroughStates(shuffledProblems.map(p =>
+        p.options ? new Array(p.options.length).fill(false) : []
+      ));
       setShowFeedback(false);
       setStartTime(new Date());
       setMode('playing');
@@ -544,6 +718,9 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
       setCurrentIndex(0);
       setScore(0);
       setUserAnswers([]);
+      setStrikethroughStates(shuffledProblems.map(p =>
+        p.options ? new Array(p.options.length).fill(false) : []
+      ));
       setShowFeedback(false);
       setMode('playing');
       const now = new Date();
@@ -593,6 +770,9 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
       setCurrentIndex(0);
       setScore(0);
       setUserAnswers([]);
+      setStrikethroughStates(shuffledProblems.map(p =>
+        p.options ? new Array(p.options.length).fill(false) : []
+      ));
       setShowFeedback(false);
       setStartTime(new Date());
       setMode('playing');
@@ -615,14 +795,18 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
         alert(t[currentLang].messages.sessionNotFound);
         return;
       }
-      const progressPercent = ((session.currentIndex / session.problems.length) * 100).toFixed(0);
-      const confirmMessage = `${t[currentLang].messages.confirmResumeSession} \n\n` +
-        `${t[currentLang].labels.totalQuestions}: ${session.problems.length}${currentLang === 'ja' ? '問' : ''} \n` +
-        `${t[currentLang].sections.savedSessions.progress} ${session.currentIndex + 1}${currentLang === 'ja' ? '問目' : ''} (${progressPercent}%) \n` +
-        `${t[currentLang].sections.savedSessions.correct} ${session.score}${currentLang === 'ja' ? '問' : ''} \n` +
-        `${currentLang === 'ja' ? '開始日時' : 'Start Time'}: ${session.startTime.toLocaleString()} `;
+      // 学習プランからの新規開始 or 最初から開始の場合は確認不要
+      const isNewPlanSession = sessionId.startsWith('study-plan-') && session.currentIndex === 0;
+      if (!isNewPlanSession) {
+        const progressPercent = ((session.currentIndex / session.problems.length) * 100).toFixed(0);
+        const confirmMessage = `${t[currentLang].messages.confirmResumeSession} \n\n` +
+          `${t[currentLang].labels.totalQuestions}: ${session.problems.length}${currentLang === 'ja' ? '問' : ''} \n` +
+          `${t[currentLang].sections.savedSessions.progress} ${session.currentIndex + 1}${currentLang === 'ja' ? '問目' : ''} (${progressPercent}%) \n` +
+          `${t[currentLang].sections.savedSessions.correct} ${session.score}${currentLang === 'ja' ? '問' : ''} \n` +
+          `${currentLang === 'ja' ? '開始日時' : 'Start Time'}: ${session.startTime.toLocaleString()} `;
 
-      if (!confirm(confirmMessage)) return;
+        if (!confirm(confirmMessage)) return;
+      }
 
       await quizSessionService.save({
         ...session,
@@ -636,6 +820,9 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
       setCurrentIndex(session.currentIndex);
       setScore(session.score);
       setUserAnswers(session.answers);
+      setStrikethroughStates(session.problems.map(p =>
+        p.options ? new Array(p.options.length).fill(false) : []
+      ));
       setShowFeedback(false);
 
       // 保存された経過時間を復元
@@ -648,6 +835,28 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
       } else {
         // 保存された経過時間がない場合（古いセッション）
         setStartTime(session.startTime);
+      }
+
+      // 学習プランセッション開始時: SM-2スナップショットを取得（新規/復習の判定用）
+      if (sessionId.startsWith('study-plan-') && session.currentIndex === 0) {
+        const snapshot = new Map<number, { isNew: boolean; repetitions: number }>();
+        for (const problem of session.problems) {
+          if (problem.id) {
+            try {
+              const card = await spacedRepetitionService.getCardByProblemId(problem.id);
+              snapshot.set(problem.id, {
+                isNew: !card || card.repetitions === 0,
+                repetitions: card?.repetitions ?? 0,
+              });
+            } catch {
+              snapshot.set(problem.id, { isNew: true, repetitions: 0 });
+            }
+          }
+        }
+        setSm2Snapshot(snapshot);
+        debugLog('📸 SM-2 snapshot taken:', snapshot.size, 'problems,',
+          Array.from(snapshot.values()).filter(s => s.isNew).length, 'new,',
+          Array.from(snapshot.values()).filter(s => !s.isNew).length, 'review');
       }
 
       setMode('playing');
@@ -683,7 +892,12 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
     const isCorrect = typeof answer === 'boolean' ? answer : answer === currentProblem.correctAnswer;
     const newUserAnswers = [...userAnswers, answer];
     setUserAnswers(newUserAnswers);
-    if (isCorrect) setScore(prev => prev + 1);
+    if (isCorrect) {
+      setScore(prev => prev + 1);
+      setXpFloatTrigger(prev => prev + 1); // Trigger +XP animation
+    }
+    setLastAnswerCorrect(isCorrect);
+    setShowMistakeReason(!isCorrect); // 不正解時のみ理由タグを表示
 
     // 解答時間を計算
     const responseTime = Date.now() - questionStartTime.getTime();
@@ -709,13 +923,30 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
       debugLog('❌ History save error:', error);
     }
 
-    // SM-2復習モードの場合、カードを更新
-    if (currentSessionId && currentSessionId.startsWith('review-') && currentProblem.id) {
+    // SM-2カードを更新（復習モード + 学習プランセッション）
+    const shouldUpdateSM2 = currentSessionId && currentProblem.id && (
+      currentSessionId.startsWith('review-') ||
+      currentSessionId.startsWith('study-plan-')
+    );
+    if (shouldUpdateSM2) {
       try {
         debugLog('🔄 Updating SM-2 card:', currentProblem.id, 'isCorrect:', isCorrect);
 
-        // カードを取得
-        const card = await spacedRepetitionService.getCardByProblemId(currentProblem.id);
+        // カードを取得（なければ新規作成）
+        let card = await spacedRepetitionService.getCardByProblemId(currentProblem.id!);
+        if (!card && currentSessionId!.startsWith('study-plan-')) {
+          // 学習プランセッション: 新規問題のSM-2カードを作成
+          const newCard = createNewCard(
+            currentProblem.id!,
+            currentProblem.category,
+            undefined,
+            currentProblem.question?.substring(0, 50)
+          );
+          const cardId = await spacedRepetitionService.createCard(newCard);
+          card = { ...newCard, id: cardId };
+          debugLog('✨ New SM-2 card created for problemId:', currentProblem.id);
+        }
+
         if (card) {
           // 解答時間を計算（実際に計測）
           const responseTime = Date.now() - questionStartTime.getTime();
@@ -760,12 +991,54 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
     }
   };
 
+  const handleToggleStrikethrough = (optionIndex: number) => {
+    if (showFeedback) return; // Don't allow strikethrough after answer is shown
+
+    const newStrikethroughStates = [...strikethroughStates];
+    if (!newStrikethroughStates[currentIndex]) {
+      newStrikethroughStates[currentIndex] = [];
+    }
+    const currentStrikethrough = [...(newStrikethroughStates[currentIndex] || [])];
+    currentStrikethrough[optionIndex] = !currentStrikethrough[optionIndex];
+    newStrikethroughStates[currentIndex] = currentStrikethrough;
+    setStrikethroughStates(newStrikethroughStates);
+  };
+
   const handleNext = async () => {
     if (pendingSubjectiveFeedback) {
       setShowSubjectiveFeedback(true);
       return;
     }
     proceedToNextQuestion();
+  };
+
+  const handleSaveNote = async (note: string, tags: string[]) => {
+    const currentProblem = currentProblems[currentIndex];
+    if (!currentProblem.id) return;
+
+    try {
+      // 更新されたProblemオブジェクトを作成
+      const updatedProblem: Problem = {
+        ...currentProblem,
+        userNotes: note,
+        noteUpdatedAt: new Date(),
+        noteTags: tags,
+      };
+
+      // IndexedDBのProblemを更新
+      await problemService.update(updatedProblem);
+
+      // ローカルの状態も更新
+      const updatedProblems = [...currentProblems];
+      updatedProblems[currentIndex] = updatedProblem;
+      setCurrentProblems(updatedProblems);
+
+      setShowNoteEditor(false);
+      toast.success(currentLang === 'ja' ? 'メモを保存しました' : 'Note saved successfully');
+    } catch (error) {
+      console.error('[QuizView] メモの保存に失敗:', error);
+      toast.error(currentLang === 'ja' ? 'メモの保存に失敗しました' : 'Failed to save note');
+    }
   };
 
   const proceedToNextQuestion = async () => {
@@ -807,6 +1080,7 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
 
   const finishQuiz = async () => {
     setMode('result');
+    localStorage.setItem('quizPlayed', 'true');
     if (autoSaveInterval) clearInterval(autoSaveInterval);
     if (currentSessionId) {
       try {
@@ -833,6 +1107,256 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
           }
         }).catch(error => {
           debugLog('❌ Auto-personalization failed:', error);
+        });
+
+        // 目標進捗を自動更新
+        updateAllGoalProgress().then(() => {
+          debugLog('✅ Goal progress updated');
+        }).catch(error => {
+          debugLog('❌ Goal progress update failed:', error);
+        });
+
+        // 学習プランの進捗を更新（プランベースのセッションの場合）
+        if (currentSessionId.startsWith('study-plan-')) {
+          (async () => {
+            try {
+              const allPlans = await studyPlanService.getAll();
+              const activePlans = allPlans.filter(p => p.isActive && !p.isCompleted);
+              const completedCount = currentProblems.length;
+              const accuracy = completedCount > 0 ? (score / completedCount) * 100 : 0;
+
+              // SM-2スナップショットを使い、新規と復習の問題数を分離
+              let newCount = 0;
+              let reviewCount = 0;
+              for (const problem of currentProblems) {
+                if (problem.id && sm2Snapshot.size > 0) {
+                  const snap = sm2Snapshot.get(problem.id);
+                  if (snap && !snap.isNew) {
+                    reviewCount++;
+                  } else {
+                    newCount++;
+                  }
+                } else {
+                  // スナップショットがない場合は全て新規として扱う
+                  newCount++;
+                }
+              }
+              debugLog(`📊 Problem breakdown: ${newCount} new, ${reviewCount} review (total: ${completedCount})`);
+
+              // 1. 今日のDailyGoalがあれば更新（新規/復習を分離して記録）
+              const todayGoals = await dailyGoalService.getTodayGoals();
+              const updatedPlanIds = new Set<number>();
+
+              for (const goal of todayGoals) {
+                if (!activePlans.some(p => p.id === goal.planId)) continue;
+                const updatedNew = (goal.actualNewProblems || 0) + newCount;
+                const updatedReview = (goal.actualReviewProblems || 0) + reviewCount;
+                const totalActual = updatedNew + updatedReview;
+                const isNowCompleted = totalActual >= goal.totalProblemsTarget;
+
+                await dailyGoalService.update(goal.id!, {
+                  actualNewProblems: updatedNew,
+                  actualReviewProblems: updatedReview,
+                  accuracy,
+                  isCompleted: isNowCompleted,
+                });
+                updatedPlanIds.add(goal.planId);
+                debugLog(`✅ DailyGoal ${goal.id} updated: new=${updatedNew}, review=${updatedReview}, total=${totalActual}/${goal.totalProblemsTarget}`);
+              }
+
+              // 1.5. DailyGoalがなかったプラン → 休息日学習として動的にDailyGoalを作成
+              for (const plan of activePlans) {
+                if (!plan.id || updatedPlanIds.has(plan.id)) continue;
+                // 休息日判定: 今日がstudyDaysOfWeekに含まれていない
+                const todayDow = new Date().getDay();
+                const isRestDayForPlan = plan.studyDaysOfWeek && !plan.studyDaysOfWeek.includes(todayDow);
+                if (isRestDayForPlan) {
+                  try {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    await db.dailyGoals.add({
+                      planId: plan.id,
+                      date: today,
+                      dayNumber: 0,
+                      isStudyDay: false,
+                      newProblemsTarget: 0,
+                      reviewProblemsTarget: 0,
+                      totalProblemsTarget: 0,
+                      categories: [],
+                      estimatedTime: 0,
+                      isCompleted: true,
+                      completedAt: new Date(),
+                      actualNewProblems: newCount,
+                      actualReviewProblems: reviewCount,
+                      accuracy,
+                      createdAt: new Date(),
+                      updatedAt: new Date(),
+                    });
+                    updatedPlanIds.add(plan.id);
+                    debugLog(`✅ Rest day DailyGoal created for plan ${plan.id}: new=${newCount}, review=${reviewCount}`);
+                  } catch (restDayError) {
+                    debugLog('⚠️ Rest day DailyGoal creation failed:', restDayError);
+                  }
+                }
+              }
+
+              // 2. DailyGoalがないプランも含め、全アクティブプランの進捗を直接更新
+              for (const plan of activePlans) {
+                if (!plan.id) continue;
+
+                // DailyGoalで更新されなかったプランの場合、progress.completedProblemsを直接加算
+                if (!updatedPlanIds.has(plan.id)) {
+                  const currentNewCompleted = plan.progress?.completedNewProblems || 0;
+                  const currentReviewCompleted = plan.progress?.completedReviewProblems || 0;
+                  const updatedNewCompleted = currentNewCompleted + newCount;
+                  const updatedReviewCompleted = currentReviewCompleted + reviewCount;
+                  const totalTarget = plan.totalProblemsTarget || 1;
+                  // メイン進捗は新規問題ベース
+                  const newPercentage = Math.min(100, (updatedNewCompleted / totalTarget) * 100);
+
+                  await studyPlanService.update(plan.id, {
+                    progress: {
+                      ...plan.progress,
+                      completedProblems: updatedNewCompleted + updatedReviewCompleted,
+                      completedNewProblems: updatedNewCompleted,
+                      completedReviewProblems: updatedReviewCompleted,
+                      remainingProblems: Math.max(0, totalTarget - updatedNewCompleted),
+                      progressPercentage: newPercentage,
+                    },
+                  });
+                  debugLog(`✅ Plan ${plan.id} progress directly updated: new=${updatedNewCompleted}, review=${updatedReviewCompleted}/${totalTarget} (${newPercentage.toFixed(1)}%)`);
+                }
+
+                // プラン進捗を再計算
+                await recalculatePlanProgress(plan.id);
+                debugLog(`✅ Plan ${plan.id} progress recalculated`);
+              }
+
+              window.dispatchEvent(new CustomEvent('study-plan-updated'));
+              window.dispatchEvent(new CustomEvent('daily-goal-completed'));
+
+              // PDCA日次調整: 翌日のDailyGoalを自動調整
+              for (const plan of activePlans) {
+                if (!plan.id) continue;
+                try {
+                  const adjustResult = await performDailyAdjustment(plan.id);
+                  if (adjustResult.carryOver > 0 || adjustResult.reviewExpansion > 0 || adjustResult.extraReviewAdded) {
+                    debugLog(`🔄 Daily adjustment for plan ${plan.id}:`, adjustResult);
+                  }
+
+                  // 週次リバランスチェック
+                  if (shouldAutoRebalance(plan)) {
+                    const rebalanceResult = await performWeeklyRebalance(plan.id);
+                    debugLog(`🔄 Weekly rebalance for plan ${plan.id}:`, rebalanceResult.summary);
+                  }
+                } catch (adjustError) {
+                  debugLog('⚠️ PDCA adjustment error:', adjustError);
+                }
+              }
+            } catch (e) {
+              debugLog('❌ Study plan progress update failed:', e);
+            }
+          })();
+        }
+
+        // 模試セッションの結果保存 + DailyGoal更新
+        if (currentSessionId.startsWith('mock-exam-')) {
+          (async () => {
+            try {
+              // セッションIDからplanIdを抽出: mock-exam-{planId}-{timestamp}
+              const parts = currentSessionId.split('-');
+              const planId = parseInt(parts[2], 10);
+              if (isNaN(planId)) {
+                debugLog('⚠️ Invalid mock exam session ID:', currentSessionId);
+                return;
+              }
+
+              const plan = await studyPlanService.getById(planId);
+              if (!plan) return;
+
+              // カテゴリ別結果を集計
+              const categoryMap = new Map<string, { total: number; correct: number }>();
+              currentProblems.forEach((problem, i) => {
+                const cat = problem.category || 'その他';
+                const existing = categoryMap.get(cat) || { total: 0, correct: 0 };
+                existing.total++;
+                if (userAnswers[i] === true || (typeof userAnswers[i] === 'number' && userAnswers[i] === problem.correctAnswer)) {
+                  existing.correct++;
+                }
+                categoryMap.set(cat, existing);
+              });
+
+              const categoryBreakdown = Array.from(categoryMap.entries()).map(([category, data]) => ({
+                category,
+                total: data.total,
+                correct: data.correct,
+                accuracy: data.total > 0 ? Math.round((data.correct / data.total) * 100) : 0,
+              }));
+
+              const mockScore = currentProblems.length > 0 ? Math.round((score / currentProblems.length) * 100) : 0;
+
+              await mockExamService.create({
+                planId,
+                examDate: new Date(),
+                scope: currentProblems.length >= 50 ? 'full' : 'short',
+                totalQuestions: currentProblems.length,
+                correctAnswers: score,
+                score: mockScore,
+                categoryBreakdown,
+                createdAt: new Date(),
+              });
+
+              debugLog(`✅ Mock exam result saved: ${mockScore}% (${score}/${currentProblems.length})`);
+
+              // #1: 模試でもDailyGoalを更新（模試日が「未消化」として繰越されるバグ防止）
+              // 模試で解いた問題は復習問題として計上し、DailyGoalをisCompleted=trueにマーク
+              const todayGoals = await dailyGoalService.getTodayGoals();
+              const mockGoal = todayGoals.find(g => g.planId === planId);
+              if (mockGoal && mockGoal.id) {
+                const completedCount = currentProblems.length;
+                const accuracy = completedCount > 0 ? (score / completedCount) * 100 : 0;
+                await dailyGoalService.update(mockGoal.id, {
+                  actualReviewProblems: (mockGoal.actualReviewProblems || 0) + completedCount,
+                  accuracy,
+                  isCompleted: true, // 模試完了で該当日を完了扱い
+                  completedAt: new Date(),
+                  updatedAt: new Date(),
+                });
+                debugLog(`✅ Mock exam DailyGoal ${mockGoal.id} marked completed`);
+              }
+
+              // プラン進捗を再計算
+              await recalculatePlanProgress(planId);
+
+              // #3: 模試後リバランスは lastWeeklyRebalance を考慮して二重実行を防止
+              if (plan.autoRebalanceWeekly !== false && shouldAutoRebalance(plan)) {
+                const rebalanceResult = await performWeeklyRebalance(planId);
+                debugLog(`🔄 Post-mock rebalance:`, rebalanceResult.summary);
+              }
+
+              window.dispatchEvent(new CustomEvent('study-plan-updated'));
+              window.dispatchEvent(new CustomEvent('daily-goal-completed'));
+            } catch (e) {
+              debugLog('❌ Mock exam result save failed:', e);
+            }
+          })();
+        }
+
+        // ゲーミフィケーション: XP/ストリーク/バッジ更新
+        recordQuizCompletion(score, currentProblems.length).then((result) => {
+          debugLog('✅ Gamification updated:', {
+            xp: result.xpResult.xpAwarded,
+            leveledUp: result.xpResult.leveledUp,
+            streak: result.streakResult.streak,
+            newBadges: result.newBadges.length,
+          });
+          // バッジ解除通知を表示
+          if (result.newBadges.length > 0) {
+            const badgeDef = BADGE_DEFINITIONS.find(b => b.id === result.newBadges[0].badgeId);
+            if (badgeDef) setUnlockedBadge(badgeDef);
+          }
+        }).catch(error => {
+          debugLog('❌ Gamification update failed:', error);
         });
       } catch (error) {
         debugLog('Quiz finish error:', error);
@@ -906,7 +1430,7 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Category Selection */}
-        <GlassCard className="p-6 space-y-6">
+        <GlassCard className="p-4 sm:p-6 space-y-6">
           <div className="flex items-center gap-3 mb-4">
             <div className="p-3 rounded-xl bg-primary/20 text-primary">
               <BookOpen size={24} />
@@ -943,7 +1467,7 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
         </GlassCard>
 
         {/* Quiz Set Selection */}
-        <GlassCard className="p-6 space-y-6">
+        <GlassCard className="p-4 sm:p-6 space-y-6">
           <div className="flex items-center gap-3 mb-4">
             <div className="p-3 rounded-xl bg-accent/20 text-accent">
               <Layers size={24} />
@@ -1090,38 +1614,146 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
     </div>
   );
 
+  const handleToggleFavorite = async (problemId: number) => {
+    try {
+      await favoritesService.toggleFavorite(problemId);
+      // Update the current problems array with the new favorite status
+      setCurrentProblems(prevProblems =>
+        prevProblems.map(p =>
+          p.id === problemId
+            ? { ...p, isFavorite: !p.isFavorite, favoritedAt: !p.isFavorite ? new Date() : undefined }
+            : p
+        )
+      );
+      toast.success(currentProblems[currentIndex].isFavorite ? 'お気に入りから削除しました' : 'お気に入りに追加しました', {
+        position: 'top-center',
+        duration: 2000,
+      });
+    } catch (error) {
+      console.error('Failed to toggle favorite:', error);
+      toast.error('お気に入りの更新に失敗しました', {
+        position: 'top-center',
+        duration: 2000,
+      });
+    }
+  };
+
   const renderPlayingMode = () => {
     const currentProblem = currentProblems[currentIndex];
     if (!currentProblem) return <div>Loading...</div>;
 
+    // Flashcard Mode
+    if (displayMode === 'flashcard') {
+      return (
+        <FlashcardView
+          problems={currentProblems}
+          currentIndex={currentIndex}
+          onNext={handleNext}
+          onPrev={() => {
+            if (currentIndex > 0) {
+              setCurrentIndex(currentIndex - 1);
+            }
+          }}
+          onExit={() => setDisplayMode('normal')}
+          language={currentLang as 'ja' | 'en'}
+        />
+      );
+    }
+
+    // Normal Quiz Mode
     return (
       <div className="max-w-4xl mx-auto pb-20">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <NeumorphicButton variant="secondary" onClick={handleQuitQuiz} className="!px-4 !py-2 text-sm">
-            {t[currentLang].buttons.endQuiz}
-          </NeumorphicButton>
+        {/* Header - モック2d準拠 */}
+        <div className="flex items-center gap-3 mb-7">
+          <button
+            onClick={handleQuitQuiz}
+            className="text-[15px] text-[#64748B] hover:text-[#94A3B8] transition-colors p-1"
+          >
+            ✕
+          </button>
 
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-surfaceHighlight border border-white/10">
-              <Clock size={16} className="text-primary" />
-              <span className="font-mono font-bold text-white">
-                {Math.floor(elapsedTime / 60)}:{String(elapsedTime % 60).padStart(2, '0')}
-              </span>
-            </div>
-            <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-surfaceHighlight border border-white/10">
-              <span className="text-sm text-text-secondary">{t[currentLang].labels.correctCount}</span>
-              <span className="font-bold text-accent">{score}</span>
-            </div>
+          {/* Inline Progress (モック準拠: ✕ [bar] 3/8) */}
+          <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+            <motion.div
+              initial={false}
+              animate={{ width: `${((currentIndex + (showFeedback ? 1 : 0)) / currentProblems.length) * 100}%` }}
+              transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+              className="h-full rounded-full"
+              style={{ background: '#6366F1', boxShadow: '0 0 10px rgba(99,102,241,0.5)' }}
+            />
+          </div>
+          <span className="text-[13px] font-semibold text-[#94A3B8] tabular-nums whitespace-nowrap">
+            {currentIndex + (showFeedback ? 1 : 0)}/{currentProblems.length}
+          </span>
+
+          {/* Secondary controls */}
+          <div className="flex items-center gap-1 ml-1">
+            <button
+              onClick={() => setDisplayMode(displayMode === 'normal' ? 'flashcard' : 'normal')}
+              className="p-1.5 rounded-lg hover:bg-white/10 transition-colors text-[#64748B] hover:text-[#94A3B8]"
+            >
+              {displayMode === 'normal' ? <CreditCard size={16} /> : <Grid3x3 size={16} />}
+            </button>
+            <FavoriteButton
+              problemId={currentProblem.id!}
+              isFavorite={currentProblem.isFavorite || false}
+              onToggle={handleToggleFavorite}
+              size="sm"
+            />
           </div>
         </div>
 
-        {/* Progress */}
-        <QuizProgress
-          current={currentIndex}
-          total={currentProblems.length}
-          showFeedback={showFeedback}
-        />
+        {/* Speech Control Panel */}
+        <div className="fixed bottom-8 right-8 z-40 flex flex-col gap-2 p-4 rounded-2xl bg-surface/95 backdrop-blur-xl border border-white/10 shadow-2xl">
+          <div className="flex items-center justify-between mb-2 pb-2 border-b border-white/10">
+            <span className="text-xs font-bold text-text-secondary uppercase tracking-wider">
+              📝 読み上げ
+            </span>
+            <button
+              onClick={toggleSpeech}
+              className={`p-2 rounded-lg transition-all ${
+                speechEnabled
+                  ? 'bg-primary/20 text-primary hover:bg-primary/30'
+                  : 'bg-white/5 text-text-secondary hover:bg-white/10'
+              }`}
+              title={speechEnabled ? '読み上げを停止' : '読み上げを開始'}
+            >
+              {speechEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
+            </button>
+          </div>
+
+          {speechEnabled && (
+            <div className="flex flex-col gap-2">
+              {/* Playback Controls */}
+              <div className="flex gap-2">
+                <button
+                  onClick={pauseSpeech}
+                  className="flex-1 p-2 rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition-all"
+                  title={speechState === 'speaking' ? '一時停止' : '再生'}
+                  disabled={speechState === 'idle'}
+                >
+                  {speechState === 'speaking' ? <Pause size={16} /> : <Play size={16} />}
+                </button>
+                <button
+                  onClick={skipSpeech}
+                  className="flex-1 p-2 rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition-all"
+                  title="次へスキップ"
+                  disabled={speechState === 'idle'}
+                >
+                  <SkipForward size={16} />
+                </button>
+              </div>
+
+              {/* Status Indicator */}
+              <div className="text-xs text-center text-text-secondary mt-1">
+                {speechState === 'speaking' && '🔊 読み上げ中...'}
+                {speechState === 'paused' && '⏸️ 一時停止'}
+                {speechState === 'waiting-answer' && '⏳ 解答待ち'}
+                {speechState === 'idle' && '⏹️ 停止中'}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Quiz Card */}
         <div className="mb-8">
@@ -1143,6 +1775,8 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
                     showResult={showFeedback}
                     isCorrect={idx === currentProblem.correctAnswer}
                     isSelected={userAnswers[currentIndex] === idx}
+                    isStrikedThrough={strikethroughStates[currentIndex]?.[idx] || false}
+                    onStrikethrough={() => handleToggleStrikethrough(idx)}
                   />
                 ))
               ) : (
@@ -1193,6 +1827,78 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
                   </div>
                 </div>
 
+                {/* Difficulty Grading (正解時のみ - Anki style) */}
+                {lastAnswerCorrect === true && (
+                  <div className="mb-4">
+                    <DifficultyGrading
+                      isVisible={true}
+                      onGrade={(grade: DifficultyGrade) => {
+                        // Store grade for later SM-2 integration
+                        debugLog('📊 Difficulty grade:', grade, 'for problem:', currentProblems[currentIndex]?.id);
+                        // The grade could be stored in localStorage or passed to SM-2 update
+                        const gradeKey = `diffGrade_${currentProblems[currentIndex]?.id}`;
+                        localStorage.setItem(gradeKey, grade);
+                      }}
+                      language={currentLang}
+                    />
+                  </div>
+                )}
+
+                {/* Mistake Reason Tagger (不正解時のみ) */}
+                {lastAnswerCorrect === false && showMistakeReason && (
+                  <MistakeReasonTagger
+                    problemId={currentProblem.id!}
+                    category={currentProblem.category}
+                    language={currentLang}
+                    onSave={async (reasonTag: MistakeReasonTag, note?: string) => {
+                      try {
+                        // 最新の履歴エントリーのIDを取得
+                        const allHistory = await historyService.getAll();
+                        const latestEntry = allHistory.find(h => h.problemId === currentProblem.id!);
+                        if (latestEntry?.id) {
+                          await saveMistakeReason({
+                            historyId: latestEntry.id,
+                            problemId: currentProblem.id!,
+                            category: currentProblem.category,
+                            reasonTag,
+                            note,
+                            createdAt: new Date(),
+                          });
+                          toast.success(currentLang === 'ja' ? '理由を保存しました' : 'Reason saved');
+                        }
+                      } catch (error) {
+                        debugLog('❌ Mistake reason save error:', error);
+                      }
+                      setShowMistakeReason(false);
+                    }}
+                    onSkip={() => setShowMistakeReason(false)}
+                  />
+                )}
+
+                {/* User Notes */}
+                <div className="mb-6 p-6 rounded-2xl bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                      <span>📝</span>
+                      <span>{currentLang === 'ja' ? 'あなたのメモ' : 'Your Notes'}</span>
+                    </h3>
+                    <button
+                      onClick={() => setShowNoteEditor(true)}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors"
+                    >
+                      <Edit size={14} />
+                      <span>{currentLang === 'ja' ? 'メモを編集' : 'Edit Note'}</span>
+                    </button>
+                  </div>
+                  {currentProblem.userNotes ? (
+                    <MarkdownPreview content={currentProblem.userNotes} className="text-gray-900 dark:text-gray-100" />
+                  ) : (
+                    <p className="text-gray-500 dark:text-gray-400 italic">
+                      {currentLang === 'ja' ? 'メモはまだありません。「メモを編集」をクリックしてメモを追加できます。' : 'No notes yet. Click "Edit Note" to add notes.'}
+                    </p>
+                  )}
+                </div>
+
                 <NeumorphicButton
                   variant="primary"
                   fullWidth
@@ -1209,55 +1915,103 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
     );
   };
 
-  const renderResultMode = () => (
-    <div className="max-w-2xl mx-auto text-center space-y-8 animate-in fade-in zoom-in duration-500">
-      <div className="relative inline-block">
-        <div className="absolute inset-0 bg-primary/20 blur-3xl rounded-full" />
-        <RingChart
-          current={score}
-          target={currentProblems.length}
-          label="Score"
-          color={score / currentProblems.length >= 0.8 ? '#10B981' : '#6366F1'}
-        />
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-5xl font-black text-white">{Math.round((score / currentProblems.length) * 100)}%</span>
-          <span className="text-sm font-bold text-text-secondary uppercase tracking-wider">Accuracy</span>
+  const renderResultMode = () => {
+    const incorrectCount = currentProblems.length - score;
+    const minutes = Math.floor(elapsedTime / 60);
+    const seconds = elapsedTime % 60;
+    const xpEarned = score * 10;
+
+    return (
+      <div className="max-w-md mx-auto flex flex-col items-center pt-4 animate-in fade-in zoom-in duration-500">
+        {/* Header */}
+        <div className="text-[13px] font-bold tracking-[0.12em] mb-6" style={{ color: '#34D399' }}>
+          {currentLang === 'ja' ? '今日の1歩 完了!' : 'Session Complete!'}
+        </div>
+
+        {/* Score Circle */}
+        <div
+          className="w-[150px] h-[150px] rounded-full flex flex-col items-center justify-center mb-6"
+          style={{
+            border: '6px solid rgba(16,185,129,0.25)',
+            boxShadow: '0 0 30px rgba(16,185,129,0.25), inset 0 0 20px rgba(16,185,129,0.1)',
+          }}
+        >
+          <div className="text-[40px] font-bold" style={{ color: '#34D399' }}>
+            {score}<span className="text-[20px] text-[#64748B]">/{currentProblems.length}</span>
+          </div>
+          <div className="text-[12px] text-[#94A3B8]">
+            {currentLang === 'ja' ? '正解' : 'Correct'}
+          </div>
+        </div>
+
+        {/* Stats Row */}
+        <div className="flex gap-3 w-full mb-5">
+          <div
+            className="flex-1 rounded-[14px] p-[14px] text-center"
+            style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            <div className="text-[18px] font-bold text-[#818CF8]">+{xpEarned}</div>
+            <div className="text-[11px] text-[#64748B]">XP</div>
+          </div>
+          <div
+            className="flex-1 rounded-[14px] p-[14px] text-center"
+            style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            <div className="text-[18px] font-bold text-[#34D399]">
+              {minutes}:{String(seconds).padStart(2, '0')}
+            </div>
+            <div className="text-[11px] text-[#64748B]">
+              {currentLang === 'ja' ? '学習時間' : 'Time'}
+            </div>
+          </div>
+          <div
+            className="flex-1 rounded-[14px] p-[14px] text-center"
+            style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            <div className="text-[18px] font-bold text-[#F8FAFC]">
+              {Math.round((score / currentProblems.length) * 100)}%
+            </div>
+            <div className="text-[11px] text-[#64748B]">
+              {currentLang === 'ja' ? '正答率' : 'Accuracy'}
+            </div>
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="w-full mt-auto flex flex-col gap-3 pt-6">
+          <button
+            onClick={onBack}
+            className="w-full rounded-2xl h-[56px] flex items-center justify-center text-[17px] font-bold text-white"
+            style={{ background: '#6366F1', boxShadow: '0 0 20px rgba(99,102,241,0.4)' }}
+          >
+            {currentLang === 'ja' ? 'ホームへ' : 'Home'}
+          </button>
+          {incorrectCount > 0 && (
+            <button
+              onClick={() => {
+                const incorrectIds: number[] = [];
+                currentProblems.forEach((problem, i) => {
+                  const isCorrect = userAnswers[i] === true ||
+                    (typeof userAnswers[i] === 'number' && userAnswers[i] === problem.correctAnswer);
+                  if (!isCorrect && problem.id) {
+                    incorrectIds.push(problem.id);
+                  }
+                });
+                if (incorrectIds.length > 0) {
+                  startReviewQuiz(incorrectIds);
+                }
+              }}
+              className="w-full text-center text-[13px] font-semibold text-[#64748B] py-2"
+            >
+              {currentLang === 'ja'
+                ? `間違えた${incorrectCount}問を復習する`
+                : `Review ${incorrectCount} incorrect`}
+            </button>
+          )}
         </div>
       </div>
-
-      <div className="space-y-2">
-        <h2 className="text-3xl font-bold text-white">{t[currentLang].messages.sessionCompleted}</h2>
-        <p className="text-text-secondary">
-          {t[currentLang].labels.correctCount} <span className="text-accent font-bold">{score}</span> / {currentProblems.length}
-        </p>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <GlassCard className="p-4 flex flex-col items-center justify-center gap-2">
-          <Clock className="text-primary" size={24} />
-          <span className="text-2xl font-bold text-white">
-            {Math.floor(elapsedTime / 60)}<span className="text-sm text-text-secondary font-normal">m</span> {elapsedTime % 60}<span className="text-sm text-text-secondary font-normal">s</span>
-          </span>
-          <span className="text-xs text-text-secondary uppercase tracking-wider">Time</span>
-        </GlassCard>
-
-        <GlassCard className="p-4 flex flex-col items-center justify-center gap-2">
-          <Zap className="text-yellow-400" size={24} />
-          <span className="text-2xl font-bold text-white">+{score * 10}</span>
-          <span className="text-xs text-text-secondary uppercase tracking-wider">XP Earned</span>
-        </GlassCard>
-      </div>
-
-      <div className="flex flex-col gap-4 pt-8">
-        <NeumorphicButton variant="primary" onClick={onBack} fullWidth>
-          {t[currentLang].buttons.backToMenu}
-        </NeumorphicButton>
-        <NeumorphicButton variant="secondary" onClick={() => setMode('selection')} fullWidth>
-          {t[currentLang].buttons.retryQuiz}
-        </NeumorphicButton>
-      </div>
-    </div>
-  );
+    );
+  };
 
   if (isLoading) {
     return (
@@ -1278,6 +2032,11 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
       {mode === 'playing' && renderPlayingMode()}
       {mode === 'result' && renderResultMode()}
 
+      {/* +XP Float Animation */}
+      {mode === 'playing' && (
+        <XPFloatAnimation trigger={xpFloatTrigger} amount={10} />
+      )}
+
       <LevelUpModal
         isOpen={showLevelUpModal}
         onClose={() => setShowLevelUpModal(false)}
@@ -1285,6 +2044,15 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
         totalQuestions={currentProblems.length}
         language={currentLang}
       />
+
+      {/* Badge Unlock Toast */}
+      {unlockedBadge && (
+        <BadgeUnlockToast
+          badge={unlockedBadge}
+          onClose={() => setUnlockedBadge(null)}
+          language={currentLang}
+        />
+      )}
 
       <SubjectiveFeedback
         isEnabled={showSubjectiveFeedback}
@@ -1295,6 +2063,32 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
         }}
         onSubmit={handleSubjectiveFeedbackSubmit}
       />
+
+      {/* Note Editor Modal */}
+      {showNoteEditor && mode === 'playing' && currentProblems[currentIndex] && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowNoteEditor(false)} />
+          <div className="relative z-10 w-full max-w-4xl flex flex-col max-h-[90vh]">
+            {/* Close Button - Fixed at top */}
+            <button
+              onClick={() => setShowNoteEditor(false)}
+              className="flex-shrink-0 self-end mb-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors backdrop-blur-sm"
+            >
+              <span className="text-lg">✕ 閉じる</span>
+            </button>
+            {/* Scrollable Note Editor */}
+            <div className="flex-1 overflow-y-auto min-h-0 pb-24">
+              <NoteEditor
+                problemId={currentProblems[currentIndex].id!}
+                initialNote={currentProblems[currentIndex].userNotes || ''}
+                initialTags={currentProblems[currentIndex].noteTags || []}
+                onSave={handleSaveNote}
+                className="shadow-2xl"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

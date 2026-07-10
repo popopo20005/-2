@@ -40,7 +40,8 @@ logs
 
 # Temporary files
 *.tmp
-*.tempnul
+*.temp
+copy-pdf-worker.cjsnul
 Lib/
 Scripts/
 SuperClaude_Framework/

@@ -1,17 +1,27 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { Crown } from 'lucide-react';
 import { getResponseTimeStatistics } from '../services/responseTimeService';
 import { createPortal } from 'react-dom';
-import { resetDatabase } from '../lib/database';
+import { db, resetDatabase } from '../lib/database';
 import { demonstrateLearningStateEstimation } from '../lib/learningStateDemo';
+import { authService, type AuthUser } from '../services/authService';
+import { useSubscription } from '../contexts/SubscriptionContext';
+import { getAllAnalyses, removeSession, getExamGrowthSummary, type GrowthStatus } from '../services/subtopicAnalysisService';
+import { EXAM_PRESETS } from '../lib/examPresets';
+import { userPresetService } from '../services/userPresetService';
+import type { PersonalSubtopicAnalysis } from '../types/subtopicAnalysis';
+import type { View } from '../types';
 
 interface SettingsProps {
   onBack: () => void;
   onToggleDarkMode?: () => void;
   isDarkMode: boolean;
   language?: 'ja' | 'en';
+  onShowOnboarding?: () => void;
+  onNavigate?: (view: View) => void;
 }
 
-export function Settings({ onBack, isDarkMode, language: propsLanguage }: SettingsProps) {
+export function Settings({ onBack, isDarkMode, language: propsLanguage, onShowOnboarding, onNavigate }: SettingsProps) {
   const [language, setLanguage] = useState(propsLanguage || localStorage.getItem('language') || 'ja');
   const [showHelp, setShowHelp] = useState(false);
   const [showUsage, setShowUsage] = useState(false);
@@ -36,6 +46,134 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
   const [autoAdjustTime, setAutoAdjustTime] = useState(() => {
     return localStorage.getItem('autoAdjustTime') === 'true';
   });
+
+  // サブトピック分析データ管理
+  interface AnalysisDataEntry {
+    name: string;
+    growthStatuses: GrowthStatus[];
+    analyses: PersonalSubtopicAnalysis[];
+  }
+  const [analysisData, setAnalysisData] = useState<Map<string, AnalysisDataEntry>>(new Map());
+  const [expandedExam, setExpandedExam] = useState<string | null>(null);
+  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ examId: string; category: string; sessionId?: string } | null>(null);
+
+  const loadAnalysisData = useCallback(async () => {
+    const allAnalyses = await db.personalSubtopicAnalyses.toArray();
+    if (allAnalyses.length === 0) {
+      setAnalysisData(new Map());
+      return;
+    }
+
+    // examId でグループ化
+    const grouped = new Map<string, PersonalSubtopicAnalysis[]>();
+    for (const a of allAnalyses) {
+      const list = grouped.get(a.examId) || [];
+      list.push(a);
+      grouped.set(a.examId, list);
+    }
+
+    // プリセット名マッピング
+    const presetNameMap = new Map<string, string>();
+    for (const p of EXAM_PRESETS) {
+      presetNameMap.set(p.id, p.name);
+    }
+    const customPresets = await userPresetService.getAll();
+    for (const p of customPresets) {
+      presetNameMap.set(p.presetId, p.name);
+    }
+
+    // 成長状態を取得
+    const result = new Map<string, AnalysisDataEntry>();
+    for (const [examId, analyses] of grouped) {
+      const growthStatuses = await getExamGrowthSummary(examId);
+      result.set(examId, {
+        name: presetNameMap.get(examId) || examId,
+        growthStatuses,
+        analyses,
+      });
+    }
+
+    setAnalysisData(result);
+  }, []);
+
+  useEffect(() => {
+    loadAnalysisData();
+  }, [loadAnalysisData]);
+
+  const handleDeleteSession = async (examId: string, category: string, sessionId: string) => {
+    await removeSession(examId, category, sessionId);
+    setDeleteConfirm(null);
+    await loadAnalysisData();
+  };
+
+  const handleDeleteAllForExam = async (examId: string) => {
+    const analyses = await getAllAnalyses(examId);
+    for (const a of analyses) {
+      for (const s of a.sessions) {
+        await removeSession(examId, a.category, s.id);
+      }
+    }
+    setDeleteConfirm(null);
+    setExpandedExam(null);
+    await loadAnalysisData();
+  };
+
+  // アカウント認証
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authTab, setAuthTab] = useState<'login' | 'register'>('login');
+
+  useEffect(() => {
+    if (authService.isConfigured()) {
+      const unsub = authService.onAuthStateChange((user) => setCurrentUser(user));
+      return unsub;
+    }
+  }, []);
+
+  const handleGoogleLogin = async () => {
+    setAuthLoading(true);
+    setAuthError('');
+    try {
+      await authService.signInWithGoogle();
+    } catch (e) {
+      setAuthError(e instanceof Error ? e.message : 'Google ログインに失敗しました');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleEmailAuth = async () => {
+    setAuthLoading(true);
+    setAuthError('');
+    try {
+      if (authTab === 'login') {
+        await authService.signInWithEmail(authEmail, authPassword);
+      } else {
+        await authService.createUser(authEmail, authPassword);
+      }
+      setAuthEmail('');
+      setAuthPassword('');
+    } catch (e) {
+      setAuthError(e instanceof Error ? e.message : '認証に失敗しました');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    setAuthLoading(true);
+    try {
+      await authService.signOut();
+    } catch (e) {
+      setAuthError(e instanceof Error ? e.message : 'ログアウトに失敗しました');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
 
   // 解答時間統計
   const [responseTimeStats, setResponseTimeStats] = useState<{
@@ -112,6 +250,9 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
       resetDb: 'データベースリセット',
       resetDbDesc: '問題が表示されない場合やデータベースに問題がある場合に使用してください。',
       resetDbButton: '🗑️ データベースをリセット',
+      showOnboarding: 'チュートリアルの再表示',
+      showOnboardingDesc: 'アプリの使い方を最初から確認できます。',
+      showOnboardingButton: '📚 チュートリアルを表示',
       languageChanged: '言語設定を変更しました。ページを再読み込みして反映してください。',
       on: 'オン',
       off: 'オフ',
@@ -125,6 +266,21 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
         description: '理解度と正解/不正解の組み合わせから、確信度・適当回答・体感難易度を自動推定します',
         testButton: '📊 推定システムをテスト',
         testComplete: 'コンソールで推定結果を確認してください！'
+      },
+      subtopicData: {
+        title: '📊 サブトピック分析データ',
+        desc: '学習データから蓄積されたサブトピック重要度の分析データを管理します。',
+        noData: 'まだ分析データがありません。学習プラン作成画面からサブトピック分析を行うとデータが蓄積されます。',
+        sessions: 'セッション',
+        problems: '問題',
+        deleteSession: '削除',
+        deleteAll: '全削除',
+        confirmTitle: 'セッションを削除しますか？',
+        confirmAllTitle: 'この試験の全分析データを削除しますか？',
+        confirmDesc: 'この操作は元に戻せません。',
+        cancel: 'キャンセル',
+        confirmDelete: '削除する',
+        confidence: '信頼度',
       },
       modals: {
         usage: {
@@ -272,6 +428,9 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
       resetDb: 'Database Reset',
       resetDbDesc: 'Use this if problems are not displayed or there are database issues.',
       resetDbButton: '🗑️ Reset Database',
+      showOnboarding: 'Show Tutorial Again',
+      showOnboardingDesc: 'Review how to use the app from the beginning.',
+      showOnboardingButton: '📚 Show Tutorial',
       languageChanged: 'Language setting has been changed. Please reload the page to apply changes.',
       on: 'ON',
       off: 'OFF',
@@ -285,6 +444,21 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
         description: 'Automatically estimates confidence, casual answers, and perceived difficulty from understanding and correct/incorrect combinations',
         testButton: '📊 Test Estimation System',
         testComplete: 'Check the estimation results in the console!'
+      },
+      subtopicData: {
+        title: '📊 Subtopic Analysis Data',
+        desc: 'Manage subtopic importance analysis data accumulated from your learning data.',
+        noData: 'No analysis data yet. Analyze subtopics from the study plan creation screen to accumulate data.',
+        sessions: 'Sessions',
+        problems: 'Problems',
+        deleteSession: 'Delete',
+        deleteAll: 'Delete All',
+        confirmTitle: 'Delete this session?',
+        confirmAllTitle: 'Delete all analysis data for this exam?',
+        confirmDesc: 'This action cannot be undone.',
+        cancel: 'Cancel',
+        confirmDelete: 'Delete',
+        confidence: 'Confidence',
       },
       modals: {
         usage: {
@@ -446,32 +620,33 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
 
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-teal-50 to-cyan-50 dark:from-gray-900 dark:to-gray-800 p-8">
+    <div className="min-h-screen p-8" style={{ background: '#0F172A' }}>
       <div className="max-w-6xl mx-auto">
         <header className="mb-8">
           <button
             onClick={onBack}
-            className="quiz-action-button mb-4"
+            className="mb-4 px-4 py-2 rounded-xl text-[14px] text-[#CBD5E1] transition-colors hover:text-[#F8FAFC]"
+            style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}
           >
             {t[currentLang].backButton}
           </button>
-          <h1 className="text-3xl font-bold text-teal-900 dark:text-white">{t[currentLang].title}</h1>
+          <h1 className="text-3xl font-bold text-[#F8FAFC]">{t[currentLang].title}</h1>
         </header>
         
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* 基本設定 */}
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg p-6">
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-6">
+          <div className="rounded-2xl shadow-lg p-6" style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}>
+            <h2 className="text-xl font-semibold text-[#F8FAFC] mb-6">
               {t[currentLang].basicSettings}
             </h2>
-            
+
             <div className="space-y-6">
               {/* ユーザー名設定 */}
               <div>
-                <label className="block text-sm font-medium text-gray-900 dark:text-white mb-2">
+                <label className="block text-sm font-medium text-[#F8FAFC] mb-2">
                   {t[currentLang].userName}
                 </label>
-                <p className="text-sm text-gray-500 dark:text-gray-200 mb-3">
+                <p className="text-sm text-[#94A3B8] mb-3">
                   {t[currentLang].userNameDesc}
                 </p>
                 <input
@@ -479,18 +654,19 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
                   value={userName}
                   onChange={(e) => handleUserNameChange(e.target.value)}
                   placeholder={t[currentLang].userNamePlaceholder}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 rounded-md text-[#F8FAFC] focus:ring-2 focus:ring-[#6366F1] focus:border-transparent placeholder-[#64748B]"
+                  style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}
                 />
               </div>
 
-              <hr className="border-gray-200 dark:border-gray-700" />
+              <hr style={{ borderColor: 'rgba(255,255,255,0.06)' }} />
 
               <div className="flex items-center justify-between">
                 <div>
-                  <label className="text-sm font-medium text-gray-900 dark:text-white">
+                  <label className="text-sm font-medium text-[#F8FAFC]">
                     {t[currentLang].subjectiveFeedback}
                   </label>
-                  <p className="text-sm text-gray-500 dark:text-gray-200">
+                  <p className="text-sm text-[#94A3B8]">
                     {t[currentLang].subjectiveFeedbackDesc}
                   </p>
                 </div>
@@ -506,23 +682,22 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
                       });
                       handleSubjectiveFeedbackToggle();
                     }}
-                    className={`px-4 py-2 rounded-lg border-2 transition-all cursor-pointer ${
-                      subjectiveFeedbackEnabled
-                        ? 'bg-blue-100 border-blue-500 text-blue-700'
-                        : 'bg-gray-100 border-gray-300 text-gray-700'
-                    } hover:shadow-md`}
+                    className="px-4 py-2 rounded-lg transition-all cursor-pointer hover:shadow-md text-[14px]"
                     style={{
                       minWidth: '80px',
-                      textAlign: 'center'
+                      textAlign: 'center',
+                      background: subjectiveFeedbackEnabled ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.1)',
+                      border: subjectiveFeedbackEnabled ? '2px solid #6366F1' : '2px solid rgba(255,255,255,0.1)',
+                      color: subjectiveFeedbackEnabled ? '#818CF8' : '#94A3B8'
                     }}
                   >
-                    {subjectiveFeedbackEnabled ? `✅ ${t[currentLang].on}` : `❌ ${t[currentLang].off}`}
+                    {subjectiveFeedbackEnabled ? `${t[currentLang].on}` : `${t[currentLang].off}`}
                   </button>
 
                   {/* 従来のトグルボタンも残す */}
                   <div
                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${
-                      subjectiveFeedbackEnabled ? 'bg-blue-600' : 'bg-gray-200'
+                      subjectiveFeedbackEnabled ? 'bg-[#6366F1]' : 'bg-white/10'
                     }`}
                     onClick={(e) => {
                       e.preventDefault();
@@ -541,11 +716,11 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
               </div>
 
               {/* 学習状態推定システムのデモ */}
-              <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                <h4 className="text-sm font-medium text-blue-900 dark:text-blue-100 mb-2">
+              <div className="mt-4 p-3 rounded-lg" style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                <h4 className="text-sm font-medium text-[#818CF8] mb-2">
                   {t[currentLang].learningStateEstimation.title}
                 </h4>
-                <p className="text-xs text-blue-700 dark:text-blue-300 mb-3">
+                <p className="text-xs text-[#94A3B8] mb-3">
                   {t[currentLang].learningStateEstimation.description}
                 </p>
                 <button
@@ -554,29 +729,29 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
                     console.log('推定システムデモ実行完了:', result);
                     alert(t[currentLang].learningStateEstimation.testComplete);
                   }}
-                  className="px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition"
+                  className="px-3 py-2 bg-[#6366F1] hover:bg-[#5558E6] text-white text-sm rounded-xl transition"
                 >
                   {t[currentLang].learningStateEstimation.testButton}
                 </button>
               </div>
 
-              <hr className="border-gray-200 dark:border-gray-700" />
+              <hr style={{ borderColor: 'rgba(255,255,255,0.06)' }} />
 
               {/* ⏱️ 解答時間設定 */}
               <div>
-                <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+                <h3 className="text-xl font-semibold text-[#F8FAFC] mb-2">
                   {t[currentLang].timeSettings}
                 </h3>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                <p className="text-sm text-[#94A3B8] mb-4">
                   {t[currentLang].timeSettingsDesc}
                 </p>
 
                 {/* ○×問題の解答時間 */}
                 <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-[#CBD5E1] mb-2">
                     {t[currentLang].tfTime}
                   </label>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                  <p className="text-xs text-[#64748B] mb-2">
                     {t[currentLang].tfTimeDesc}
                   </p>
                   <div className="flex items-center gap-4">
@@ -587,9 +762,10 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
                       step="1"
                       value={tfTimePerQuestion}
                       onChange={(e) => handleTfTimeChange(parseInt(e.target.value))}
-                      className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
+                      className="flex-1 h-2 rounded-lg appearance-none cursor-pointer"
+                      style={{ background: 'rgba(255,255,255,0.1)' }}
                     />
-                    <span className="text-lg font-semibold text-gray-900 dark:text-white min-w-[60px] text-right">
+                    <span className="text-lg font-semibold text-[#F8FAFC] min-w-[60px] text-right">
                       {tfTimePerQuestion}秒
                     </span>
                   </div>
@@ -597,10 +773,10 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
 
                 {/* 選択問題の解答時間 */}
                 <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-[#CBD5E1] mb-2">
                     {t[currentLang].mcTime}
                   </label>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                  <p className="text-xs text-[#64748B] mb-2">
                     {t[currentLang].mcTimeDesc}
                   </p>
                   <div className="flex items-center gap-4">
@@ -611,25 +787,26 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
                       step="10"
                       value={mcTimePerQuestion}
                       onChange={(e) => handleMcTimeChange(parseInt(e.target.value))}
-                      className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
+                      className="flex-1 h-2 rounded-lg appearance-none cursor-pointer"
+                      style={{ background: 'rgba(255,255,255,0.1)' }}
                     />
-                    <span className="text-lg font-semibold text-gray-900 dark:text-white min-w-[60px] text-right">
+                    <span className="text-lg font-semibold text-[#F8FAFC] min-w-[60px] text-right">
                       {mcTimePerQuestion}秒
                     </span>
                   </div>
                 </div>
 
                 {/* 自動調整 */}
-                <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                <div className="mb-4 p-3 rounded-lg" style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)' }}>
                   <div className="flex items-center justify-between mb-3">
                     <div>
-                      <label className="block text-sm font-medium text-gray-900 dark:text-white">
+                      <label className="block text-sm font-medium text-[#F8FAFC]">
                         🤖 自動調整
                       </label>
-                      <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                      <p className="text-xs text-[#94A3B8] mt-1">
                         あなたの実際の解答時間から自動で最適化
                       </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                      <p className="text-xs text-[#64748B] mt-1">
                         ※ 適当回答除外: ○×1秒未満・選択3秒未満は計算対象外
                       </p>
                     </div>
@@ -637,8 +814,8 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
                       onClick={handleAutoAdjustToggle}
                       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                         autoAdjustTime
-                          ? 'bg-blue-600'
-                          : 'bg-gray-300 dark:bg-gray-600'
+                          ? 'bg-[#6366F1]'
+                          : 'bg-white/10'
                       }`}
                     >
                       <span
@@ -651,7 +828,7 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
 
                   {/* 統計情報の表示 */}
                   {responseTimeStats && (
-                    <div className="text-xs space-y-1 text-gray-600 dark:text-gray-400 border-t border-blue-200 dark:border-blue-800 pt-2">
+                    <div className="text-xs space-y-1 text-[#94A3B8] pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
                       <div className="flex justify-between">
                         <span>○×問題:</span>
                         <span className="font-semibold">
@@ -669,12 +846,12 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
                         </span>
                       </div>
                       {responseTimeStats.canAutoPersonalize ? (
-                        <p className="text-green-600 dark:text-green-400 mt-2">
-                          ✅ 十分なデータがあります。自動調整が有効です。
+                        <p className="text-[#34D399] mt-2">
+                          十分なデータがあります。自動調整が有効です。
                         </p>
                       ) : (
-                        <p className="text-orange-600 dark:text-orange-400 mt-2">
-                          ⚠️ データが不足しています。10問以上解答すると自動調整が有効になります。
+                        <p className="text-[#F59E0B] mt-2">
+                          データが不足しています。10問以上解答すると自動調整が有効になります。
                         </p>
                       )}
                     </div>
@@ -682,35 +859,37 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
                 </div>
               </div>
 
-              <hr className="border-gray-200 dark:border-gray-700" />
+              <hr style={{ borderColor: 'rgba(255,255,255,0.06)' }} />
               
               <div>
-                <label className="block text-sm font-medium text-gray-900 dark:text-white mb-2">
+                <label className="block text-sm font-medium text-[#F8FAFC] mb-2">
                   {t[currentLang].language}
                 </label>
-                <p className="text-sm text-gray-500 dark:text-gray-200 mb-3">
+                <p className="text-sm text-[#94A3B8] mb-3">
                   {t[currentLang].languageDesc}
                 </p>
                 <div className="flex space-x-2">
                   <button
                     onClick={() => handleLanguageChange('ja')}
-                    className={`px-4 py-2 rounded-md transition-colors text-sm ${
-                      language === 'ja' 
-                        ? 'bg-blue-500 text-white' 
-                        : 'quiz-action-button'
+                    className={`px-4 py-2 rounded-xl transition-colors text-sm ${
+                      language === 'ja'
+                        ? 'bg-[#6366F1] text-white'
+                        : 'text-[#CBD5E1]'
                     }`}
+                    style={language !== 'ja' ? { background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.1)' } : {}}
                   >
-                    🇯🇵 日本語
+                    日本語
                   </button>
                   <button
                     onClick={() => handleLanguageChange('en')}
-                    className={`px-4 py-2 rounded-md transition-colors text-sm ${
-                      language === 'en' 
-                        ? 'bg-blue-500 text-white' 
-                        : 'quiz-action-button'
+                    className={`px-4 py-2 rounded-xl transition-colors text-sm ${
+                      language === 'en'
+                        ? 'bg-[#6366F1] text-white'
+                        : 'text-[#CBD5E1]'
                     }`}
+                    style={language !== 'en' ? { background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.1)' } : {}}
                   >
-                    🇺🇸 English
+                    English
                   </button>
                 </div>
               </div>
@@ -718,93 +897,318 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
           </div>
 
           {/* ヘルプ・サポート */}
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg p-6">
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-6">
+          <div className="rounded-2xl shadow-lg p-6" style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}>
+            <h2 className="text-xl font-semibold text-[#F8FAFC] mb-6">
               {t[currentLang].helpSupport}
             </h2>
-            
-            <div className="space-y-4">
-              <button
-                onClick={() => window.open('https://minguella-website.netlify.app/', '_blank')}
-                className="quiz-action-button w-full p-4 text-left"
-              >
-                <div className="flex items-center">
-                  <span className="text-2xl mr-3">🏠</span>
-                  <div>
-                    <div className="font-medium">{t[currentLang].homepage.title}</div>
-                    <div className="text-sm opacity-90">{t[currentLang].homepage.desc}</div>
-                  </div>
-                  <div className="ml-auto text-gray-400 dark:text-gray-500">
-                    <span className="text-sm">↗</span>
-                  </div>
-                </div>
-              </button>
-              
-              <button
-                onClick={() => setShowUsage(true)}
-                className="quiz-action-button w-full p-4 text-left"
-              >
-                <div className="flex items-center">
-                  <span className="text-2xl mr-3">📖</span>
-                  <div>
-                    <div className="font-medium">{t[currentLang].usage.title}</div>
-                    <div className="text-sm opacity-90">{t[currentLang].usage.desc}</div>
-                  </div>
-                </div>
-              </button>
 
-              <button
-                onClick={() => setShowHelp(true)}
-                className="quiz-action-button w-full p-4 text-left"
-              >
-                <div className="flex items-center">
-                  <span className="text-2xl mr-3">❓</span>
-                  <div>
-                    <div className="font-medium">{t[currentLang].faq.title}</div>
-                    <div className="text-sm opacity-90">{t[currentLang].faq.desc}</div>
+            <div className="space-y-2">
+              {[
+                { onClick: () => window.open('https://minguella-website.netlify.app/', '_blank'), icon: '🏠', title: t[currentLang].homepage.title, desc: t[currentLang].homepage.desc, extra: <span className="ml-auto text-[#64748B] text-sm">↗</span> },
+                { onClick: () => setShowUsage(true), icon: '📖', title: t[currentLang].usage.title, desc: t[currentLang].usage.desc },
+                { onClick: () => setShowHelp(true), icon: '❓', title: t[currentLang].faq.title, desc: t[currentLang].faq.desc },
+                { onClick: () => setShowNotice(true), icon: '⚠️', title: t[currentLang].notice.title, desc: t[currentLang].notice.desc },
+              ].map((item, i) => (
+                <button
+                  key={i}
+                  onClick={item.onClick}
+                  className="w-full px-[18px] py-[13px] text-left rounded-xl transition-colors hover:bg-white/5"
+                  style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+                >
+                  <div className="flex items-center">
+                    <span className="text-2xl mr-3">{item.icon}</span>
+                    <div>
+                      <div className="font-medium text-[14px] text-[#CBD5E1]">{item.title}</div>
+                      <div className="text-sm text-[#64748B]">{item.desc}</div>
+                    </div>
+                    {item.extra}
                   </div>
-                </div>
-              </button>
-
-              <button
-                onClick={() => setShowNotice(true)}
-                className="quiz-action-button w-full p-4 text-left"
-              >
-                <div className="flex items-center">
-                  <span className="text-2xl mr-3">⚠️</span>
-                  <div>
-                    <div className="font-medium">{t[currentLang].notice.title}</div>
-                    <div className="text-sm opacity-90">{t[currentLang].notice.desc}</div>
-                  </div>
-                </div>
-              </button>
+                </button>
+              ))}
             </div>
           </div>
 
           {/* システム情報 */}
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg p-6">
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-6">
+          <div className="rounded-2xl shadow-lg p-6" style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}>
+            <h2 className="text-xl font-semibold text-[#F8FAFC] mb-6">
               {t[currentLang].systemInfo}
             </h2>
-            
+
             <div className="space-y-4 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-200">{t[currentLang].appName}:</span>
-                <span className="font-medium text-gray-900 dark:text-white">Minguella</span>
+              <div className="flex justify-between px-[18px] py-[13px]" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                <span className="text-[14px] text-[#94A3B8]">{t[currentLang].appName}:</span>
+                <span className="font-medium text-[#F8FAFC]">Minguella</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-200">{t[currentLang].version}:</span>
-                <span className="font-medium text-gray-900 dark:text-white">1.0.0</span>
+              <div className="flex justify-between px-[18px] py-[13px]" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                <span className="text-[14px] text-[#94A3B8]">{t[currentLang].version}:</span>
+                <span className="font-medium text-[#F8FAFC]">1.0.0</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-200">{t[currentLang].language}:</span>
-                <span className="font-medium text-gray-900 dark:text-white">{language === 'ja' ? '日本語' : 'English'}</span>
+              <div className="flex justify-between px-[18px] py-[13px]" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                <span className="text-[14px] text-[#94A3B8]">{t[currentLang].language}:</span>
+                <span className="font-medium text-[#F8FAFC]">{language === 'ja' ? '日本語' : 'English'}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-200">{t[currentLang].theme}:</span>
-                <span className="font-medium text-gray-900 dark:text-white">{isDarkMode ? t[currentLang].dark : t[currentLang].light}</span>
+              <div className="flex justify-between px-[18px] py-[13px]" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                <span className="text-[14px] text-[#94A3B8]">{t[currentLang].theme}:</span>
+                <span className="font-medium text-[#F8FAFC]">{isDarkMode ? t[currentLang].dark : t[currentLang].light}</span>
               </div>
             </div>
+          </div>
+
+          {/* アカウント認証 */}
+          {authService.isConfigured() && (
+            <div className="rounded-2xl shadow-lg p-6" style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <h2 className="text-xl font-semibold text-[#F8FAFC] mb-6">
+                👤 アカウント
+              </h2>
+
+              {currentUser ? (
+                /* ログイン済み状態 */
+                <div className="space-y-4">
+                  <div className="rounded-lg p-4" style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)' }}>
+                    <p className="text-sm font-medium text-[#34D399]">ログイン済み</p>
+                    <p className="text-sm text-[#10B981] mt-1">
+                      {currentUser.email || currentUser.displayName || 'アノニマス'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    disabled={authLoading}
+                    className="w-full px-4 py-2 rounded-xl text-[#CBD5E1] text-sm transition-all disabled:opacity-50 hover:bg-white/5"
+                    style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.1)' }}
+                  >
+                    {authLoading ? '処理中...' : 'ログアウト'}
+                  </button>
+                </div>
+              ) : (
+                /* 未ログイン状態 */
+                <div className="space-y-4">
+                  {/* Google ログイン */}
+                  <button
+                    onClick={handleGoogleLogin}
+                    disabled={authLoading}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-[#CBD5E1] text-sm font-medium transition-all disabled:opacity-50 hover:bg-white/5"
+                    style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.1)' }}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                      <path d="M17.64 9.2c0-.637-.057-1.251-.154-1.85H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.975 2.684-6.775z" fill="#4285F4"/>
+                      <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H-.027v2.332A8.997 8.997 0 009 18z" fill="#34A853"/>
+                      <path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.957H.927A8.996 8.996 0 000 9c0 1.452.348 2.827.927 4.043l3.037-2.333z" fill="#FBBC05"/>
+                      <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.927 4.957L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
+                    </svg>
+                    Googleでログイン
+                  </button>
+
+                  {/* メール・パスワード認証 */}
+                  <div className="pt-4" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                    {/* タブ切り替え */}
+                    <div className="flex gap-1 mb-3 rounded-md p-0.5" style={{ background: 'rgba(15,23,42,0.5)' }}>
+                      <button
+                        onClick={() => { setAuthTab('login'); setAuthError(''); }}
+                        className={`flex-1 py-1.5 text-xs font-medium rounded transition-all ${
+                          authTab === 'login'
+                            ? 'text-[#F8FAFC] shadow-sm'
+                            : 'text-[#64748B] hover:text-[#CBD5E1]'
+                        }`}
+                        style={authTab === 'login' ? { background: 'rgba(99,102,241,0.3)' } : {}}
+                      >
+                        ログイン
+                      </button>
+                      <button
+                        onClick={() => { setAuthTab('register'); setAuthError(''); }}
+                        className={`flex-1 py-1.5 text-xs font-medium rounded transition-all ${
+                          authTab === 'register'
+                            ? 'text-[#F8FAFC] shadow-sm'
+                            : 'text-[#64748B] hover:text-[#CBD5E1]'
+                        }`}
+                        style={authTab === 'register' ? { background: 'rgba(99,102,241,0.3)' } : {}}
+                      >
+                        新規登録
+                      </button>
+                    </div>
+
+                    {/* フォーム */}
+                    <div className="space-y-2">
+                      <input
+                        type="email"
+                        value={authEmail}
+                        onChange={(e) => setAuthEmail(e.target.value)}
+                        placeholder="メールアドレス"
+                        className="w-full px-3 py-2 text-sm rounded-md text-[#F8FAFC] placeholder-[#64748B] focus:outline-none focus:ring-2 focus:ring-[#6366F1]"
+                        style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}
+                      />
+                      <input
+                        type="password"
+                        value={authPassword}
+                        onChange={(e) => setAuthPassword(e.target.value)}
+                        placeholder="パスワード（6文字以上）"
+                        onKeyDown={(e) => e.key === 'Enter' && handleEmailAuth()}
+                        className="w-full px-3 py-2 text-sm rounded-md text-[#F8FAFC] placeholder-[#64748B] focus:outline-none focus:ring-2 focus:ring-[#6366F1]"
+                        style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}
+                      />
+                      {authError && (
+                        <p className="text-xs text-[#EF4444]">{authError}</p>
+                      )}
+                      <button
+                        onClick={handleEmailAuth}
+                        disabled={authLoading || !authEmail || !authPassword}
+                        className="w-full px-4 py-2 bg-[#6366F1] hover:bg-[#5558E6] text-white rounded-xl transition-all text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {authLoading ? '処理中...' : authTab === 'login' ? 'ログイン' : '新規登録'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* サブスクリプション管理 */}
+          <SubscriptionSection onNavigate={onNavigate} />
+
+          {/* サブトピック分析データ管理 */}
+          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg p-6">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+              {t[currentLang].subtopicData.title}
+            </h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+              {t[currentLang].subtopicData.desc}
+            </p>
+
+            {analysisData.size === 0 ? (
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 text-center">
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {t[currentLang].subtopicData.noData}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {Array.from(analysisData.entries()).map(([examId, entry]) => (
+                  <div key={examId} className="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
+                    {/* プリセットヘッダー */}
+                    <div
+                      className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                      onClick={() => setExpandedExam(expandedExam === examId ? null : examId)}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-400">
+                          {expandedExam === examId ? '▾' : '▸'}
+                        </span>
+                        <span className="font-medium text-gray-900 dark:text-white">
+                          {entry.name}
+                        </span>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                          ({entry.analyses.length} {currentLang === 'ja' ? 'カテゴリ' : 'categories'})
+                        </span>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteConfirm({ examId, category: '__all__' });
+                        }}
+                        className="px-2 py-1 text-xs text-red-600 dark:text-red-400 border border-red-200 dark:border-red-700 rounded hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
+                      >
+                        {t[currentLang].subtopicData.deleteAll}
+                      </button>
+                    </div>
+
+                    {/* カテゴリ一覧（展開時） */}
+                    {expandedExam === examId && (
+                      <div className="divide-y divide-gray-100 dark:divide-gray-700">
+                        {entry.growthStatuses.map((gs) => {
+                          const analysis = entry.analyses.find(a => a.category === gs.category);
+                          const categoryKey = `${examId}:${gs.category}`;
+                          const isExpanded = expandedCategory === categoryKey;
+
+                          return (
+                            <div key={gs.category} className="px-3 py-2">
+                              {/* カテゴリヘッダー */}
+                              <div
+                                className="flex items-center justify-between cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 rounded p-1 -mx-1 transition-colors"
+                                onClick={() => setExpandedCategory(isExpanded ? null : categoryKey)}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className="text-lg">{gs.growthEmoji}</span>
+                                  <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                                    {gs.category}
+                                  </span>
+                                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                                    ({gs.growthLabel[currentLang]})
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+                                  <span>{t[currentLang].subtopicData.sessions}: {gs.sessionCount}</span>
+                                  <span>{t[currentLang].subtopicData.problems}: {gs.totalProblems}</span>
+                                  <span>{t[currentLang].subtopicData.confidence}: {gs.confidence}</span>
+                                </div>
+                              </div>
+
+                              {/* セッション一覧（展開時） */}
+                              {isExpanded && analysis && (
+                                <div className="mt-2 ml-8 space-y-1">
+                                  {analysis.sessions.map((session) => (
+                                    <div
+                                      key={session.id}
+                                      className="flex items-center justify-between py-1.5 px-2 bg-gray-50 dark:bg-gray-700/30 rounded text-sm"
+                                    >
+                                      <div className="flex items-center gap-3">
+                                        <span className="text-gray-600 dark:text-gray-300">
+                                          {new Date(session.analyzedAt).toLocaleDateString(currentLang === 'ja' ? 'ja-JP' : 'en-US')}
+                                        </span>
+                                        <span className="text-gray-500 dark:text-gray-400">
+                                          ({session.totalProblems}{currentLang === 'ja' ? '問' : ' problems'})
+                                        </span>
+                                        {session.sourceYear && (
+                                          <span className="text-xs px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded">
+                                            {session.sourceYear}{currentLang === 'ja' ? '年' : ''}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <button
+                                        onClick={() => setDeleteConfirm({ examId, category: gs.category, sessionId: session.id })}
+                                        className="px-2 py-0.5 text-xs text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
+                                      >
+                                        {t[currentLang].subtopicData.deleteSession}
+                                      </button>
+                                    </div>
+                                  ))}
+
+                                  {/* サブトピック分布プレビュー */}
+                                  {analysis.mergedDistribution && Object.keys(analysis.mergedDistribution).length > 0 && (
+                                    <div className="mt-2 p-2 bg-purple-50 dark:bg-purple-900/20 rounded border border-purple-200 dark:border-purple-800">
+                                      <p className="text-xs font-medium text-purple-700 dark:text-purple-300 mb-1">
+                                        {currentLang === 'ja' ? 'サブトピック分布:' : 'Subtopic distribution:'}
+                                      </p>
+                                      <div className="flex flex-wrap gap-1">
+                                        {Object.entries(analysis.mergedDistribution)
+                                          .sort(([, a], [, b]) => b - a)
+                                          .slice(0, 8)
+                                          .map(([name, count]) => (
+                                            <span
+                                              key={name}
+                                              className="text-xs px-1.5 py-0.5 bg-purple-100 dark:bg-purple-800/40 text-purple-700 dark:text-purple-300 rounded"
+                                            >
+                                              {name}: {count}
+                                            </span>
+                                          ))}
+                                        {Object.keys(analysis.mergedDistribution).length > 8 && (
+                                          <span className="text-xs text-purple-500 dark:text-purple-400">
+                                            +{Object.keys(analysis.mergedDistribution).length - 8}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* デバッグ・メンテナンス */}
@@ -827,8 +1231,87 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
                 {t[currentLang].resetDbButton}
               </button>
             </div>
+
+            {/* チュートリアル再表示 */}
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mt-4">
+              <h4 className="text-sm font-medium text-blue-900 dark:text-blue-100 mb-2">
+                {t[currentLang].showOnboarding}
+              </h4>
+              <p className="text-sm text-blue-700 dark:text-blue-300 mb-3">
+                {t[currentLang].showOnboardingDesc}
+              </p>
+              <button
+                onClick={() => {
+                  localStorage.removeItem('onboardingCompleted');
+                  onShowOnboarding?.();
+                }}
+                className="px-4 py-2 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-md transition-all text-sm shadow-md hover:shadow-lg backdrop-blur-sm"
+              >
+                {t[currentLang].showOnboardingButton}
+              </button>
+            </div>
           </div>
         </div>
+
+        {/* 削除確認ダイアログ */}
+        {deleteConfirm && createPortal(
+          <div
+            style={{
+              position: 'fixed',
+              top: 0, left: 0, right: 0, bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.6)',
+              zIndex: 999999,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '16px'
+            }}
+            onClick={() => setDeleteConfirm(null)}
+          >
+            <div
+              className="bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 p-6"
+              style={{ maxWidth: '400px', width: '100%' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                {deleteConfirm.category === '__all__'
+                  ? t[currentLang].subtopicData.confirmAllTitle
+                  : t[currentLang].subtopicData.confirmTitle}
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                {t[currentLang].subtopicData.confirmDesc}
+              </p>
+              {deleteConfirm.category !== '__all__' && (
+                <p className="text-sm text-gray-700 dark:text-gray-300 mb-4">
+                  {deleteConfirm.category} - {deleteConfirm.sessionId && (
+                    <span className="text-gray-500">Session ID: {deleteConfirm.sessionId.slice(0, 8)}...</span>
+                  )}
+                </p>
+              )}
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => setDeleteConfirm(null)}
+                  className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                >
+                  {t[currentLang].subtopicData.cancel}
+                </button>
+                <button
+                  onClick={() => {
+                    if (deleteConfirm.category === '__all__') {
+                      handleDeleteAllForExam(deleteConfirm.examId);
+                    } else if (deleteConfirm.sessionId) {
+                      handleDeleteSession(deleteConfirm.examId, deleteConfirm.category, deleteConfirm.sessionId);
+                    }
+                  }}
+                  className="px-4 py-2 text-sm text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
+                >
+                  {t[currentLang].subtopicData.confirmDelete}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
 
         {/* 使い方説明モーダル */}
         {showUsage && createPortal(
@@ -1064,3 +1547,103 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage }: Settin
   );
 }
 
+// ============================================================
+// サブスクリプション管理セクション
+// ============================================================
+
+const PLAN_BADGE_COLORS: Record<string, string> = {
+  free: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
+  basic: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+  premium: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+};
+
+function SubscriptionSection({ onNavigate }: { onNavigate?: (view: View) => void }) {
+  const { plan, periodEnd, cancelAtPeriodEnd, openCustomerPortal, loading } = useSubscription();
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleManageSubscription = async () => {
+    setError(null);
+    setPortalLoading(true);
+    try {
+      await openCustomerPortal();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '管理画面を開けませんでした');
+      setPortalLoading(false);
+    }
+  };
+
+  if (loading) return null;
+
+  return (
+    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg p-6">
+      <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+        <Crown className="size-5 text-amber-500" />
+        サブスクリプション
+      </h2>
+
+      <div className="space-y-4">
+        {/* 現在のプラン */}
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-gray-600 dark:text-gray-400">現在のプラン</span>
+          <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${PLAN_BADGE_COLORS[plan]}`}>
+            {plan === 'free' ? 'スタンダード' : plan === 'basic' ? 'プロ' : 'プレミアム'}
+          </span>
+        </div>
+
+        {/* 請求情報（有料プランのみ） */}
+        {plan !== 'free' && periodEnd && (
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-600 dark:text-gray-400">
+              {cancelAtPeriodEnd ? '終了日' : '次回請求日'}
+            </span>
+            <span className="text-sm text-gray-900 dark:text-white">
+              {periodEnd.toLocaleDateString('ja-JP')}
+            </span>
+          </div>
+        )}
+
+        {cancelAtPeriodEnd && (
+          <div className="p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              期間終了時にキャンセルされます
+            </p>
+          </div>
+        )}
+
+        {error && (
+          <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
+        )}
+
+        {/* アクションボタン */}
+        <div className="flex flex-col gap-2">
+          {plan === 'free' ? (
+            <button
+              onClick={() => onNavigate?.('pricing')}
+              className="w-full py-2 px-4 bg-gradient-to-r from-amber-500 to-orange-500 text-white font-medium rounded-lg hover:from-amber-600 hover:to-orange-600 transition-all text-sm flex items-center justify-center gap-2"
+            >
+              <Crown className="size-4" />
+              プランをアップグレード
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => onNavigate?.('pricing')}
+                className="w-full py-2 px-4 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-all text-sm"
+              >
+                プラン変更
+              </button>
+              <button
+                onClick={handleManageSubscription}
+                disabled={portalLoading}
+                className="w-full py-2 px-4 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg transition-all text-sm disabled:opacity-50"
+              >
+                {portalLoading ? '読み込み中...' : 'お支払い管理（Stripe）'}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

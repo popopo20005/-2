@@ -1,28 +1,41 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
+import { flushSync } from 'react-dom';
 import { initializeDatabase } from './lib/database';
 import { forceQuizActionButtonStyles } from './forceButtonStyles';
 import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
 import { AdProvider, useAd } from './contexts/AdContext';
 import { AdFreeProvider } from './contexts/AdFreeContext';
 import { PomodoroProvider } from './contexts/PomodoroContext';
+import { AuthProvider } from './contexts/AuthContext';
+import { SubscriptionProvider } from './contexts/SubscriptionContext';
+import { notificationService } from './services/notificationService';
 import { MainMenu } from './components/MainMenu';
-import DashboardV2 from './components/DashboardV2';
+import { HomeView } from './components/HomeView';
+import { CreateHub } from './components/CreateHub';
+import { MoreView } from './components/MoreView';
+import { ReviewView } from './components/ReviewView';
+import { LibraryView } from './components/LibraryView';
 import QuizView from './components/QuizView';
+import PodcastView from './components/PodcastView';
 import { PWAInstallPrompt } from './components/PWAInstallPrompt';
 import { AdMobInitializer } from './components/AdMobInitializer';
 import { AdMobBanner } from './components/AdMobBanner';
 import { Onboarding } from './components/onboarding/Onboarding';
 import { AppShell } from './components/layout/AppShell';
+import { DailyReviewInterstitial } from './components/DailyReviewInterstitial';
+import { StreakAtRiskBanner } from './components/StreakAtRiskBanner';
 
 // コード分割: 頻繁に使用されないコンポーネントを遅延ロード
 const ProblemEditor = lazy(() => import('./components/ProblemEditor').then(m => ({ default: m.ProblemEditor })));
-const QuizSetManager = lazy(() => import('./components/QuizSetManager').then(m => ({ default: m.QuizSetManager })));
+// QuizSetManager は LibraryView に置き換え済み。MainMenu経由でアクセス可能
+// const QuizSetManager = lazy(() => import('./components/QuizSetManager').then(m => ({ default: m.QuizSetManager })));
 const Statistics = lazy(() => import('./components/Statistics'));
 import type { View, QuizParams } from './types';
 const History = lazy(() => import('./components/History').then(m => ({ default: m.History })));
 const Settings = lazy(() => import('./components/Settings').then(m => ({ default: m.Settings })));
 const DataMigration = lazy(() => import('./components/DataMigration').then(m => ({ default: m.DataMigration })));
 const BackupManager = lazy(() => import('./components/BackupManager').then(m => ({ default: m.BackupManager })));
+const AdvancedBackupManager = lazy(() => import('./components/AdvancedBackupManager').then(m => ({ default: m.AdvancedBackupManager })));
 const ShareCenter = lazy(() => import('./components/ShareCenter').then(m => ({ default: m.ShareCenter })));
 const LearningGroup = lazy(() => import('./components/LearningGroup').then(m => ({ default: m.LearningGroup })));
 const ExamView = lazy(() => import('./components/ExamView').then(m => ({ default: m.ExamView })));
@@ -41,8 +54,22 @@ const PomodoroTimer = lazy(() => import('./components/PomodoroTimer').then(m => 
 const WeaknessAnalysis = lazy(() => import('./components/WeaknessAnalysis').then(m => ({ default: m.WeaknessAnalysis })));
 const GoalManager = lazy(() => import('./components/GoalManager').then(m => ({ default: m.GoalManager })));
 const NoteManager = lazy(() => import('./components/NoteManager').then(m => ({ default: m.NoteManager })));
+const TemplateManager = lazy(() => import('./components/TemplateManager').then(m => ({ default: m.TemplateManager })));
 const SpacedRepetitionManager = lazy(() => import('./components/SpacedRepetitionManager').then(m => ({ default: m.SpacedRepetitionManager })));
 const SpacedRepetitionReview = lazy(() => import('./components/SpacedRepetitionReview').then(m => ({ default: m.SpacedRepetitionReview })));
+const FavoritesList = lazy(() => import('./components/FavoritesList').then(m => ({ default: m.FavoritesList })));
+const StudyPlanCreator = lazy(() => import('./components/StudyPlanCreator').then(m => ({ default: m.StudyPlanCreator })));
+const StudyPlanDashboard = lazy(() => import('./components/StudyPlanDashboard').then(m => ({ default: m.StudyPlanDashboard })));
+const AIProblemGenerator = lazy(() => import('./components/AIProblemGenerator').then(m => ({ default: m.AIProblemGenerator })));
+const PromptGeneratorCard = lazy(() => import('./components/PromptGeneratorCard').then(m => ({ default: m.PromptGeneratorCard })));
+const PricingPage = lazy(() => import('./components/PricingPage').then(m => ({ default: m.PricingPage })));
+const PastExamAnalysis = lazy(() => import('./components/PastExamAnalysis').then(m => ({ default: m.PastExamAnalysis })));
+const BadgeCollection = lazy(() => import('./components/gamification/BadgeSystem').then(m => ({ default: m.BadgeCollection })));
+const SmartNoteViewer = lazy(() => import('./components/SmartNoteViewer').then(m => ({ default: m.SmartNoteViewer })));
+const PDCACycleDashboard = lazy(() => import('./components/PDCACycleDashboard').then(m => ({ default: m.PDCACycleDashboard })));
+const SubtopicAnalyzer = lazy(() => import('./components/SubtopicAnalyzer').then(m => ({ default: m.SubtopicAnalyzer })));
+const PromptWizard = lazy(() => import('./components/PromptWizard').then(m => ({ default: m.PromptWizard })));
+const AIHandoff = lazy(() => import('./components/AIHandoff').then(m => ({ default: m.AIHandoff })));
 
 
 
@@ -51,9 +78,10 @@ function AppContent() {
   const { setCurrentView: setAdView } = useAd();
   const [currentView, setCurrentView] = useState<View>('menu');
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showReviewInterstitial, setShowReviewInterstitial] = useState(false);
 
   // ビューが変更されたら広告表示状態を更新
-  const handleViewChange = (view: View, options?: { quizSetId?: number; problemIds?: number[]; sessionId?: string }) => {
+  const handleViewChange = (view: View, options?: { quizSetId?: number; problemIds?: number[]; sessionId?: string; editorMode?: string }) => {
     // セッションIDが渡された場合は保存済みセッションを再開
     if (view === 'quiz' && options?.sessionId) {
       console.log('🎯 Resuming session:', options.sessionId);
@@ -72,7 +100,14 @@ function AppContent() {
         quizSetId: options.quizSetId,
         mode: undefined
       });
-    } else if (view === 'quiz') {
+    } else if (view === 'quiz' && options?.problemIds && options.problemIds.length > 0) {
+      // problemIdsが渡された場合（弱点分析などから）
+      console.log('🎯 Starting quiz with problemIds:', options.problemIds.length);
+      setQuizParams({
+        problemIds: options.problemIds,
+        mode: 'review'
+      });
+    } else if (view === 'quiz' && !options) {
       // クイズ画面でパラメータなしの場合はクリア
       setQuizParams(null);
     }
@@ -106,6 +141,13 @@ function AppContent() {
       return;
     }
 
+    // editorMode を保持
+    if (view === 'editor' && options?.editorMode) {
+      setCurrentEditorMode(options.editorMode);
+    } else if (view !== 'editor') {
+      setCurrentEditorMode(undefined);
+    }
+
     setCurrentView(view);
     setAdView(view);
 
@@ -118,6 +160,7 @@ function AppContent() {
   const [isLoading, setIsLoading] = useState(true);
   const [, setShowMigration] = useState(false);
   const [quizParams, setQuizParams] = useState<QuizParams | null>(null);
+  const [currentEditorMode, setCurrentEditorMode] = useState<string | undefined>(undefined);
   const [selectedQuizSetId, setSelectedQuizSetId] = useState<number | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
   const [statsRefreshKey, setStatsRefreshKey] = useState(0);
@@ -136,6 +179,22 @@ function AppContent() {
         // データベース初期化
         await initializeDatabase();
         console.log('データベースの初期化完了');
+
+        // 通知サービス初期化
+        try {
+          await notificationService.initialize();
+          console.log('通知サービスの初期化完了');
+
+          // 通知が有効な場合、スケジューリングを開始
+          const settings = await notificationService.getSettings();
+          if (settings && settings.enabled) {
+            await notificationService.scheduleNotifications();
+            console.log('通知スケジューリング開始');
+          }
+        } catch (error) {
+          console.error('通知サービスの初期化に失敗:', error);
+          // 通知サービスの初期化失敗はアプリ起動を妨げない
+        }
 
         // 常にダークモードを有効化
         document.documentElement.classList.add('dark');
@@ -169,7 +228,28 @@ function AppContent() {
           console.log('オンボーディングはスキップされました');
         }
 
+        // Stripe決済後のリダイレクト処理
+        const urlParams = new URLSearchParams(window.location.search);
+        const paymentStatus = urlParams.get('payment');
+        if (paymentStatus === 'success') {
+          handleViewChange('paymentSuccess');
+          // URLからパラメータを除去（履歴を汚さない）
+          window.history.replaceState({}, '', window.location.pathname);
+        } else if (paymentStatus === 'cancel') {
+          handleViewChange('paymentCancel');
+          window.history.replaceState({}, '', window.location.pathname);
+        }
+
         setIsLoading(false);
+
+        // Daily Review Interstitial: show once per day if not onboarding
+        const onboardingDone = localStorage.getItem('onboardingCompleted');
+        const today = new Date().toDateString();
+        const alreadyShown = sessionStorage.getItem('reviewInterstitialShown') === today;
+        if (onboardingDone && !alreadyShown) {
+          setShowReviewInterstitial(true);
+          sessionStorage.setItem('reviewInterstitialShown', today);
+        }
       } catch (error) {
         console.error('アプリケーションの初期化に失敗:', error);
         console.error('エラーの詳細:', error);
@@ -197,7 +277,47 @@ function AppContent() {
       }
     };
 
+    // Service Workerからの通知クリックメッセージをリッスン
+    const handleNotificationClick = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'NOTIFICATION_CLICKED') {
+        console.log('[App] 通知クリックメッセージを受信:', event.data);
+
+        const { notificationType } = event.data;
+
+        // 通知タイプに応じて適切な画面に遷移
+        switch (notificationType) {
+          case 'review_reminder':
+            console.log('[App] 復習画面に遷移します');
+            handleViewChange('spacedRepetitionReview');
+            break;
+          case 'goal_achievement':
+            console.log('[App] 目標管理画面に遷移します');
+            handleViewChange('goalManager');
+            break;
+          case 'streak_alert':
+            console.log('[App] クイズ画面に遷移します');
+            handleViewChange('quiz');
+            break;
+          default:
+            console.log('[App] メニューに遷移します');
+            handleViewChange('menu');
+            break;
+        }
+      }
+    };
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleNotificationClick);
+    }
+
     initApp();
+
+    // クリーンアップ
+    return () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleNotificationClick);
+      }
+    };
   }, [setAdView]);
 
   const checkForLegacyData = async (): Promise<boolean> => {
@@ -291,7 +411,7 @@ function AppContent() {
     switch (currentView) {
       case 'menu':
         return (
-          <DashboardV2
+          <HomeView
             onNavigate={handleViewChange}
             language={language as 'ja' | 'en'}
           />
@@ -304,11 +424,13 @@ function AppContent() {
           }}
           initialParams={quizParams}
         />;
+      case 'podcast':
+        return <PodcastView onBack={() => handleViewChange('menu')} />;
       case 'editor':
-        return <ProblemEditor onBack={() => handleViewChange('menu')} />;
+        return <ProblemEditor onBack={() => handleViewChange('menu')} initialMode={currentEditorMode} />;
       case 'quizSets':
-        return <QuizSetManager
-          onBack={() => handleViewChange('menu')}
+        return <LibraryView
+          onNavigate={handleViewChange}
           onStartQuiz={startQuizSetQuiz}
           onStartCategoryQuiz={startQuizSetCategoryQuiz}
           onShare={(quizSetId) => {
@@ -328,7 +450,14 @@ function AppContent() {
       case 'history':
         return <History onBack={() => handleViewChange('menu')} />;
       case 'settings':
-        return <Settings onBack={() => handleViewChange('menu')} onToggleDarkMode={toggleDarkMode} isDarkMode={isDarkMode} language={language as 'ja' | 'en'} />;
+        return <Settings
+          onBack={() => handleViewChange('menu')}
+          onToggleDarkMode={toggleDarkMode}
+          isDarkMode={isDarkMode}
+          language={language as 'ja' | 'en'}
+          onShowOnboarding={() => setShowOnboarding(true)}
+          onNavigate={handleViewChange}
+        />;
       case 'migration':
         return (
           <DataMigration
@@ -344,6 +473,8 @@ function AppContent() {
         );
       case 'backup':
         return <BackupManager onBack={() => handleViewChange('menu')} />;
+      case 'advancedBackup':
+        return <AdvancedBackupManager onBack={() => handleViewChange('menu')} />;
       case 'share':
         return <LearningGroup onBack={() => handleViewChange('menu')} />;
       case 'qrShare':
@@ -371,6 +502,8 @@ function AppContent() {
         ) : (
           <MainMenu onNavigate={handleViewChange} onToggleDarkMode={toggleDarkMode} isDarkMode={isDarkMode} />
         );
+      case 'allFeatures':
+        return <MainMenu onNavigate={handleViewChange} onToggleDarkMode={toggleDarkMode} isDarkMode={isDarkMode} />;
       case 'diary':
         return <StudyDiary onBack={() => handleViewChange('menu')} isDarkMode={isDarkMode} language={language as 'ja' | 'en'} />;
       case 'insights':
@@ -381,8 +514,23 @@ function AppContent() {
         return <RecommendationDashboard
           onBack={() => handleViewChange('menu')}
           onStartQuiz={(params) => {
-            setQuizParams(params);
-            handleViewChange('quiz');
+            console.log('🎯 [App] onStartQuiz called with params:', params);
+            if (params?.problemIds && params.problemIds.length > 0) {
+              // problemIdsが渡された場合は直接QuizViewに遷移
+              setQuizParams(params);
+              setCurrentView('quiz');
+              setAdView('quiz');
+            } else if (params?.category) {
+              // カテゴリー別クイズの場合
+              setQuizParams(params);
+              setCurrentView('quiz');
+              setAdView('quiz');
+            } else {
+              // その他の場合は通常フロー
+              setQuizParams(params);
+              setCurrentView('quiz');
+              setAdView('quiz');
+            }
           }}
           onNavigateToSettings={(view: View) => handleViewChange(view)}
           isDarkMode={isDarkMode}
@@ -426,11 +574,7 @@ function AppContent() {
               </div>
               <WeaknessAnalysis
                 onStartRecommendedQuiz={(problemIds) => {
-                  setQuizParams({
-                    problemIds,
-                    mode: 'review',
-                  });
-                  handleViewChange('quiz');
+                  handleViewChange('quiz', { problemIds });
                 }}
                 language={language as 'ja' | 'en'}
               />
@@ -441,11 +585,147 @@ function AppContent() {
         return <GoalManager onBack={() => handleViewChange('menu')} language={language as 'ja' | 'en'} />;
       case 'noteManager':
         return <NoteManager onBack={() => handleViewChange('menu')} />;
+      case 'smartNotes':
+        return <SmartNoteViewer onBack={() => handleViewChange('menu')} language={language as 'ja' | 'en'} />;
+      case 'subtopicAnalysis':
+        return <SubtopicAnalyzer
+          examId="general"
+          examName={language === 'ja' ? 'サブトピック分析' : 'Subtopic Analysis'}
+          subjects={[]}
+          onBack={() => handleViewChange('menu')}
+          lang={language as 'ja' | 'en'}
+        />;
+      case 'templateManager':
+        return <TemplateManager onBack={() => handleViewChange('menu')} />;
+      case 'favorites':
+        return <FavoritesList
+          onBack={() => handleViewChange('menu')}
+          onStartQuiz={(problemIds) => {
+            console.log('📋 App.tsx: onStartQuiz called with:', {
+              problemIds,
+              problemIdsLength: problemIds.length
+            });
+            const params = {
+              problemIds,
+              mode: 'review' as const
+            };
+            console.log('📋 App.tsx: Saving params to sessionStorage:', params);
+            // Save to sessionStorage to survive re-renders
+            sessionStorage.setItem('pendingQuizParams', JSON.stringify(params));
+
+            console.log('📋 App.tsx: Setting quizParams with flushSync');
+            flushSync(() => {
+              setQuizParams(params);
+            });
+            console.log('📋 App.tsx: Changing view to quiz');
+            handleViewChange('quiz');
+          }}
+        />;
       case 'spacedRepetitionManager':
         return <SpacedRepetitionManager onNavigate={handleViewChange} />;
       case 'spacedRepetitionReview':
         // SM-2復習は現在QuizViewで表示されるため、このケースは使われない
         return <SpacedRepetitionReview onNavigate={handleViewChange} />;
+      case 'studyPlanDashboard':
+        return <StudyPlanDashboard
+          onBack={() => handleViewChange('menu')}
+          onCreatePlan={() => handleViewChange('studyPlan')}
+          onNavigateToQuiz={(sessionId) => handleViewChange('quiz', { sessionId })}
+          language={language as 'ja' | 'en'}
+        />;
+      case 'studyPlan':
+        return <StudyPlanCreator
+          onBack={() => handleViewChange('studyPlanDashboard')}
+          onPlanCreated={() => handleViewChange('studyPlanDashboard')}
+          language={language as 'ja' | 'en'}
+        />;
+      case 'aiGenerator':
+        return <AIProblemGenerator
+          onBack={() => handleViewChange('menu')}
+          onSaved={() => handleViewChange('problemEdit')}
+          onNavigate={(view) => handleViewChange(view as View)}
+        />;
+      case 'promptGenerator':
+        return <PromptGeneratorCard
+          onBack={() => handleViewChange('menu')}
+          language={language as 'ja' | 'en'}
+        />;
+      case 'pricing':
+        return <PricingPage
+          onBack={() => handleViewChange('menu')}
+          onNavigate={handleViewChange}
+        />;
+      case 'paymentSuccess':
+        return (
+          <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4">
+            <div className="text-center max-w-md">
+              <div className="text-6xl mb-4">🎉</div>
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">お支払い完了！</h1>
+              <p className="text-gray-600 dark:text-gray-400 mb-6">
+                プランのアップグレードが完了しました。すべての機能をお楽しみください。
+              </p>
+              <button
+                onClick={() => handleViewChange('menu')}
+                className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium"
+              >
+                ホームに戻る
+              </button>
+            </div>
+          </div>
+        );
+      case 'paymentCancel':
+        return (
+          <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4">
+            <div className="text-center max-w-md">
+              <div className="text-6xl mb-4">😢</div>
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">お支払いがキャンセルされました</h1>
+              <p className="text-gray-600 dark:text-gray-400 mb-6">
+                お支払い手続きがキャンセルされました。いつでもプランをアップグレードできます。
+              </p>
+              <button
+                onClick={() => handleViewChange('menu')}
+                className="px-6 py-3 bg-gray-600 text-white rounded-xl hover:bg-gray-700 transition-colors font-medium"
+              >
+                ホームに戻る
+              </button>
+            </div>
+          </div>
+        );
+      case 'pastExamAnalysis':
+        return <PastExamAnalysis
+          onBack={() => handleViewChange('menu')}
+          onNavigate={handleViewChange}
+          language={language as 'ja' | 'en'}
+        />;
+      case 'badges':
+        return <BadgeCollection
+          onBack={() => handleViewChange('menu')}
+          language={language as 'ja' | 'en'}
+        />;
+      case 'pdcaCycle':
+        return <PDCACycleDashboard
+          onNavigate={handleViewChange}
+          onBack={() => handleViewChange('menu')}
+          language={language as 'ja' | 'en'}
+        />;
+      case 'create':
+        return <CreateHub onNavigate={handleViewChange} />;
+      case 'review':
+        return <ReviewView onNavigate={handleViewChange} language={language as 'ja' | 'en'} />;
+      case 'more':
+        return <MoreView onNavigate={handleViewChange} />;
+      case 'promptWizard':
+        return <PromptWizard
+          language={language as 'ja' | 'en'}
+          onNavigate={handleViewChange}
+          onBack={() => handleViewChange('create')}
+        />;
+      case 'aiHandoff':
+        return <AIHandoff
+          language={language as 'ja' | 'en'}
+          onNavigate={handleViewChange}
+          onBack={() => handleViewChange('promptWizard')}
+        />;
       default:
         return <MainMenu onNavigate={handleViewChange} onToggleDarkMode={toggleDarkMode} isDarkMode={isDarkMode} />;
     }
@@ -498,8 +778,23 @@ function AppContent() {
     );
   }
 
-  // DashboardV2 (menu view) は AppShell をバイパスして独自のレイアウトを使用
-  if (currentView === 'menu') {
+  // Daily Review Interstitial (shown once per day when review cards are due)
+  if (showReviewInterstitial && currentView === 'menu') {
+    return (
+      <DailyReviewInterstitial
+        onStartReview={(problemIds) => {
+          setShowReviewInterstitial(false);
+          handleViewChange('quiz', { problemIds });
+        }}
+        onSkip={() => setShowReviewInterstitial(false)}
+        language={language as 'ja' | 'en'}
+      />
+    );
+  }
+
+  // クイズプレイ中はAppShellのナビバーを非表示にする
+  const hideNavViews = ['quiz', 'exam', 'podcast'];
+  if (hideNavViews.includes(currentView)) {
     return (
       <>
         <AdMobInitializer />
@@ -521,6 +816,13 @@ function AppContent() {
 
   return (
     <AppShell currentView={currentView} onNavigate={handleViewChange} isDarkMode={isDarkMode}>
+      {/* ストリーク危機バナー（ホーム画面のみ） */}
+      {currentView === 'menu' && (
+        <StreakAtRiskBanner
+          onStartQuick={() => handleViewChange('quiz')}
+          language={language as 'ja' | 'en'}
+        />
+      )}
       {/* AdMob初期化（ネイティブプラットフォームのみ） */}
       <AdMobInitializer />
 
@@ -545,15 +847,19 @@ function AppContent() {
 // LanguageProvider、AdFreeProvider、AdProviderでラップしたApp関数
 function App() {
   return (
-    <LanguageProvider>
-      <AdFreeProvider>
-        <AdProvider>
-          <PomodoroProvider>
-            <AppContent />
-          </PomodoroProvider>
-        </AdProvider>
-      </AdFreeProvider>
-    </LanguageProvider>
+    <AuthProvider>
+      <SubscriptionProvider>
+        <LanguageProvider>
+          <AdFreeProvider>
+            <AdProvider>
+              <PomodoroProvider>
+                <AppContent />
+              </PomodoroProvider>
+            </AdProvider>
+          </AdFreeProvider>
+        </LanguageProvider>
+      </SubscriptionProvider>
+    </AuthProvider>
   );
 }
 

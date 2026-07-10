@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { quizSetService, problemService, categoryService } from '../lib/database';
 import type { QuizSet, Problem } from '../types';
 import { SkeletonList, Skeleton } from './ui/Skeleton';
+import { actionHistoryService } from '../services/actionHistoryService';
+import { UndoToast } from './UndoToast';
+import { QuizSetPreviewModal } from './QuizSetPreviewModal';
 
 interface QuizSetManagerProps {
   onBack: () => void;
@@ -47,6 +51,10 @@ export function QuizSetManager({ onBack, onStartQuiz: _onStartQuiz, onStartCateg
     description: ''
   });
   const [createSelectedProblems, setCreateSelectedProblems] = useState<Set<number>>(new Set());
+
+  // プレビューモーダル
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [previewQuizSet, setPreviewQuizSet] = useState<ExtendedQuizSet | null>(null);
 
   useEffect(() => {
     loadData();
@@ -387,15 +395,38 @@ export function QuizSetManager({ onBack, onStartQuiz: _onStartQuiz, onStartCateg
   const deleteQuizSet = async (id: number) => {
     const quizSet = quizSets.find(qs => qs.id === id);
     if (!quizSet) return;
-    
-    if (!confirm(`「${quizSet.name}」${t[currentLang].messages.deleteConfirm}`)) return;
-    
+
     try {
+      // アクション記録（ロールバック用）
+      const actionId = actionHistoryService.recordAction('delete', 'quizSet', quizSet);
+
+      // 削除実行
       await quizSetService.delete(id);
       await loadData();
+
+      // カスタムトースト表示
+      toast.custom((t) => (
+        <UndoToast
+          message={`「${quizSet.name}」を削除しました`}
+          onUndo={async () => {
+            try {
+              await actionHistoryService.rollback(actionId);
+              await loadData();
+              toast.success('削除を取り消しました', { position: 'top-center' });
+            } catch (error) {
+              console.error('Rollback failed:', error);
+              toast.error('元に戻せませんでした', { position: 'top-center' });
+            }
+          }}
+          onDismiss={() => toast.dismiss(t.id)}
+        />
+      ), {
+        duration: 5000,
+        position: 'bottom-center'
+      });
     } catch (error) {
       console.error('問題集削除エラー:', error);
-      alert(t[currentLang].messages.deleteError);
+      toast.error(t[currentLang].messages.deleteError, { position: 'top-center' });
     }
   };
 
@@ -441,6 +472,17 @@ export function QuizSetManager({ onBack, onStartQuiz: _onStartQuiz, onStartCateg
     });
     setCreateSelectedProblems(new Set());
     setAvailableProblems([]);
+  };
+
+  const openPreviewModal = (quizSet: ExtendedQuizSet) => {
+    console.log('プレビューモーダルを開く:', quizSet);
+    setPreviewQuizSet(quizSet);
+    setIsPreviewModalOpen(true);
+  };
+
+  const closePreviewModal = () => {
+    setIsPreviewModalOpen(false);
+    setPreviewQuizSet(null);
   };
 
   const toggleProblemSelection = (problemId: number) => {
@@ -791,11 +833,11 @@ export function QuizSetManager({ onBack, onStartQuiz: _onStartQuiz, onStartCateg
                     </h3>
                     <div className="flex space-x-1 ml-2">
                       <button
-                        onClick={() => alert(t[currentLang].messages.detailsComingSoon)}
-                        className="quiz-action-button p-1 text-sm rounded"
-                        title="詳細表示"
+                        onClick={() => openPreviewModal(quizSet)}
+                        className="quiz-action-button p-1 text-sm rounded hover:bg-purple-100 dark:hover:bg-purple-900 transition-colors"
+                        title={language === 'ja' ? 'プレビュー' : 'Preview'}
                       >
-                        📋
+                        👁️
                       </button>
                       <button
                         onClick={() => onShare && quizSet.id && onShare(quizSet.id)}
@@ -1360,6 +1402,19 @@ export function QuizSetManager({ onBack, onStartQuiz: _onStartQuiz, onStartCateg
             </div>
           </div>
         </div>
+      )}
+
+      {/* プレビューモーダル */}
+      {isPreviewModalOpen && previewQuizSet && (
+        <QuizSetPreviewModal
+          quizSet={previewQuizSet}
+          problems={allProblems.filter(p => p.id && previewQuizSet.problemIds.includes(p.id))}
+          onClose={closePreviewModal}
+          onStartQuiz={(quizSetId) => {
+            closePreviewModal();
+            _onStartQuiz && _onStartQuiz(quizSetId);
+          }}
+        />
       )}
     </div>
   );

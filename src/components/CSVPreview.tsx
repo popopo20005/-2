@@ -195,7 +195,7 @@ export function CSVPreview({ data, errors, warnings, onClose, onConfirm, languag
               <tbody className="divide-y divide-gray-200" style={{ backgroundColor: '#ffffff' }}>
                 {data.map((row, index) => {
                   // Memoize options check to prevent recalculation
-                  const options = [row.option1, row.option2, row.option3, row.option4];
+                  const options = [row.option1, row.option2, row.option3, row.option4, row.option5, row.option6, row.option7, row.option8, row.option9, row.option10];
                   const validOptions = options.filter(opt => opt && opt.trim());
                   const hasOptions = validOptions.length > 0;
 

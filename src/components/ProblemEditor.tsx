@@ -29,9 +29,10 @@ import {
 
 interface ProblemEditorProps {
   onBack: () => void;
+  initialMode?: string;
 }
 
-export function ProblemEditor({ onBack }: ProblemEditorProps) {
+export function ProblemEditor({ onBack, initialMode: _initialMode }: ProblemEditorProps) {
   const [categories, setCategories] = useState<string[]>([]);
   const [problems, setProblems] = useState<Problem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -2134,29 +2135,29 @@ ________________________________________
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#0F172A' }}>
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-300">{t[currentLang].loading}</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#6366F1] mx-auto mb-4"></div>
+          <p className="text-[#CBD5E1]">{t[currentLang].loading}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-8">
+    <div className="min-h-screen p-8" style={{ background: '#0F172A' }}>
       <div className="max-w-6xl mx-auto">
         <header className="mb-8">
           <div className="flex items-center justify-between mb-4">
             <button
               onClick={onBack}
-              className="quiz-action-button px-4 py-2 rounded-lg transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm"
+              className="px-4 py-2 rounded-lg transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm bg-[#6366F1] hover:bg-[#5558E6] text-white"
             >
               {t[currentLang].buttons.backToMenu}
             </button>
             <button
               onClick={() => setShowGuide(true)}
-              className="flex items-center space-x-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-all shadow-md hover:shadow-lg transform hover:scale-105"
+              className="flex items-center space-x-2 px-4 py-2 bg-[#6366F1] hover:bg-[#5558E6] text-white rounded-lg transition-all shadow-md hover:shadow-lg transform hover:scale-105"
               title="ガイドを表示"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2165,16 +2166,16 @@ ________________________________________
               <span>使い方ガイド</span>
             </button>
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{t[currentLang].pageTitle}</h1>
+          <h1 className="text-3xl font-bold text-[#F8FAFC]">{t[currentLang].pageTitle}</h1>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* カテゴリー管理 */}
-          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-800 rounded-lg shadow-md p-6">
-            <h2 className="text-xl font-semibold text-blue-900 dark:text-blue-100 mb-4">
+          <div className="rounded-2xl border border-white/10 shadow-md p-6" style={{ background: 'rgba(30,41,59,0.7)' }}>
+            <h2 className="text-xl font-semibold text-[#F8FAFC] mb-4">
               {t[currentLang].sections.categoryManagement}
             </h2>
-            
+
             <div className="space-y-4">
               <div className="flex space-x-2">
                 <input
@@ -2182,27 +2183,28 @@ ________________________________________
                   value={newCategoryName}
                   onChange={(e) => setNewCategoryName(e.target.value)}
                   placeholder={t[currentLang].labels.newCategoryName}
-                  className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="flex-1 px-3 py-2 border border-white/10 rounded-md text-[#F8FAFC] placeholder-[#64748B]"
+                  style={{ background: 'rgba(15,23,42,0.5)' }}
                 />
                 <button
                   onClick={handleAddCategory}
-                  className="quiz-action-button px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm"
+                  className="px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 bg-[#6366F1] hover:bg-[#5558E6] text-white"
                 >
                   {t[currentLang].buttons.add}
                 </button>
               </div>
-              
+
               <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                <label className="text-sm font-medium text-[#CBD5E1]">
                   {t[currentLang].labels.registeredCategories}
                 </label>
                 <div className="max-h-32 overflow-y-auto space-y-1">
                   {categories.map((category) => (
-                    <div key={category} className="flex items-center justify-between bg-gray-50 dark:bg-gray-700 p-2 rounded">
-                      <span className="text-gray-900 dark:text-white">{category}</span>
+                    <div key={category} className="flex items-center justify-between p-2 rounded" style={{ background: 'rgba(15,23,42,0.5)' }}>
+                      <span className="text-[#F8FAFC]">{category}</span>
                       <button
                         onClick={() => handleDeleteCategory(category)}
-                        className="text-red-500 hover:text-red-700 text-sm hover:bg-red-50 dark:hover:bg-red-900/20 rounded px-2 py-1 transition-all"
+                        className="text-[#EF4444] hover:text-red-300 text-sm hover:bg-red-900/20 rounded px-2 py-1 transition-all"
                       >
                         {t[currentLang].buttons.delete}
                       </button>
@@ -2214,21 +2216,22 @@ ________________________________________
           </div>
 
           {/* 問題フォーム */}
-          <div className="bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border border-green-200 dark:border-green-800 rounded-lg shadow-md p-6">
-            <h2 className="text-xl font-semibold text-green-900 dark:text-green-100 mb-4">
+          <div className="rounded-2xl border border-white/10 shadow-md p-6" style={{ background: 'rgba(30,41,59,0.7)' }}>
+            <h2 className="text-xl font-semibold text-[#F8FAFC] mb-4">
               {editingProblem ? t[currentLang].sections.problemEdit : t[currentLang].sections.problemAdd}
             </h2>
             
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-[#CBD5E1] mb-1">
                   {t[currentLang].labels.category}
                 </label>
                 <div className="flex gap-2">
                   <select
                     value={formData.category}
                     onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    className="flex-1 px-3 py-2 border border-white/10 rounded-md text-[#F8FAFC]"
+                    style={{ background: 'rgba(15,23,42,0.5)' }}
                   >
                     <option value="">{t[currentLang].labels.selectCategory}</option>
                     {categories.map((category) => (
@@ -2241,7 +2244,8 @@ ________________________________________
                       value={newCategoryName}
                       onChange={(e) => setNewCategoryName(e.target.value)}
                       placeholder={currentLang === 'ja' ? '新カテゴリー' : 'New category'}
-                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white w-32"
+                      className="px-3 py-2 border border-white/10 rounded-md text-[#F8FAFC] placeholder-[#64748B] w-32"
+                      style={{ background: 'rgba(15,23,42,0.5)' }}
                     />
                     <button
                       type="button"
@@ -2250,7 +2254,7 @@ ________________________________________
                         await handleAddCategory();
                         setFormData({ ...formData, category: newCategoryName.trim() });
                       }}
-                      className="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-md transition-colors font-medium"
+                      className="px-3 py-2 bg-[#6366F1] hover:bg-[#5558E6] text-white rounded-md transition-colors font-medium"
                       title={currentLang === 'ja' ? 'カテゴリーを追加' : 'Add category'}
                     >
                       +
@@ -2260,13 +2264,14 @@ ________________________________________
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-[#CBD5E1] mb-1">
                   {t[currentLang].labels.problemType}
                 </label>
                 <select
                   value={formData.type}
                   onChange={(e) => setFormData({ ...formData, type: e.target.value as 'true-false' | 'multiple-choice' })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full px-3 py-2 border border-white/10 rounded-md text-[#F8FAFC]"
+                  style={{ background: 'rgba(15,23,42,0.5)' }}
                 >
                   <option value="true-false">{t[currentLang].labels.trueFalse}</option>
                   <option value="multiple-choice">{t[currentLang].labels.multipleChoice}</option>
@@ -2274,21 +2279,22 @@ ________________________________________
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-[#CBD5E1] mb-1">
                   {t[currentLang].labels.question}
                 </label>
                 <textarea
                   value={formData.question}
                   onChange={(e) => setFormData({ ...formData, question: e.target.value })}
                   rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full px-3 py-2 border border-white/10 rounded-md text-[#F8FAFC] placeholder-[#64748B]"
+                  style={{ background: 'rgba(15,23,42,0.5)' }}
                   placeholder={t[currentLang].labels.questionPlaceholder}
                 />
               </div>
 
               {formData.type === 'true-false' ? (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-[#CBD5E1] mb-2">
                     {t[currentLang].labels.answer}
                   </label>
                   <div className="flex space-x-4">
@@ -2299,7 +2305,7 @@ ________________________________________
                         onChange={() => setFormData({ ...formData, answer: true })}
                         className="mr-2"
                       />
-                      <span className="text-gray-900 dark:text-white">{t[currentLang].labels.correct}</span>
+                      <span className="text-[#F8FAFC]">{t[currentLang].labels.correct}</span>
                     </label>
                     <label className="flex items-center">
                       <input
@@ -2308,13 +2314,13 @@ ________________________________________
                         onChange={() => setFormData({ ...formData, answer: false })}
                         className="mr-2"
                       />
-                      <span className="text-gray-900 dark:text-white">{t[currentLang].labels.incorrect}</span>
+                      <span className="text-[#F8FAFC]">{t[currentLang].labels.incorrect}</span>
                     </label>
                   </div>
                 </div>
               ) : (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-[#CBD5E1] mb-2">
                     {t[currentLang].labels.options}
                   </label>
                   <div className="space-y-2">
@@ -2335,7 +2341,8 @@ ________________________________________
                             setFormData({ ...formData, options: newOptions });
                           }}
                           placeholder={`${t[currentLang].labels.optionPlaceholder} ${index + 1}`}
-                          className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                          className="flex-1 px-3 py-2 border border-white/10 rounded-md text-[#F8FAFC] placeholder-[#64748B]"
+                          style={{ background: 'rgba(15,23,42,0.5)' }}
                         />
                         {formData.options.length > 2 && (
                           <button
@@ -2349,7 +2356,7 @@ ________________________________________
                                   : formData.correctAnswer;
                               setFormData({ ...formData, options: newOptions, correctAnswer: newCorrectAnswer });
                             }}
-                            className="px-3 py-2 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                            className="px-3 py-2 text-[#EF4444] hover:text-red-300"
                             title={currentLang === 'ja' ? '選択肢を削除' : 'Remove option'}
                           >
                             ✕
@@ -2364,7 +2371,7 @@ ________________________________________
                       onClick={() => {
                         setFormData({ ...formData, options: [...formData.options, ''] });
                       }}
-                      className="mt-2 px-4 py-2 text-sm bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-md hover:bg-blue-200 dark:hover:bg-blue-800"
+                      className="mt-2 px-4 py-2 text-sm bg-[#6366F1]/20 text-[#818CF8] rounded-md hover:bg-[#6366F1]/30"
                     >
                       + {currentLang === 'ja' ? '選択肢を追加' : 'Add option'} ({formData.options.length}/10)
                     </button>
@@ -2373,14 +2380,15 @@ ________________________________________
               )}
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-[#CBD5E1] mb-1">
                   {t[currentLang].labels.explanation}
                 </label>
                 <textarea
                   value={formData.explanation}
                   onChange={(e) => setFormData({ ...formData, explanation: e.target.value })}
                   rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full px-3 py-2 border border-white/10 rounded-md text-[#F8FAFC] placeholder-[#64748B]"
+                  style={{ background: 'rgba(15,23,42,0.5)' }}
                   placeholder={t[currentLang].labels.explanationPlaceholder}
                 />
               </div>
@@ -2388,7 +2396,7 @@ ________________________________________
               {/* タグ管理 */}
               {editingProblem?.id && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-[#CBD5E1] mb-2">
                     タグ
                   </label>
                   <TagManager
@@ -2426,13 +2434,14 @@ ________________________________________
               <div className="flex space-x-2">
                 <button
                   onClick={handleSaveProblem}
-                  className="quiz-action-button flex-1 px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm"
+                  className="flex-1 px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 bg-[#6366F1] hover:bg-[#5558E6] text-white"
                 >
                   {editingProblem ? t[currentLang].buttons.update : t[currentLang].buttons.save}
                 </button>
                 <button
                   onClick={clearForm}
-                  className="quiz-action-button px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm"
+                  className="px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 border border-white/10 text-[#CBD5E1] hover:text-[#F8FAFC]"
+                  style={{ background: 'rgba(15,23,42,0.5)' }}
                 >
                   {t[currentLang].buttons.clear}
                 </button>
@@ -2442,14 +2451,14 @@ ________________________________________
         </div>
 
         {/* インポート・エクスポート */}
-        <div className="mt-8 bg-gradient-to-br from-purple-50 to-violet-50 dark:from-purple-900/20 dark:to-violet-900/20 border border-purple-200 dark:border-purple-800 rounded-lg shadow-md p-6">
+        <div className="mt-8 rounded-2xl border border-white/10 shadow-md p-6" style={{ background: 'rgba(30,41,59,0.7)' }}>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-purple-900 dark:text-purple-100">
+            <h2 className="text-xl font-semibold text-[#F8FAFC]">
               {t[currentLang].sections.importExport}
             </h2>
             <button
               onClick={() => setShowImportHelp(!showImportHelp)}
-              className="flex items-center space-x-2 px-3 py-2 bg-purple-100 dark:bg-purple-900/40 hover:bg-purple-200 dark:hover:bg-purple-800/60 text-purple-900 dark:text-purple-100 rounded-lg transition-all"
+              className="flex items-center space-x-2 px-3 py-2 bg-[#6366F1]/20 hover:bg-[#6366F1]/30 text-[#818CF8] rounded-lg transition-all"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -2460,19 +2469,19 @@ ________________________________________
 
           {/* 使い方ヘルプセクション */}
           {showImportHelp && (
-            <div className="mb-6 bg-white dark:bg-gray-800 rounded-lg border-2 border-purple-300 dark:border-purple-700 p-6 space-y-6">
+            <div className="mb-6 rounded-lg border-2 border-white/10 p-6 space-y-6" style={{ background: 'rgba(30,41,59,0.95)' }}>
               {/* AIツール用プロンプト */}
               <div className="space-y-3">
-                <h3 className="text-lg font-bold text-purple-900 dark:text-purple-100 flex items-center space-x-2">
+                <h3 className="text-lg font-bold text-[#F8FAFC] flex items-center space-x-2">
                   <span>🤖</span>
                   <span>AIツールで問題を生成</span>
                 </h3>
-                <p className="text-sm text-gray-700 dark:text-gray-300">
+                <p className="text-sm text-[#CBD5E1]">
                   ChatGPT、Claude、Geminiなどに以下のプロンプトを送信して、問題データを生成できます：
                 </p>
-                <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg border border-gray-300 dark:border-gray-600">
+                <div className="p-4 rounded-lg border border-white/10" style={{ background: 'rgba(15,23,42,0.5)' }}>
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-semibold text-gray-600 dark:text-gray-400">プロンプト例</span>
+                    <span className="text-xs font-semibold text-[#64748B]">プロンプト例</span>
                     <button
                       onClick={() => {
                         const promptText = `以下の形式で、日本史の問題を5問作成してください：
@@ -2494,12 +2503,12 @@ ________________________________________
                         navigator.clipboard.writeText(promptText);
                         alert('プロンプトをクリップボードにコピーしました！');
                       }}
-                      className="text-xs px-2 py-1 bg-purple-500 hover:bg-purple-600 text-white rounded transition-all"
+                      className="text-xs px-2 py-1 bg-[#6366F1] hover:bg-[#5558E6] text-white rounded transition-all"
                     >
                       📋 コピー
                     </button>
                   </div>
-                  <pre className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap font-mono">
+                  <pre className="text-xs text-[#CBD5E1] whitespace-pre-wrap font-mono">
 {`以下の形式で、日本史の問題を5問作成してください：
 
 カテゴリー: [カテゴリー名]
@@ -2522,13 +2531,13 @@ ________________________________________
 
               {/* ○×問題の例 */}
               <div className="space-y-3">
-                <h3 className="text-lg font-bold text-green-900 dark:text-green-100 flex items-center space-x-2">
+                <h3 className="text-lg font-bold text-[#34D399] flex items-center space-x-2">
                   <span>⭕</span>
                   <span>○×問題の形式</span>
                 </h3>
-                <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border border-green-300 dark:border-green-700">
+                <div className="p-4 rounded-lg border border-white/10" style={{ background: 'rgba(16,185,129,0.1)' }}>
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-semibold text-green-700 dark:text-green-300">例</span>
+                    <span className="text-xs font-semibold text-[#34D399]">例</span>
                     <button
                       onClick={() => {
                         const example = `カテゴリー: 日本史
@@ -2538,32 +2547,32 @@ ________________________________________
                         navigator.clipboard.writeText(example);
                         alert('例をクリップボードにコピーしました！');
                       }}
-                      className="text-xs px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded transition-all"
+                      className="text-xs px-2 py-1 bg-[#10B981] hover:bg-emerald-600 text-white rounded transition-all"
                     >
                       📋 コピー
                     </button>
                   </div>
-                  <pre className="text-sm font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
+                  <pre className="text-sm font-mono text-[#CBD5E1] whitespace-pre-wrap">
 {`カテゴリー: 日本史
 問題: 徳川家康は江戸幕府を開いた
 正解: TRUE
 解説: 1603年に徳川家康が江戸幕府を開きました`}
                   </pre>
-                  <p className="text-xs text-green-700 dark:text-green-300 mt-2">
-                    💡 正解は <code className="bg-green-200 dark:bg-green-800 px-1 rounded">TRUE</code>（正しい）または <code className="bg-green-200 dark:bg-green-800 px-1 rounded">FALSE</code>（誤り）
+                  <p className="text-xs text-[#34D399] mt-2">
+                    💡 正解は <code className="bg-emerald-900/40 px-1 rounded text-[#34D399]">TRUE</code>（正しい）または <code className="bg-emerald-900/40 px-1 rounded text-[#34D399]">FALSE</code>（誤り）
                   </p>
                 </div>
               </div>
 
               {/* 多択問題の例 */}
               <div className="space-y-3">
-                <h3 className="text-lg font-bold text-blue-900 dark:text-blue-100 flex items-center space-x-2">
+                <h3 className="text-lg font-bold text-[#818CF8] flex items-center space-x-2">
                   <span>🔢</span>
                   <span>多択問題の形式</span>
                 </h3>
-                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-300 dark:border-blue-700">
+                <div className="p-4 rounded-lg border border-white/10" style={{ background: 'rgba(99,102,241,0.1)' }}>
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">例</span>
+                    <span className="text-xs font-semibold text-[#818CF8]">例</span>
                     <button
                       onClick={() => {
                         const example = `カテゴリー: 世界史
@@ -2577,12 +2586,12 @@ ________________________________________
                         navigator.clipboard.writeText(example);
                         alert('例をクリップボードにコピーしました！');
                       }}
-                      className="text-xs px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded transition-all"
+                      className="text-xs px-2 py-1 bg-[#6366F1] hover:bg-[#5558E6] text-white rounded transition-all"
                     >
                       📋 コピー
                     </button>
                   </div>
-                  <pre className="text-sm font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
+                  <pre className="text-sm font-mono text-[#CBD5E1] whitespace-pre-wrap">
 {`カテゴリー: 世界史
 問題: 第一次世界大戦が始まったのは何年か？
 選択肢1: 1912年
@@ -2592,39 +2601,39 @@ ________________________________________
 正解: 1
 解説: 1914年にサラエボ事件をきっかけに開戦`}
                   </pre>
-                  <p className="text-xs text-blue-700 dark:text-blue-300 mt-2">
-                    💡 正解は選択肢の番号：<code className="bg-blue-200 dark:bg-blue-800 px-1 rounded">0</code>=1番目、<code className="bg-blue-200 dark:bg-blue-800 px-1 rounded">1</code>=2番目、<code className="bg-blue-200 dark:bg-blue-800 px-1 rounded">2</code>=3番目、<code className="bg-blue-200 dark:bg-blue-800 px-1 rounded">3</code>=4番目
+                  <p className="text-xs text-[#818CF8] mt-2">
+                    💡 正解は選択肢の番号：<code className="bg-indigo-900/40 px-1 rounded text-[#818CF8]">0</code>=1番目、<code className="bg-indigo-900/40 px-1 rounded text-[#818CF8]">1</code>=2番目、<code className="bg-indigo-900/40 px-1 rounded text-[#818CF8]">2</code>=3番目、<code className="bg-indigo-900/40 px-1 rounded text-[#818CF8]">3</code>=4番目
                   </p>
                 </div>
               </div>
 
               {/* インポート手順 */}
               <div className="space-y-3">
-                <h3 className="text-lg font-bold text-orange-900 dark:text-orange-100 flex items-center space-x-2">
+                <h3 className="text-lg font-bold text-[#FBBF24] flex items-center space-x-2">
                   <span>📥</span>
                   <span>インポート手順</span>
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className="bg-orange-50 dark:bg-orange-900/20 p-3 rounded-lg border border-orange-300 dark:border-orange-700">
+                  <div className="p-3 rounded-lg border border-white/10" style={{ background: 'rgba(15,23,42,0.5)' }}>
                     <div className="flex items-center space-x-2 mb-2">
-                      <div className="w-6 h-6 bg-orange-500 rounded-full flex items-center justify-center text-white text-xs font-bold">1</div>
-                      <span className="font-semibold text-sm text-gray-900 dark:text-white">貼り付け</span>
+                      <div className="w-6 h-6 bg-[#FBBF24] rounded-full flex items-center justify-center text-black text-xs font-bold">1</div>
+                      <span className="font-semibold text-sm text-[#F8FAFC]">貼り付け</span>
                     </div>
-                    <p className="text-xs text-gray-600 dark:text-gray-400">下のテキストエリアにAI生成データを貼り付け</p>
+                    <p className="text-xs text-[#64748B]">下のテキストエリアにAI生成データを貼り付け</p>
                   </div>
-                  <div className="bg-orange-50 dark:bg-orange-900/20 p-3 rounded-lg border border-orange-300 dark:border-orange-700">
+                  <div className="p-3 rounded-lg border border-white/10" style={{ background: 'rgba(15,23,42,0.5)' }}>
                     <div className="flex items-center space-x-2 mb-2">
-                      <div className="w-6 h-6 bg-orange-500 rounded-full flex items-center justify-center text-white text-xs font-bold">2</div>
-                      <span className="font-semibold text-sm text-gray-900 dark:text-white">プレビュー</span>
+                      <div className="w-6 h-6 bg-[#FBBF24] rounded-full flex items-center justify-center text-black text-xs font-bold">2</div>
+                      <span className="font-semibold text-sm text-[#F8FAFC]">プレビュー</span>
                     </div>
-                    <p className="text-xs text-gray-600 dark:text-gray-400">「プレビュー」ボタンで内容確認</p>
+                    <p className="text-xs text-[#64748B]">「プレビュー」ボタンで内容確認</p>
                   </div>
-                  <div className="bg-orange-50 dark:bg-orange-900/20 p-3 rounded-lg border border-orange-300 dark:border-orange-700">
+                  <div className="p-3 rounded-lg border border-white/10" style={{ background: 'rgba(15,23,42,0.5)' }}>
                     <div className="flex items-center space-x-2 mb-2">
-                      <div className="w-6 h-6 bg-orange-500 rounded-full flex items-center justify-center text-white text-xs font-bold">3</div>
-                      <span className="font-semibold text-sm text-gray-900 dark:text-white">インポート</span>
+                      <div className="w-6 h-6 bg-[#FBBF24] rounded-full flex items-center justify-center text-black text-xs font-bold">3</div>
+                      <span className="font-semibold text-sm text-[#F8FAFC]">インポート</span>
                     </div>
-                    <p className="text-xs text-gray-600 dark:text-gray-400">問題なければ「インポート」実行</p>
+                    <p className="text-xs text-[#64748B]">問題なければ「インポート」実行</p>
                   </div>
                 </div>
               </div>
@@ -2632,16 +2641,16 @@ ________________________________________
           )}
 
           {/* 問題集作成オプション */}
-          <div className="mb-6 bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
+          <div className="mb-6 p-4 rounded-lg border border-white/10" style={{ background: 'rgba(99,102,241,0.1)' }}>
             <div className="flex items-center space-x-3 mb-3">
               <input
                 type="checkbox"
                 id="create-quiz-set"
                 checked={createQuizSet}
                 onChange={(e) => setCreateQuizSet(e.target.checked)}
-                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                className="h-4 w-4 text-[#6366F1] focus:ring-[#6366F1] border-white/10 rounded"
               />
-              <label htmlFor="create-quiz-set" className="text-sm font-medium text-gray-900 dark:text-white">
+              <label htmlFor="create-quiz-set" className="text-sm font-medium text-[#F8FAFC]">
                 {t[currentLang].importExport.createQuizSetOption}
               </label>
             </div>
@@ -2652,7 +2661,8 @@ ________________________________________
                   value={quizSetName}
                   onChange={(e) => setQuizSetName(e.target.value)}
                   placeholder={t[currentLang].importExport.quizSetNamePlaceholder}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
+                  className="w-full px-3 py-2 border border-white/10 rounded-md text-[#F8FAFC] placeholder-[#64748B]"
+                  style={{ background: 'rgba(15,23,42,0.5)' }}
                 />
               </div>
             )}
@@ -2661,27 +2671,27 @@ ________________________________________
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* CSVファイルインポート */}
             <div className="space-y-4">
-              <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+              <h3 className="text-lg font-medium text-[#F8FAFC]">
                 {t[currentLang].importExport.csvFileImport}
               </h3>
               <input
                 type="file"
                 accept=".csv"
                 onChange={handleFileImport}
-                className="block w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-900 dark:file:text-blue-300"
+                className="block w-full text-sm text-[#94A3B8] file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-[#6366F1] file:text-white hover:file:bg-[#5558E6]"
               />
               
               <div className="space-y-2">
                 <button
                   onClick={() => setShowCsvFormat(!showCsvFormat)}
-                  className="text-blue-500 hover:text-blue-700 text-sm underline hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded px-2 py-1 transition-all"
+                  className="text-[#818CF8] hover:text-[#A5B4FC] text-sm underline hover:bg-[#6366F1]/10 rounded px-2 py-1 transition-all"
                 >
                   {t[currentLang].importExport.csvFormatDetails}
                 </button>
                 
                 {showCsvFormat && (
-                  <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-md text-sm">
-                    <div className="text-gray-900 dark:text-white whitespace-pre-wrap font-mono">
+                  <div className="p-4 rounded-md text-sm border border-white/10" style={{ background: 'rgba(15,23,42,0.5)' }}>
+                    <div className="text-[#CBD5E1] whitespace-pre-wrap font-mono">
                       {t[currentLang].messages.csvFormatPrompt}
                     </div>
                   </div>
@@ -2691,13 +2701,13 @@ ________________________________________
               <div className="space-y-2">
                 <button
                   onClick={handleExportCsv}
-                  className="quiz-action-button w-full px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm"
+                  className="w-full px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 bg-[#6366F1] hover:bg-[#5558E6] text-white"
                 >
                   {t[currentLang].buttons.export}
                 </button>
                 <button
                   onClick={handleDownloadTemplate}
-                  className="w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-all shadow-md hover:shadow-lg"
+                  className="w-full px-4 py-2 bg-[#10B981] text-white rounded-md hover:bg-emerald-600 transition-all shadow-md hover:shadow-lg"
                 >
                   📥 CSVテンプレートをダウンロード
                 </button>
@@ -2706,10 +2716,10 @@ ________________________________________
 
             {/* テキストからCSV生成 */}
             <div className="space-y-4">
-              <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+              <h3 className="text-lg font-medium text-[#F8FAFC]">
                 {t[currentLang].importExport.textToCsv}
               </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-300">
+              <p className="text-sm text-[#CBD5E1]">
                 {t[currentLang].importExport.textToCsvDescription}
               </p>
               
@@ -2721,14 +2731,15 @@ ________________________________________
                   e.stopPropagation();
                 }}
                 rows={8}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white selection:bg-blue-200 selection:text-gray-900 dark:selection:bg-blue-700 dark:selection:text-white"
+                className="w-full px-3 py-2 border border-white/10 rounded-md text-[#F8FAFC] placeholder-[#64748B] selection:bg-[#6366F1]/30 selection:text-[#F8FAFC]"
+                style={{ background: 'rgba(15,23,42,0.5)' }}
                 placeholder={t[currentLang].importExport.csvDataPlaceholder}
               />
               
               <div className="space-y-2">
                 <button
                   onClick={handleCsvPreview}
-                  className="w-full px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-all shadow-md hover:shadow-lg"
+                  className="w-full px-4 py-2 bg-[#6366F1] text-white rounded-md hover:bg-[#5558E6] transition-all shadow-md hover:shadow-lg"
                 >
                   👁️ CSVプレビュー（検証付き）
                 </button>
@@ -2742,14 +2753,15 @@ ________________________________________
                       handleCsvTextImport();
                     }}
                     disabled={createQuizSet && !quizSetName.trim()}
-                    className="quiz-action-button flex-1 px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm disabled:bg-gray-400 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
+                    className="flex-1 px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 bg-[#6366F1] hover:bg-[#5558E6] text-white disabled:bg-[#64748B] disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
                     title={createQuizSet && !quizSetName.trim() ? t[currentLang].messages.quizSetNameRequired : ""}
                   >
                     {t[currentLang].buttons.import}
                   </button>
                   <button
                     onClick={generateCsvFromText}
-                    className="quiz-action-button flex-1 px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm"
+                    className="flex-1 px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 border border-white/10 text-[#CBD5E1] hover:text-[#F8FAFC]"
+                    style={{ background: 'rgba(15,23,42,0.5)' }}
                   >
                     {t[currentLang].buttons.generateCsv}
                   </button>
@@ -2758,8 +2770,8 @@ ________________________________________
 
               {/* AIツール用プロンプト表示 */}
               <div className="mt-4 space-y-2">
-                <div className="text-sm text-gray-700 dark:text-gray-300 bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-200 dark:border-blue-700">
-                  <strong className="text-blue-900 dark:text-blue-100">💡 外部AIで問題を一括作成</strong>
+                <div className="text-sm text-[#CBD5E1] p-3 rounded-lg border border-white/10" style={{ background: 'rgba(99,102,241,0.1)' }}>
+                  <strong className="text-[#818CF8]">💡 外部AIで問題を一括作成</strong>
                   <p className="mt-1 text-xs">
                     ChatGPT、Claude、Gemini等の外部AIにプロンプトをコピーして、問題を自動生成できます。
                     <span className="inline-block mt-1 px-2 py-0.5 bg-purple-500 text-white text-xs rounded-full font-bold">JSON形式（推奨）</span>が最も高精度です。
@@ -2767,7 +2779,8 @@ ________________________________________
                 </div>
                 <button
                   onClick={() => setShowPrompts(!showPrompts)}
-                  className="quiz-action-button w-full px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 backdrop-blur-sm"
+                  className="w-full px-4 py-2 rounded-md transition-all shadow-md hover:shadow-lg transform hover:scale-105 border border-white/10 text-[#CBD5E1] hover:text-[#F8FAFC]"
+                  style={{ background: 'rgba(15,23,42,0.5)' }}
                 >
                   {showPrompts ? '🔼 AIプロンプトを閉じる' : '🔽 AIプロンプトを表示'}
                 </button>
@@ -2776,36 +2789,36 @@ ________________________________________
               {showPrompts && (
                 <div className="mt-4 space-y-4">
                   {/* 使い方ガイド */}
-                  <div className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 border-2 border-indigo-300 dark:border-indigo-700 rounded-lg p-4">
-                    <h4 className="text-md font-bold text-indigo-900 dark:text-indigo-100 mb-3 flex items-center space-x-2">
+                  <div className="rounded-lg p-4 border-2 border-white/10" style={{ background: 'rgba(99,102,241,0.1)' }}>
+                    <h4 className="text-md font-bold text-[#818CF8] mb-3 flex items-center space-x-2">
                       <span>📖</span>
                       <span>使い方（3ステップ）</span>
                     </h4>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <div className="bg-white dark:bg-gray-800 p-3 rounded-lg border border-indigo-200 dark:border-indigo-700">
+                      <div className="p-3 rounded-lg border border-white/10" style={{ background: 'rgba(15,23,42,0.5)' }}>
                         <div className="flex items-center space-x-2 mb-2">
-                          <div className="w-6 h-6 bg-indigo-500 rounded-full flex items-center justify-center text-white text-xs font-bold">1</div>
-                          <span className="font-semibold text-sm text-gray-900 dark:text-white">コピー</span>
+                          <div className="w-6 h-6 bg-[#6366F1] rounded-full flex items-center justify-center text-white text-xs font-bold">1</div>
+                          <span className="font-semibold text-sm text-[#F8FAFC]">コピー</span>
                         </div>
-                        <p className="text-xs text-gray-600 dark:text-gray-300">
+                        <p className="text-xs text-[#94A3B8]">
                           下のプロンプトから1つ選び、「📋 コピー」ボタンでクリップボードにコピー
                         </p>
                       </div>
-                      <div className="bg-white dark:bg-gray-800 p-3 rounded-lg border border-indigo-200 dark:border-indigo-700">
+                      <div className="p-3 rounded-lg border border-white/10" style={{ background: 'rgba(15,23,42,0.5)' }}>
                         <div className="flex items-center space-x-2 mb-2">
-                          <div className="w-6 h-6 bg-indigo-500 rounded-full flex items-center justify-center text-white text-xs font-bold">2</div>
-                          <span className="font-semibold text-sm text-gray-900 dark:text-white">生成</span>
+                          <div className="w-6 h-6 bg-[#6366F1] rounded-full flex items-center justify-center text-white text-xs font-bold">2</div>
+                          <span className="font-semibold text-sm text-[#F8FAFC]">生成</span>
                         </div>
-                        <p className="text-xs text-gray-600 dark:text-gray-300">
+                        <p className="text-xs text-[#94A3B8]">
                           ChatGPT/Claude/Gemini等にプロンプトを貼り付けて問題を生成
                         </p>
                       </div>
-                      <div className="bg-white dark:bg-gray-800 p-3 rounded-lg border border-indigo-200 dark:border-indigo-700">
+                      <div className="p-3 rounded-lg border border-white/10" style={{ background: 'rgba(15,23,42,0.5)' }}>
                         <div className="flex items-center space-x-2 mb-2">
-                          <div className="w-6 h-6 bg-indigo-500 rounded-full flex items-center justify-center text-white text-xs font-bold">3</div>
-                          <span className="font-semibold text-sm text-gray-900 dark:text-white">インポート</span>
+                          <div className="w-6 h-6 bg-[#6366F1] rounded-full flex items-center justify-center text-white text-xs font-bold">3</div>
+                          <span className="font-semibold text-sm text-[#F8FAFC]">インポート</span>
                         </div>
-                        <p className="text-xs text-gray-600 dark:text-gray-300">
+                        <p className="text-xs text-[#94A3B8]">
                           生成された問題を上のテキストエリアに貼り付け→「インポート」
                         </p>
                       </div>
@@ -2813,53 +2826,53 @@ ________________________________________
                   </div>
 
                   {/* ○×問題用プロンプト */}
-                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                  <div className="rounded-lg p-4 border border-white/10" style={{ background: 'rgba(99,102,241,0.08)' }}>
                     <div className="flex justify-between items-center mb-2">
-                      <h4 className="text-md font-medium text-blue-900 dark:text-blue-100">○×問題用プロンプト</h4>
+                      <h4 className="text-md font-medium text-[#818CF8]">○×問題用プロンプト</h4>
                       <button
                         onClick={() => copyToClipboard(trueFalsePrompt, '○×問題用')}
-                        className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
+                        className="px-3 py-1 bg-[#6366F1] text-white rounded text-sm hover:bg-[#5558E6]"
                       >
                         {t[currentLang].buttons.copyPrompt}
                       </button>
                     </div>
-                    <pre className="text-xs text-blue-800 dark:text-blue-200 whitespace-pre-wrap bg-white dark:bg-gray-800 p-3 rounded border max-h-40 overflow-y-auto">
+                    <pre className="text-xs text-[#CBD5E1] whitespace-pre-wrap p-3 rounded border border-white/10 max-h-40 overflow-y-auto" style={{ background: 'rgba(15,23,42,0.5)' }}>
                       {trueFalsePrompt}
                     </pre>
                   </div>
 
                   {/* 多択問題用プロンプト（テキスト形式） */}
-                  <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+                  <div className="rounded-lg p-4 border border-white/10" style={{ background: 'rgba(16,185,129,0.08)' }}>
                     <div className="flex justify-between items-center mb-2">
-                      <h4 className="text-md font-medium text-green-900 dark:text-green-100">多択問題用プロンプト（テキスト形式）</h4>
+                      <h4 className="text-md font-medium text-[#34D399]">多択問題用プロンプト（テキスト形式）</h4>
                       <button
                         onClick={() => copyToClipboard(multipleChoicePrompt, '多択問題用（テキスト形式）')}
-                        className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
+                        className="px-3 py-1 bg-[#10B981] text-white rounded text-sm hover:bg-emerald-600"
                       >
                         {t[currentLang].buttons.copyPrompt}
                       </button>
                     </div>
-                    <pre className="text-xs text-green-800 dark:text-green-200 whitespace-pre-wrap bg-white dark:bg-gray-800 p-3 rounded border max-h-40 overflow-y-auto">
+                    <pre className="text-xs text-[#CBD5E1] whitespace-pre-wrap p-3 rounded border border-white/10 max-h-40 overflow-y-auto" style={{ background: 'rgba(15,23,42,0.5)' }}>
                       {multipleChoicePrompt}
                     </pre>
                   </div>
 
                   {/* JSON形式プロンプト（推奨・高精度） */}
-                  <div className="bg-purple-50 dark:bg-purple-900/20 border-2 border-purple-300 dark:border-purple-700 rounded-lg p-4">
+                  <div className="rounded-lg p-4 border-2 border-[#6366F1]/30" style={{ background: 'rgba(99,102,241,0.1)' }}>
                     <div className="flex justify-between items-center mb-2">
                       <div className="flex items-center space-x-2">
-                        <h4 className="text-md font-medium text-purple-900 dark:text-purple-100">JSON形式プロンプト</h4>
+                        <h4 className="text-md font-medium text-[#818CF8]">JSON形式プロンプト</h4>
                         <span className="px-2 py-1 bg-purple-500 text-white text-xs font-bold rounded-full">推奨</span>
                         <span className="px-2 py-1 bg-yellow-500 text-white text-xs font-bold rounded-full">高精度</span>
                       </div>
                       <button
                         onClick={() => copyToClipboard(jsonFormatPrompt, 'JSON形式')}
-                        className="px-3 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700"
+                        className="px-3 py-1 bg-[#6366F1] text-white rounded text-sm hover:bg-[#5558E6]"
                       >
                         {t[currentLang].buttons.copyPrompt}
                       </button>
                     </div>
-                    <div className="mb-2 text-xs text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-800/30 p-2 rounded">
+                    <div className="mb-2 text-xs text-[#818CF8] bg-[#6366F1]/10 p-2 rounded">
                       ✨ <strong>なぜJSON形式が優れているか：</strong>
                       <ul className="ml-4 mt-1 list-disc">
                         <li>構造的強制：JSON構文エラーで即座にミス検出</li>
@@ -2869,7 +2882,7 @@ ________________________________________
                         <li>AI出力精度：テキスト形式70-80% → JSON形式90-95%+</li>
                       </ul>
                     </div>
-                    <pre className="text-xs text-purple-800 dark:text-purple-200 whitespace-pre-wrap bg-white dark:bg-gray-800 p-3 rounded border max-h-60 overflow-y-auto">
+                    <pre className="text-xs text-[#CBD5E1] whitespace-pre-wrap p-3 rounded border border-white/10 max-h-60 overflow-y-auto" style={{ background: 'rgba(15,23,42,0.5)' }}>
                       {jsonFormatPrompt}
                     </pre>
                   </div>
@@ -2880,12 +2893,12 @@ ________________________________________
         </div>
 
         {/* 問題一覧 */}
-        <div className="mt-8 bg-gradient-to-br from-orange-50 to-red-50 dark:from-orange-900/20 dark:to-red-900/20 border border-orange-200 dark:border-orange-800 rounded-lg shadow-md p-6">
+        <div className="mt-8 rounded-2xl border border-white/10 shadow-md p-6" style={{ background: 'rgba(30,41,59,0.7)' }}>
           <div className="flex justify-between items-center mb-4">
             <div>
-              <h2 className="text-xl font-semibold text-orange-900 dark:text-orange-100">{t[currentLang].sections.problemList}</h2>
+              <h2 className="text-xl font-semibold text-[#F8FAFC]">{t[currentLang].sections.problemList}</h2>
               {duplicateProblemsMap.size > 0 && (
-                <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                <p className="text-sm text-[#EF4444] mt-1">
                   ⚠️ {duplicateProblemsMap.size}件の重複問題を検出
                 </p>
               )}
@@ -2893,7 +2906,7 @@ ________________________________________
             <button
               onClick={() => detectDuplicatesInBackground(problems)}
               disabled={problems.length === 0}
-              className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg transition-colors font-medium shadow-md hover:shadow-lg transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed disabled:transform-none"
+              className="px-4 py-2 bg-[#FBBF24] hover:bg-amber-400 text-black rounded-lg transition-colors font-medium shadow-md hover:shadow-lg transform hover:scale-105 disabled:bg-[#64748B] disabled:text-[#94A3B8] disabled:cursor-not-allowed disabled:transform-none"
               title={currentLang === 'ja' ? '重複問題を手動で検出' : 'Manually detect duplicates'}
             >
               {currentLang === 'ja' ? '🔍 重複検出' : '🔍 Detect Duplicates'}
@@ -2904,7 +2917,8 @@ ________________________________________
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              className="w-full px-3 py-2 border border-white/10 rounded-md text-[#F8FAFC]"
+              style={{ background: 'rgba(15,23,42,0.5)' }}
             >
               <option value="">{t[currentLang].labels.allCategories}</option>
               {categories.map((category) => (
@@ -2916,7 +2930,8 @@ ________________________________________
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               placeholder={t[currentLang].labels.searchPlaceholder}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              className="w-full px-3 py-2 border border-white/10 rounded-md text-[#F8FAFC] placeholder-[#64748B]"
+              style={{ background: 'rgba(15,23,42,0.5)' }}
             />
           </div>
 
@@ -2935,20 +2950,20 @@ ________________________________________
           <div className="overflow-x-auto">
             <table className="w-full table-auto">
               <thead>
-                <tr className="border-b border-gray-200 dark:border-gray-700">
+                <tr className="border-b border-white/10">
                   <th className="w-12 py-2 px-4"></th>
-                  <th className="text-left py-2 px-4 text-gray-900 dark:text-white">{t[currentLang].labels.tableHeaders.category}</th>
-                  <th className="text-left py-2 px-4 text-gray-900 dark:text-white">{t[currentLang].labels.tableHeaders.question}</th>
-                  <th className="text-left py-2 px-4 text-gray-900 dark:text-white">{t[currentLang].labels.tableHeaders.type}</th>
-                  <th className="text-left py-2 px-4 text-gray-900 dark:text-white">{t[currentLang].labels.tableHeaders.actions}</th>
+                  <th className="text-left py-2 px-4 text-[#94A3B8]">{t[currentLang].labels.tableHeaders.category}</th>
+                  <th className="text-left py-2 px-4 text-[#94A3B8]">{t[currentLang].labels.tableHeaders.question}</th>
+                  <th className="text-left py-2 px-4 text-[#94A3B8]">{t[currentLang].labels.tableHeaders.type}</th>
+                  <th className="text-left py-2 px-4 text-[#94A3B8]">{t[currentLang].labels.tableHeaders.actions}</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredProblems.map((problem) => (
                   <tr
                     key={problem.id}
-                    className={`border-b border-gray-100 dark:border-gray-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors ${
-                      problem.id && selectionManager.isSelected(problem.id) ? 'bg-purple-50 dark:bg-purple-900/20' : ''
+                    className={`border-b border-white/5 hover:bg-[#6366F1]/10 transition-colors ${
+                      problem.id && selectionManager.isSelected(problem.id) ? 'bg-[#6366F1]/15' : ''
                     }`}
                     onContextMenu={(e) => problem.id && handleContextMenu(e, problem.id)}
                     onTouchStart={(e) => problem.id && handleTouchStart(e, problem.id)}
@@ -2961,10 +2976,10 @@ ________________________________________
                         checked={problem.id ? selectionManager.isSelected(problem.id) : false}
                         onChange={() => problem.id && handleToggleSelection(problem.id)}
                         onClick={(e) => e.stopPropagation()}
-                        className="w-5 h-5 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+                        className="w-5 h-5 text-[#6366F1] border-white/20 rounded focus:ring-[#6366F1]"
                       />
                     </td>
-                    <td className="py-2 px-4 text-gray-900 dark:text-white">
+                    <td className="py-2 px-4 text-[#F8FAFC]">
                       <div className="flex items-center gap-2">
                         <span>{problem.category}</span>
                         {problem.id && duplicateProblemsMap.has(problem.id) && (
@@ -2974,7 +2989,7 @@ ________________________________________
                               setSelectedDuplicateProblem(problem);
                               setShowDuplicateResolveModal(true);
                             }}
-                            className="px-2 py-1 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-xs font-bold hover:bg-red-200 dark:hover:bg-red-800 transition-colors"
+                            className="px-2 py-1 bg-red-900/40 text-[#EF4444] rounded text-xs font-bold hover:bg-red-900/60 transition-colors"
                             title={currentLang === 'ja' ? `${duplicateProblemsMap.get(problem.id!)?.length}件の重複` : `${duplicateProblemsMap.get(problem.id!)?.length} duplicates`}
                           >
                             {currentLang === 'ja' ? '重複' : 'Duplicate'}
@@ -2983,7 +2998,7 @@ ________________________________________
                       </div>
                     </td>
                     <td
-                      className="py-2 px-4 text-gray-900 dark:text-white cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                      className="py-2 px-4 text-[#F8FAFC] cursor-pointer hover:text-[#818CF8] transition-colors"
                       onClick={(e) => {
                         e.stopPropagation();
                         setSelectedProblemDetail(problem);
@@ -2993,7 +3008,7 @@ ________________________________________
                     >
                       {problem.question.length > 50 ? problem.question.substring(0, 50) + '...' : problem.question}
                     </td>
-                    <td className="py-2 px-4 text-gray-900 dark:text-white">
+                    <td className="py-2 px-4 text-[#F8FAFC]">
                       {problem.type === 'multiple-choice' ? t[currentLang].labels.multipleChoiceShort : t[currentLang].labels.trueFalseShort}
                     </td>
                     <td className="py-2 px-4">
@@ -3014,7 +3029,7 @@ ________________________________________
                               }
                             }
                           }}
-                          className="px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded hover:bg-yellow-200 dark:hover:bg-yellow-800 text-lg"
+                          className="px-2 py-1 bg-amber-900/30 text-[#FBBF24] rounded hover:bg-amber-900/50 text-lg"
                         >
                           {problem.isFavorite ? '⭐' : '☆'}
                         </button>
@@ -3024,7 +3039,7 @@ ________________________________________
                             console.log('Edit button clicked', problem);
                             handleEditProblem(problem);
                           }}
-                          className="quiz-action-button text-sm px-2 py-1 rounded transition-all"
+                          className="text-sm px-2 py-1 rounded transition-all bg-[#6366F1]/20 text-[#818CF8] hover:bg-[#6366F1]/30"
                         >
                           {t[currentLang].buttons.edit}
                         </button>
@@ -3033,7 +3048,7 @@ ________________________________________
                             e.stopPropagation();
                             problem.id && handleDeleteProblem(problem.id);
                           }}
-                          className="text-red-500 hover:text-red-700 text-sm hover:bg-red-50 dark:hover:bg-red-900/20 rounded px-2 py-1 transition-all"
+                          className="text-[#EF4444] hover:text-red-300 text-sm hover:bg-red-900/20 rounded px-2 py-1 transition-all"
                         >
                           {t[currentLang].buttons.delete}
                         </button>
@@ -3045,7 +3060,7 @@ ________________________________________
             </table>
             
             {filteredProblems.length === 0 && (
-              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+              <div className="text-center py-8 text-[#64748B]">
                 {t[currentLang].messages.noProblemsFound}
               </div>
             )}
@@ -3055,9 +3070,9 @@ ________________________________________
 
       {/* 問題詳細モーダル */}
       {showProblemDetailModal && selectedProblemDetail && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setShowProblemDetailModal(false)}>
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="sticky top-0 bg-gradient-to-r from-blue-500 to-purple-600 text-white p-4 rounded-t-lg flex justify-between items-center">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setShowProblemDetailModal(false)}>
+          <div className="rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-white/10" style={{ background: 'rgba(30,41,59,0.95)' }} onClick={(e) => e.stopPropagation()}>
+            <div className="sticky top-0 bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] text-white p-4 rounded-t-2xl flex justify-between items-center">
               <h3 className="text-xl font-bold">📋 問題詳細</h3>
               <button
                 onClick={() => setShowProblemDetailModal(false)}
@@ -3069,16 +3084,16 @@ ________________________________________
             <div className="p-6 space-y-4">
               {/* カテゴリ */}
               <div>
-                <label className="text-sm font-semibold text-gray-600 dark:text-gray-400">カテゴリ</label>
-                <p className="mt-1 text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700 p-3 rounded-lg">
+                <label className="text-sm font-semibold text-[#94A3B8]">カテゴリ</label>
+                <p className="mt-1 text-[#F8FAFC] p-3 rounded-lg" style={{ background: 'rgba(15,23,42,0.5)' }}>
                   {selectedProblemDetail.category}
                 </p>
               </div>
 
               {/* 問題文 */}
               <div>
-                <label className="text-sm font-semibold text-gray-600 dark:text-gray-400">問題文</label>
-                <p className="mt-1 text-gray-900 dark:text-white bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border-l-4 border-blue-500 whitespace-pre-wrap">
+                <label className="text-sm font-semibold text-[#94A3B8]">問題文</label>
+                <p className="mt-1 text-[#F8FAFC] p-4 rounded-lg border-l-4 border-[#6366F1] whitespace-pre-wrap" style={{ background: 'rgba(99,102,241,0.1)' }}>
                   {selectedProblemDetail.question}
                 </p>
               </div>
@@ -3086,21 +3101,22 @@ ________________________________________
               {/* 選択肢（多択問題の場合） */}
               {selectedProblemDetail.type === 'multiple-choice' && selectedProblemDetail.options && (
                 <div>
-                  <label className="text-sm font-semibold text-gray-600 dark:text-gray-400">選択肢</label>
+                  <label className="text-sm font-semibold text-[#94A3B8]">選択肢</label>
                   <div className="mt-1 space-y-2">
                     {selectedProblemDetail.options.map((option, index) => (
                       <div
                         key={index}
                         className={`p-3 rounded-lg border-l-4 ${
                           index === selectedProblemDetail.correctAnswer
-                            ? 'bg-green-50 dark:bg-green-900/20 border-green-500 text-green-900 dark:text-green-100'
-                            : 'bg-gray-50 dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white'
+                            ? 'border-[#10B981] text-[#34D399]'
+                            : 'border-white/10 text-[#F8FAFC]'
                         }`}
+                        style={{ background: index === selectedProblemDetail.correctAnswer ? 'rgba(16,185,129,0.1)' : 'rgba(15,23,42,0.5)' }}
                       >
                         <span className="font-semibold">{index + 1}. </span>
                         {option}
                         {index === selectedProblemDetail.correctAnswer && (
-                          <span className="ml-2 text-green-600 dark:text-green-400 font-bold">✓ 正解</span>
+                          <span className="ml-2 text-[#34D399] font-bold">✓ 正解</span>
                         )}
                       </div>
                     ))}
@@ -3111,8 +3127,8 @@ ________________________________________
               {/* 正解（○×問題の場合） */}
               {selectedProblemDetail.type === 'true-false' && (
                 <div>
-                  <label className="text-sm font-semibold text-gray-600 dark:text-gray-400">正解</label>
-                  <p className="mt-1 text-gray-900 dark:text-white bg-green-50 dark:bg-green-900/20 p-3 rounded-lg border-l-4 border-green-500">
+                  <label className="text-sm font-semibold text-[#94A3B8]">正解</label>
+                  <p className="mt-1 text-[#34D399] p-3 rounded-lg border-l-4 border-[#10B981]" style={{ background: 'rgba(16,185,129,0.1)' }}>
                     {selectedProblemDetail.answer ? '○ 正しい' : '✕ 誤り'}
                   </p>
                 </div>
@@ -3120,8 +3136,8 @@ ________________________________________
 
               {/* 解説 */}
               <div>
-                <label className="text-sm font-semibold text-gray-600 dark:text-gray-400">解説</label>
-                <p className="mt-1 text-gray-900 dark:text-white bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg border-l-4 border-purple-500 whitespace-pre-wrap">
+                <label className="text-sm font-semibold text-[#94A3B8]">解説</label>
+                <p className="mt-1 text-[#CBD5E1] p-4 rounded-lg border-l-4 border-[#6366F1] whitespace-pre-wrap" style={{ background: 'rgba(99,102,241,0.1)' }}>
                   {selectedProblemDetail.explanation}
                 </p>
               </div>
@@ -3129,12 +3145,12 @@ ________________________________________
               {/* タグ */}
               {selectedProblemDetail.tags && selectedProblemDetail.tags.length > 0 && (
                 <div>
-                  <label className="text-sm font-semibold text-gray-600 dark:text-gray-400">タグ</label>
+                  <label className="text-sm font-semibold text-[#94A3B8]">タグ</label>
                   <div className="mt-1 flex flex-wrap gap-2">
                     {selectedProblemDetail.tags.map((tag, index) => (
                       <span
                         key={index}
-                        className="px-3 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded-full text-sm"
+                        className="px-3 py-1 bg-[#6366F1]/20 text-[#818CF8] rounded-full text-sm"
                       >
                         #{tag}
                       </span>
@@ -3146,8 +3162,8 @@ ________________________________________
               {/* ユーザーノート */}
               {selectedProblemDetail.userNotes && (
                 <div>
-                  <label className="text-sm font-semibold text-gray-600 dark:text-gray-400">📝 ユーザーノート</label>
-                  <p className="mt-1 text-gray-900 dark:text-white bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg border-l-4 border-yellow-500 whitespace-pre-wrap">
+                  <label className="text-sm font-semibold text-[#94A3B8]">📝 ユーザーノート</label>
+                  <p className="mt-1 text-[#F8FAFC] p-4 rounded-lg border-l-4 border-[#FBBF24] whitespace-pre-wrap" style={{ background: 'rgba(251,191,36,0.1)' }}>
                     {selectedProblemDetail.userNotes}
                   </p>
                 </div>

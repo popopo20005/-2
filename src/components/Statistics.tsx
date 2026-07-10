@@ -4,13 +4,26 @@ import type { Problem } from '../types';
 import { ThreeDDoughnutChart } from './charts/ThreeDDoughnutChart';
 import { ThreeDBarChart } from './charts/ThreeDBarChart';
 import { GlowingLineChart } from './charts/GlowingLineChart';
-import { BadgeSystem, type Badge } from './gamification/BadgeSystem';
+import { XPProgressWidget } from './gamification/XPProgressWidget';
 import { SkeletonStatGrid, SkeletonChart, Skeleton } from './ui/Skeleton';
 import { GlassCard } from './ui/GlassCard';
 import { NeumorphicButton } from './ui/NeumorphicButton';
-import { ArrowLeft, Copy, X, Trophy, TrendingUp, PieChart, BarChart2, BookOpen, Layers, Target, Zap } from 'lucide-react';
+import { ArrowLeft, Copy, X, Trophy, TrendingUp, PieChart, BarChart2, BookOpen, Layers, Target, Zap, BarChart3, Calendar, LineChart, ChevronDown, ChevronUp, FileText } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { debugLog } from '../utils/debug';
+import { PerformanceMonitor } from '../services/performanceOptimizer';
+import { StatsComparisonModal } from './StatsComparisonModal';
+import { ReportGeneratorModal } from './ReportGeneratorModal';
+import { tagsService, type TagStatistics } from '../services/tagsService';
+
+// Performance monitoring instance
+const performanceMonitor = new PerformanceMonitor();
+import {
+  generateStatisticsSummary,
+} from '../services/statisticsAggregator';
+import type {
+  StatisticsSummary,
+} from '../types/statistics';
 
 interface StatisticsProps {
   onBack: () => void;
@@ -154,7 +167,43 @@ const t = {
     copy: 'コピー',
     badges: '🏆 獲得バッジ',
     badgesDesc: '学習の進捗に応じて獲得したバッジ',
-    locked: '未獲得'
+    locked: '未獲得',
+    // 新しいタブ
+    weeklyTab: '週次',
+    monthlyTab: '月次',
+    trendsTab: 'トレンド',
+    predictionTab: '予測',
+    // 週次統計
+    thisWeek: '今週の統計',
+    weekOf: '週',
+    studyDays: '学習日数',
+    totalStudyTime: '総学習時間',
+    minutes: '分',
+    topCategories: 'よく学習したカテゴリー',
+    // 月次統計
+    thisMonth: '今月の統計',
+    bestWeek: '最高の週',
+    categoryBreakdown: 'カテゴリー別内訳',
+    // トレンド
+    accuracyTrend: '正解率のトレンド',
+    activityTrend: '学習量のトレンド',
+    last30Days: '過去30日',
+    improving: '上昇中',
+    stable: '安定',
+    declining: '低下中',
+    changeRate: '変化率',
+    movingAverage: '移動平均',
+    // 予測
+    performancePrediction: 'パフォーマンス予測',
+    daysAhead: '日後',
+    predictedAccuracy: '予測正解率',
+    predictedActivity: '予測学習量',
+    problemsPerDay: '問/日',
+    confidence: '信頼度',
+    recommendation: '推奨アクション',
+    // 統計内訳
+    dailyBreakdown: '日別内訳',
+    weeklyBreakdown: '週別内訳'
   },
   en: {
     title: '📊 Learning Statistics',
@@ -248,6 +297,43 @@ const t = {
     copy: 'Copy',
     badges: '🏆 Earned Badges',
     badgesDesc: 'Badges earned based on your learning progress',
+    locked: 'Locked',
+    // New tabs
+    weeklyTab: 'Weekly',
+    monthlyTab: 'Monthly',
+    trendsTab: 'Trends',
+    predictionTab: 'Prediction',
+    // Weekly stats
+    thisWeek: 'This Week',
+    weekOf: 'Week of',
+    studyDays: 'Study Days',
+    totalStudyTime: 'Total Study Time',
+    minutes: 'min',
+    topCategories: 'Top Categories',
+    // Monthly stats
+    thisMonth: 'This Month',
+    bestWeek: 'Best Week',
+    categoryBreakdown: 'Category Breakdown',
+    // Trends
+    accuracyTrend: 'Accuracy Trend',
+    activityTrend: 'Activity Trend',
+    last30Days: 'Last 30 Days',
+    improving: 'Improving',
+    stable: 'Stable',
+    declining: 'Declining',
+    changeRate: 'Change Rate',
+    movingAverage: 'Moving Average',
+    // Prediction
+    performancePrediction: 'Performance Prediction',
+    daysAhead: 'days ahead',
+    predictedAccuracy: 'Predicted Accuracy',
+    predictedActivity: 'Predicted Activity',
+    problemsPerDay: 'problems/day',
+    confidence: 'Confidence',
+    recommendation: 'Recommendation',
+    // Statistics Breakdown
+    dailyBreakdown: 'Daily Breakdown',
+    weeklyBreakdown: 'Weekly Breakdown',
   },
 };
 
@@ -267,14 +353,34 @@ const Statistics = ({ onBack, onStartQuizSetWorstProblems, onOpenQuizSetStats: _
   const [categoryStats, setCategoryStats] = useState<CategoryStats[]>([]);
   const [worstProblems, setWorstProblems] = useState<WorstProblem[]>([]);
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
-  const [badges, setBadges] = useState<Badge[]>([]);
+  // badges state removed - now using gamification service
   const [showCopyOptions, setShowCopyOptions] = useState(false);
   const [selectedQuizSetForCopy, setSelectedQuizSetForCopy] = useState<number | null>(null);
   const [selectedCategoryForCopy, setSelectedCategoryForCopy] = useState<string | null>(null);
   const [selectedProblemCounts, setSelectedProblemCounts] = useState<Record<number, number | 'all'>>({});
+  const [showComparisonModal, setShowComparisonModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+
+  // 新しい統計データの状態管理
+  const [activeTab, setActiveTab] = useState<'overview' | 'weekly' | 'monthly' | 'trends' | 'prediction'>('overview');
+  const [statisticsSummary, setStatisticsSummary] = useState<StatisticsSummary | null>(null);
+  const [tagStats, setTagStats] = useState<TagStatistics[]>([]);
+  const [expandedTags, setExpandedTags] = useState<Set<string>>(new Set());
 
   const formatAccuracy = (accuracy: number): string => {
     return `${accuracy.toFixed(1)}%`;
+  };
+
+  const toggleTagExpansion = (tag: string) => {
+    setExpandedTags(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(tag)) {
+        newSet.delete(tag);
+      } else {
+        newSet.add(tag);
+      }
+      return newSet;
+    });
   };
 
   // 推定時間を計算する関数（useCallbackで最適化）
@@ -480,12 +586,14 @@ const Statistics = ({ onBack, onStartQuizSetWorstProblems, onOpenQuizSetStats: _
     useEffect(() => {
   const loadStatistics = async () => {
     try {
-      const [overall, categories, worst, recent] = await Promise.all([
-        statisticsService.getOverallStats(),
-        statisticsService.getCategoryStats(),
-        statisticsService.getWorstProblems(),
-        statisticsService.getRecentActivity()
-      ]);
+      const [overall, categories, worst, recent] = await performanceMonitor.measure('Statistics: Load Core Stats', () =>
+        Promise.all([
+          statisticsService.getOverallStats(),
+          statisticsService.getCategoryStats(),
+          statisticsService.getWorstProblems(),
+          statisticsService.getRecentActivity()
+        ])
+      );
 
       setOverallStats(overall);
       setCategoryStats(categories);
@@ -500,86 +608,45 @@ const Statistics = ({ onBack, onStartQuizSetWorstProblems, onOpenQuizSetStats: _
         recentActivityLength: recent.length
       });
 
-      // Badge translations
-      const badgeTranslations = {
-        ja: {
-          first_step: { name: '最初の一歩', description: '最初の問題に回答しました' },
-          quiz_master: { name: 'クイズマスター', description: '100問に回答しました' },
-          accuracy_expert: { name: '正確性の達人', description: '総合正答率80%を達成しました' },
-          consistent_learner: { name: '継続学習者', description: '3日連続でプレイしました' }
-        },
-        en: {
-          first_step: { name: 'First Step', description: 'Answered your first question' },
-          quiz_master: { name: 'Quiz Master', description: 'Answered 100 questions' },
-          accuracy_expert: { name: 'Accuracy Expert', description: 'Achieved 80% overall accuracy' },
-          consistent_learner: { name: 'Consistent Learner', description: 'Played for 3 consecutive days' }
-        }
-      };
+      await performanceMonitor.measure('Statistics: Load Quiz Set Worst Problems', () => loadQuizSetWorstProblems());
+      await performanceMonitor.measure('Statistics: Load Category Worst Problems', () => loadCategoryWorstProblems());
 
-      const currentLang = language || 'ja';
+      // タグ別統計の読み込み
+      const tagStatistics = await performanceMonitor.measure('Statistics: Load Tag Stats', () => tagsService.getTagStatistics());
+      setTagStats(tagStatistics);
+      debugLog('🏷️ Tag statistics loaded:', tagStatistics);
 
-      // Generate badges based on stats
-      const earnedBadges: Badge[] = [
-        {
-          id: 'first_step',
-          name: badgeTranslations[currentLang].first_step.name,
-          description: badgeTranslations[currentLang].first_step.description,
-          icon: 'star',
-          color: 'bronze',
-          isUnlocked: overall.totalAnswered > 0,
-          progress: Math.min(100, (overall.totalAnswered / 1) * 100)
-        },
-        {
-          id: 'quiz_master',
-          name: badgeTranslations[currentLang].quiz_master.name,
-          description: badgeTranslations[currentLang].quiz_master.description,
-          icon: 'trophy',
-          color: 'gold',
-          isUnlocked: overall.totalAnswered >= 100,
-          progress: Math.min(100, (overall.totalAnswered / 100) * 100)
-        },
-        {
-          id: 'accuracy_expert',
-          name: badgeTranslations[currentLang].accuracy_expert.name,
-          description: badgeTranslations[currentLang].accuracy_expert.description,
-          icon: 'target',
-          color: 'blue',
-          isUnlocked: overall.overallAccuracy >= 80 && overall.totalAnswered > 10,
-          progress: Math.min(100, (overall.overallAccuracy / 80) * 100)
-        },
-        {
-          id: 'consistent_learner',
-          name: badgeTranslations[currentLang].consistent_learner.name,
-          description: badgeTranslations[currentLang].consistent_learner.description,
-          icon: 'zap',
-          color: 'purple',
-          isUnlocked: false, // Placeholder logic
-          progress: 30
-        }
-      ];
+      // 統計サマリーの読み込み
+      loadAdvancedStatistics();
 
-      // Debug: Log badge calculations with details
-      debugLog('🏅 Badges calculated:');
-      earnedBadges.forEach(b => {
-        debugLog(`  - ${b.name}:`, {
-          isUnlocked: b.isUnlocked,
-          progress: `${b.progress}%`,
-          condition: b.id === 'first_step' ? `totalAnswered > 0 (${overall.totalAnswered} > 0)` :
-                     b.id === 'quiz_master' ? `totalAnswered >= 100 (${overall.totalAnswered} >= 100)` :
-                     b.id === 'accuracy_expert' ? `accuracy >= 80 && totalAnswered > 10 (${overall.overallAccuracy.toFixed(2)} >= 80 && ${overall.totalAnswered} > 10)` :
-                     'placeholder logic'
-        });
-      });
-
-      setBadges(earnedBadges);
-
-      await loadQuizSetWorstProblems();
-      await loadCategoryWorstProblems();
+      // Log performance summary
+      const summaryStats = performanceMonitor.getAllStats();
+      debugLog('📊 Statistics Performance Summary:', summaryStats);
 
     } catch (error) {
       debugLog('統計データの読み込みエラー:', error);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // 統計サマリーの読み込み（週次・月次・トレンド・予測）
+  const loadAdvancedStatistics = async () => {
+    try {
+      debugLog('📊 統計サマリーを読み込み中...');
+
+      const summary = await performanceMonitor.measure('Statistics: Generate Summary', () =>
+        generateStatisticsSummary()
+      );
+      setStatisticsSummary(summary);
+
+      debugLog('✅ 統計サマリー読み込み完了:', {
+        allTime: summary.allTime,
+        thisWeek: summary.thisWeek,
+        thisMonth: summary.thisMonth,
+      });
+    } catch (error) {
+      debugLog('❌ 統計サマリーの読み込みエラー:', error);
     }
   };
 
@@ -612,7 +679,7 @@ if (isLoading) {
 
 return (
   <div className="min-h-screen p-4 md:p-8 pb-24">
-    <div className="max-w-7xl mx-auto">
+    <div id="statistics-container" className="max-w-7xl mx-auto">
       <header className="mb-8">
         <div className="flex justify-between items-center mb-6">
           <NeumorphicButton
@@ -625,18 +692,110 @@ return (
               {t[currentLang].backButton}
             </div>
           </NeumorphicButton>
-          <NeumorphicButton
-            onClick={() => setShowCopyOptions(!showCopyOptions)}
-            variant="primary"
-            className="px-4 py-2"
-          >
-            <div className="flex items-center gap-2">
-              <Copy className="w-4 h-4" />
-              {t[currentLang].copyButton}
-            </div>
-          </NeumorphicButton>
+          <div className="flex items-center gap-3">
+            {/* レポート生成ボタン */}
+            <NeumorphicButton
+              onClick={() => setShowReportModal(true)}
+              variant="success"
+              className="px-4 py-2"
+            >
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4" />
+                {currentLang === 'ja' ? 'レポート生成' : 'Generate Report'}
+              </div>
+            </NeumorphicButton>
+            <NeumorphicButton
+              onClick={() => setShowComparisonModal(true)}
+              variant="primary"
+              className="px-4 py-2"
+            >
+              <div className="flex items-center gap-2">
+                <BarChart3 className="w-4 h-4" />
+                {currentLang === 'ja' ? '比較' : 'Compare'}
+              </div>
+            </NeumorphicButton>
+            <NeumorphicButton
+              onClick={() => setShowCopyOptions(!showCopyOptions)}
+              variant="primary"
+              className="px-4 py-2"
+            >
+              <div className="flex items-center gap-2">
+                <Copy className="w-4 h-4" />
+                {t[currentLang].copyButton}
+              </div>
+            </NeumorphicButton>
+          </div>
         </div>
         <h1 className="text-3xl font-bold text-white">{t[currentLang].title}</h1>
+
+        {/* タブナビゲーション */}
+        <div className="mt-6 flex flex-wrap gap-2">
+          <button
+            onClick={() => setActiveTab('overview')}
+            className={`px-4 py-2 rounded-lg font-medium transition-all ${
+              activeTab === 'overview'
+                ? 'bg-blue-600 text-white shadow-lg'
+                : 'bg-gray-700/50 text-gray-300 hover:bg-gray-600/50'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <PieChart className="w-4 h-4" />
+              {currentLang === 'ja' ? '概要' : 'Overview'}
+            </div>
+          </button>
+          <button
+            onClick={() => setActiveTab('weekly')}
+            className={`px-4 py-2 rounded-lg font-medium transition-all ${
+              activeTab === 'weekly'
+                ? 'bg-blue-600 text-white shadow-lg'
+                : 'bg-gray-700/50 text-gray-300 hover:bg-gray-600/50'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4" />
+              {t[currentLang].weeklyTab}
+            </div>
+          </button>
+          <button
+            onClick={() => setActiveTab('monthly')}
+            className={`px-4 py-2 rounded-lg font-medium transition-all ${
+              activeTab === 'monthly'
+                ? 'bg-blue-600 text-white shadow-lg'
+                : 'bg-gray-700/50 text-gray-300 hover:bg-gray-600/50'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <BarChart2 className="w-4 h-4" />
+              {t[currentLang].monthlyTab}
+            </div>
+          </button>
+          <button
+            onClick={() => setActiveTab('trends')}
+            className={`px-4 py-2 rounded-lg font-medium transition-all ${
+              activeTab === 'trends'
+                ? 'bg-blue-600 text-white shadow-lg'
+                : 'bg-gray-700/50 text-gray-300 hover:bg-gray-600/50'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <LineChart className="w-4 h-4" />
+              {t[currentLang].trendsTab}
+            </div>
+          </button>
+          <button
+            onClick={() => setActiveTab('prediction')}
+            className={`px-4 py-2 rounded-lg font-medium transition-all ${
+              activeTab === 'prediction'
+                ? 'bg-blue-600 text-white shadow-lg'
+                : 'bg-gray-700/50 text-gray-300 hover:bg-gray-600/50'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-4 h-4" />
+              {t[currentLang].predictionTab}
+            </div>
+          </button>
+        </div>
 
         {/* コピーオプション */}
         {showCopyOptions && (
@@ -734,13 +893,18 @@ return (
         )}
       </header>
 
-      {/* バッジシステム */}
+      {/* 概要タブのコンテンツ */}
+      {activeTab === 'overview' && (
+        <>
+      {/* ゲーミフィケーション: XP/レベル/ストリーク */}
       <section className="mb-12">
         <h2 className="text-xl font-semibold text-white mb-6 flex items-center gap-2">
           <Trophy className="w-6 h-6 text-yellow-500" />
           {t[currentLang].badges}
         </h2>
-        <BadgeSystem badges={badges} language={currentLang} />
+        <XPProgressWidget
+          language={currentLang}
+        />
       </section>
 
       {/* 全体統計 */}
@@ -962,6 +1126,510 @@ return (
             ))}
           </div>
         </section>
+      )}
+
+      {/* タグ別統計 */}
+      {tagStats.length > 0 && (
+        <section className="mb-12">
+          <h2 className="text-xl font-semibold text-white mb-6 flex items-center gap-2">
+            <span className="text-2xl">🏷️</span> {currentLang === 'ja' ? 'タグ別統計' : 'Statistics by Tag'}
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {tagStats.map((tagStat, index) => {
+              const isExpanded = expandedTags.has(tagStat.tag);
+              return (
+                <motion.div
+                  key={tagStat.tag}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                >
+                  <GlassCard className={`p-4 border-l-4 ${
+                    tagStat.accuracy >= 80
+                      ? 'border-l-green-500'
+                      : tagStat.accuracy >= 60
+                      ? 'border-l-yellow-500'
+                      : 'border-l-red-500'
+                  }`}>
+                    {/* ヘッダー部分 */}
+                    <div
+                      className="cursor-pointer"
+                      onClick={() => toggleTagExpansion(tagStat.tag)}
+                    >
+                      <div className="flex justify-between items-start mb-3">
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-bold text-lg text-white">{tagStat.tag}</h3>
+                          {isExpanded ? (
+                            <ChevronUp className="w-4 h-4 text-white/60" />
+                          ) : (
+                            <ChevronDown className="w-4 h-4 text-white/60" />
+                          )}
+                        </div>
+                        <span className={`text-xl font-bold ${
+                          tagStat.accuracy >= 80
+                            ? 'text-green-400'
+                            : tagStat.accuracy >= 60
+                            ? 'text-yellow-400'
+                            : 'text-red-400'
+                        }`}>
+                          {tagStat.accuracy}%
+                        </span>
+                      </div>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between text-white/80">
+                          <span>{currentLang === 'ja' ? '問題数' : 'Problems'}:</span>
+                          <span className="font-medium">{tagStat.problemCount}</span>
+                        </div>
+                        <div className="flex justify-between text-white/80">
+                          <span>{currentLang === 'ja' ? '解答数' : 'Attempts'}:</span>
+                          <span className="font-medium">{tagStat.totalAttempts}</span>
+                        </div>
+                        <div className="flex justify-between text-white/80">
+                          <span>{currentLang === 'ja' ? '正解数' : 'Correct'}:</span>
+                          <span className="font-medium text-green-400">{tagStat.correctAttempts}</span>
+                        </div>
+                      </div>
+                      {/* Progress bar */}
+                      <div className="mt-3">
+                        <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-500 ${
+                              tagStat.accuracy >= 80
+                                ? 'bg-green-500'
+                                : tagStat.accuracy >= 60
+                                ? 'bg-yellow-500'
+                                : 'bg-red-500'
+                            }`}
+                            style={{ width: `${tagStat.accuracy}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 問題リスト（展開時） */}
+                    {isExpanded && tagStat.problems.length > 0 && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.3 }}
+                        className="mt-4 pt-4 border-t border-white/20"
+                      >
+                        <h4 className="text-sm font-semibold text-white/90 mb-3">
+                          {currentLang === 'ja' ? '問題別統計' : 'Problem Statistics'}
+                        </h4>
+                        <div className="space-y-2 max-h-64 overflow-y-auto">
+                          {tagStat.problems.map((problemStat, pIndex) => (
+                            <div
+                              key={problemStat.problem.id || pIndex}
+                              className="bg-white/5 rounded-lg p-3 text-sm"
+                            >
+                              <div className="flex justify-between items-start mb-2">
+                                <p className="text-white/90 font-medium line-clamp-2 flex-1">
+                                  {problemStat.problem.question}
+                                </p>
+                                <span className={`ml-2 text-xs font-bold px-2 py-0.5 rounded ${
+                                  problemStat.accuracy >= 80
+                                    ? 'bg-green-500/20 text-green-400'
+                                    : problemStat.accuracy >= 60
+                                    ? 'bg-yellow-500/20 text-yellow-400'
+                                    : 'bg-red-500/20 text-red-400'
+                                }`}>
+                                  {problemStat.accuracy}%
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-3 text-xs text-white/70">
+                                <span>{currentLang === 'ja' ? 'カテゴリー' : 'Category'}: {problemStat.problem.category}</span>
+                                <span>•</span>
+                                <span>
+                                  {currentLang === 'ja' ? '試行' : 'Attempts'}: {problemStat.attempts}
+                                </span>
+                                <span>•</span>
+                                <span className="text-green-400">
+                                  {currentLang === 'ja' ? '正解' : 'Correct'}: {problemStat.correct}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {/* 問題がない場合のメッセージ */}
+                    {isExpanded && tagStat.problems.length === 0 && (
+                      <div className="mt-4 pt-4 border-t border-white/20 text-sm text-white/60 text-center">
+                        {currentLang === 'ja' ? 'このタグの問題はまだ解答されていません' : 'No problems answered for this tag yet'}
+                      </div>
+                    )}
+                  </GlassCard>
+                </motion.div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+        </>
+      )}
+
+      {/* 週次タブのコンテンツ */}
+      {activeTab === 'weekly' && statisticsSummary?.thisWeek && (
+        <div className="space-y-6">
+          <GlassCard className="p-6">
+            <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+              <Calendar className="w-6 h-6 text-blue-500" />
+              {t[currentLang].thisWeek}
+            </h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              <div className="bg-white/5 rounded-lg p-4">
+                <div className="text-sm text-white/70 mb-1">{t[currentLang].totalProblems}</div>
+                <div className="text-2xl font-bold text-blue-400">{statisticsSummary.thisWeek.totalProblems}</div>
+              </div>
+              <div className="bg-white/5 rounded-lg p-4">
+                <div className="text-sm text-white/70 mb-1">{t[currentLang].overallAccuracy}</div>
+                <div className="text-2xl font-bold text-green-400">
+                  {(statisticsSummary.thisWeek.averageAccuracy * 100).toFixed(1)}%
+                </div>
+              </div>
+              <div className="bg-white/5 rounded-lg p-4">
+                <div className="text-sm text-white/70 mb-1">{t[currentLang].studyDays}</div>
+                <div className="text-2xl font-bold text-purple-400">{statisticsSummary.thisWeek.studyDays}</div>
+              </div>
+              <div className="bg-white/5 rounded-lg p-4">
+                <div className="text-sm text-white/70 mb-1">{t[currentLang].totalStudyTime}</div>
+                <div className="text-2xl font-bold text-orange-400">
+                  {Math.round(statisticsSummary.thisWeek.totalStudyTime / 60)} {t[currentLang].minutes}
+                </div>
+              </div>
+            </div>
+
+            {/* 日別統計 */}
+            <div className="mt-6">
+              <h3 className="text-lg font-semibold text-white mb-4">{t[currentLang].dailyBreakdown}</h3>
+              <div className="space-y-2">
+                {statisticsSummary.thisWeek.dailyStats.map((day, index) => (
+                  <div key={index} className="bg-white/5 rounded-lg p-3 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="text-white/70 text-sm font-medium">
+                        {new Date(day.date).toLocaleDateString(currentLang === 'ja' ? 'ja-JP' : 'en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          weekday: 'short'
+                        })}
+                      </div>
+                      <div className="text-white text-sm">
+                        {day.problemsSolved} {currentLang === 'ja' ? '問' : 'problems'}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="text-sm">
+                        <span className="text-green-400 font-medium">{(day.accuracy * 100).toFixed(1)}%</span>
+                      </div>
+                      <div className="text-sm text-white/70">
+                        {Math.round(day.studyTime / 60)} {currentLang === 'ja' ? '分' : 'min'}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* よく学習したカテゴリー */}
+            {statisticsSummary.thisWeek.topCategories.length > 0 && (
+              <div className="mt-6">
+                <h3 className="text-lg font-semibold text-white mb-4">{t[currentLang].topCategories}</h3>
+                <div className="space-y-2">
+                  {statisticsSummary.thisWeek.topCategories.map((cat, index) => (
+                    <div key={index} className="bg-white/5 rounded-lg p-3 flex items-center justify-between">
+                      <div className="text-white font-medium">{cat.category}</div>
+                      <div className="text-blue-400 font-bold">{cat.count} {currentLang === 'ja' ? '問' : 'problems'}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </GlassCard>
+        </div>
+      )}
+
+      {/* 月次タブのコンテンツ */}
+      {activeTab === 'monthly' && statisticsSummary?.thisMonth && (
+        <div className="space-y-6">
+          <GlassCard className="p-6">
+            <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+              <Calendar className="w-6 h-6 text-purple-500" />
+              {t[currentLang].thisMonth}
+            </h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              <div className="bg-white/5 rounded-lg p-4">
+                <div className="text-sm text-white/70 mb-1">{t[currentLang].totalProblems}</div>
+                <div className="text-2xl font-bold text-blue-400">{statisticsSummary.thisMonth.totalProblems}</div>
+              </div>
+              <div className="bg-white/5 rounded-lg p-4">
+                <div className="text-sm text-white/70 mb-1">{t[currentLang].overallAccuracy}</div>
+                <div className="text-2xl font-bold text-green-400">
+                  {(statisticsSummary.thisMonth.averageAccuracy * 100).toFixed(1)}%
+                </div>
+              </div>
+              <div className="bg-white/5 rounded-lg p-4">
+                <div className="text-sm text-white/70 mb-1">{t[currentLang].studyDays}</div>
+                <div className="text-2xl font-bold text-purple-400">{statisticsSummary.thisMonth.studyDays}</div>
+              </div>
+              <div className="bg-white/5 rounded-lg p-4">
+                <div className="text-sm text-white/70 mb-1">{t[currentLang].totalStudyTime}</div>
+                <div className="text-2xl font-bold text-orange-400">
+                  {Math.round(statisticsSummary.thisMonth.totalStudyTime / 60)} {t[currentLang].minutes}
+                </div>
+              </div>
+            </div>
+
+            {/* 週別統計 */}
+            <div className="mt-6">
+              <h3 className="text-lg font-semibold text-white mb-4">{t[currentLang].weeklyBreakdown}</h3>
+              <div className="space-y-2">
+                {statisticsSummary.thisMonth.weeklyStats.map((week, index) => (
+                  <div key={index} className="bg-white/5 rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-white/70 text-sm font-medium">
+                        {t[currentLang].weekOf} {new Date(week.weekStart).toLocaleDateString(currentLang === 'ja' ? 'ja-JP' : 'en-US', {
+                          month: 'short',
+                          day: 'numeric'
+                        })}
+                      </div>
+                      <div className="text-white text-sm font-bold">
+                        {week.totalProblems} {currentLang === 'ja' ? '問' : 'problems'}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4 text-sm">
+                      <span className="text-green-400">{(week.averageAccuracy * 100).toFixed(1)}%</span>
+                      <span className="text-white/70">
+                        {week.studyDays} {currentLang === 'ja' ? '日学習' : 'study days'}
+                      </span>
+                      <span className="text-white/70">
+                        {Math.round(week.totalStudyTime / 60)} {currentLang === 'ja' ? '分' : 'min'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 最高の週 */}
+            {statisticsSummary.thisMonth.bestWeek && (
+              <div className="mt-6">
+                <h3 className="text-lg font-semibold text-white mb-4">{t[currentLang].bestWeek}</h3>
+                <GlassCard className="p-4 bg-gradient-to-br from-yellow-500/20 to-orange-500/20 border-yellow-500/30">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-white font-medium">
+                      {new Date(statisticsSummary.thisMonth.bestWeek.weekStart).toLocaleDateString(currentLang === 'ja' ? 'ja-JP' : 'en-US', {
+                        month: 'short',
+                        day: 'numeric'
+                      })} - {new Date(statisticsSummary.thisMonth.bestWeek.weekEnd).toLocaleDateString(currentLang === 'ja' ? 'ja-JP' : 'en-US', {
+                        month: 'short',
+                        day: 'numeric'
+                      })}
+                    </div>
+                    <div className="text-yellow-400 text-xl font-bold">
+                      {statisticsSummary.thisMonth.bestWeek.totalProblems} {currentLang === 'ja' ? '問' : 'problems'}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 text-sm">
+                    <span className="text-green-400 font-medium">
+                      {(statisticsSummary.thisMonth.bestWeek.averageAccuracy * 100).toFixed(1)}%
+                    </span>
+                    <span className="text-white/70">
+                      {statisticsSummary.thisMonth.bestWeek.studyDays} {currentLang === 'ja' ? '日学習' : 'study days'}
+                    </span>
+                  </div>
+                </GlassCard>
+              </div>
+            )}
+
+            {/* カテゴリー別内訳 */}
+            {statisticsSummary.thisMonth.categoryBreakdown.length > 0 && (
+              <div className="mt-6">
+                <h3 className="text-lg font-semibold text-white mb-4">{t[currentLang].categoryBreakdown}</h3>
+                <div className="space-y-2">
+                  {statisticsSummary.thisMonth.categoryBreakdown.map((cat, index) => (
+                    <div key={index} className="bg-white/5 rounded-lg p-3 flex items-center justify-between">
+                      <div className="text-white font-medium">{cat.category}</div>
+                      <div className="flex items-center gap-4">
+                        <span className="text-blue-400 font-bold">{cat.count} {currentLang === 'ja' ? '問' : 'problems'}</span>
+                        <span className="text-green-400 font-medium">{(cat.accuracy * 100).toFixed(1)}%</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </GlassCard>
+        </div>
+      )}
+
+      {/* トレンドタブのコンテンツ */}
+      {activeTab === 'trends' && statisticsSummary?.trends && (
+        <div className="space-y-6">
+          {/* 正解率のトレンド */}
+          <GlassCard className="p-6">
+            <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+              <LineChart className="w-6 h-6 text-green-500" />
+              {t[currentLang].accuracyTrend}
+            </h2>
+            <div className="mb-4 flex items-center gap-4">
+              <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                statisticsSummary.trends.accuracy.trend === 'improving'
+                  ? 'bg-green-500/20 text-green-400'
+                  : statisticsSummary.trends.accuracy.trend === 'declining'
+                  ? 'bg-red-500/20 text-red-400'
+                  : 'bg-gray-500/20 text-gray-400'
+              }`}>
+                {statisticsSummary.trends.accuracy.trend === 'improving'
+                  ? `📈 ${t[currentLang].improving}`
+                  : statisticsSummary.trends.accuracy.trend === 'declining'
+                  ? `📉 ${t[currentLang].declining}`
+                  : `➡️ ${t[currentLang].stable}`
+                }
+              </div>
+              <div className="text-white/70 text-sm">
+                {t[currentLang].changeRate}: <span className={`font-bold ${
+                  statisticsSummary.trends.accuracy.changeRate > 0 ? 'text-green-400' : 'text-red-400'
+                }`}>
+                  {statisticsSummary.trends.accuracy.changeRate > 0 ? '+' : ''}
+                  {statisticsSummary.trends.accuracy.changeRate.toFixed(1)}%
+                </span>
+              </div>
+            </div>
+            <div className="h-64">
+              <GlowingLineChart
+                data={statisticsSummary.trends.accuracy.dataPoints.map(dp => dp.value * 100)}
+                labels={statisticsSummary.trends.accuracy.dataPoints.map(dp =>
+                  new Date(dp.date).toLocaleDateString(currentLang === 'ja' ? 'ja-JP' : 'en-US', {
+                    month: 'short',
+                    day: 'numeric'
+                  })
+                )}
+                height={200}
+                color="#10b981"
+              />
+            </div>
+          </GlassCard>
+
+          {/* 学習量のトレンド */}
+          <GlassCard className="p-6">
+            <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+              <LineChart className="w-6 h-6 text-blue-500" />
+              {t[currentLang].activityTrend}
+            </h2>
+            <div className="mb-4 flex items-center gap-4">
+              <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                statisticsSummary.trends.activity.trend === 'improving'
+                  ? 'bg-green-500/20 text-green-400'
+                  : statisticsSummary.trends.activity.trend === 'declining'
+                  ? 'bg-red-500/20 text-red-400'
+                  : 'bg-gray-500/20 text-gray-400'
+              }`}>
+                {statisticsSummary.trends.activity.trend === 'improving'
+                  ? `📈 ${t[currentLang].improving}`
+                  : statisticsSummary.trends.activity.trend === 'declining'
+                  ? `📉 ${t[currentLang].declining}`
+                  : `➡️ ${t[currentLang].stable}`
+                }
+              </div>
+              <div className="text-white/70 text-sm">
+                {t[currentLang].changeRate}: <span className={`font-bold ${
+                  statisticsSummary.trends.activity.changeRate > 0 ? 'text-green-400' : 'text-red-400'
+                }`}>
+                  {statisticsSummary.trends.activity.changeRate > 0 ? '+' : ''}
+                  {statisticsSummary.trends.activity.changeRate.toFixed(1)}%
+                </span>
+              </div>
+            </div>
+            <div className="h-64">
+              <GlowingLineChart
+                data={statisticsSummary.trends.activity.dataPoints.map(dp => dp.value)}
+                labels={statisticsSummary.trends.activity.dataPoints.map(dp =>
+                  new Date(dp.date).toLocaleDateString(currentLang === 'ja' ? 'ja-JP' : 'en-US', {
+                    month: 'short',
+                    day: 'numeric'
+                  })
+                )}
+                height={200}
+                color="#3b82f6"
+              />
+            </div>
+          </GlassCard>
+        </div>
+      )}
+
+      {/* 予測タブのコンテンツ */}
+      {activeTab === 'prediction' && statisticsSummary?.prediction && (
+        <div className="space-y-6">
+          <GlassCard className="p-6">
+            <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+              <TrendingUp className="w-6 h-6 text-purple-500" />
+              {t[currentLang].performancePrediction}
+            </h2>
+
+            <div className="mb-6 p-4 bg-gradient-to-br from-purple-500/20 to-blue-500/20 rounded-lg border border-purple-500/30">
+              <div className="text-white/70 text-sm mb-2">
+                {new Date(statisticsSummary.prediction.targetDate).toLocaleDateString(currentLang === 'ja' ? 'ja-JP' : 'en-US', {
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                })} ({currentLang === 'ja' ? '7日後' : '7 days ahead'})
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="text-sm text-white/70 mb-1">{t[currentLang].predictedAccuracy}</div>
+                  <div className="text-3xl font-bold text-green-400">
+                    {(statisticsSummary.prediction.predictedAccuracy * 100).toFixed(1)}%
+                  </div>
+                </div>
+                <div>
+                  <div className="text-sm text-white/70 mb-1">{t[currentLang].predictedActivity}</div>
+                  <div className="text-3xl font-bold text-blue-400">
+                    {statisticsSummary.prediction.predictedProblemsPerDay.toFixed(1)} {t[currentLang].problemsPerDay}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-white/70 text-sm">{t[currentLang].confidence}</span>
+                <span className="text-white font-bold">
+                  {(statisticsSummary.prediction.confidence * 100).toFixed(0)}%
+                </span>
+              </div>
+              <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-purple-500 to-blue-500 transition-all duration-500"
+                  style={{ width: `${statisticsSummary.prediction.confidence * 100}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="p-4 bg-blue-500/10 rounded-lg border border-blue-500/30">
+              <div className="text-sm font-medium text-blue-400 mb-2">{t[currentLang].recommendation}</div>
+              <div className="text-white">{statisticsSummary.prediction.recommendation}</div>
+            </div>
+          </GlassCard>
+        </div>
+      )}
+
+      {/* 統計比較モーダル */}
+      {showComparisonModal && (
+        <StatsComparisonModal
+          onClose={() => setShowComparisonModal(false)}
+          categories={categoryStats.map(c => c.category)}
+        />
+      )}
+
+      {/* レポート生成モーダル */}
+      {showReportModal && (
+        <ReportGeneratorModal
+          onClose={() => setShowReportModal(false)}
+          language={currentLang}
+        />
       )}
     </div>
   </div>

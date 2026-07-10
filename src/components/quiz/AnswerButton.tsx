@@ -13,6 +13,8 @@ interface AnswerButtonProps {
     showResult?: boolean;
     children?: ReactNode;
     className?: string;
+    isStrikedThrough?: boolean;
+    onStrikethrough?: () => void;
 }
 
 export function AnswerButton({
@@ -26,7 +28,28 @@ export function AnswerButton({
     showResult = false,
     children,
     className = '',
+    isStrikedThrough = false,
+    onStrikethrough,
 }: AnswerButtonProps) {
+    // Haptic feedback for mobile devices
+    const triggerHaptic = () => {
+        if ('vibrate' in navigator) {
+            navigator.vibrate(10);
+        }
+    };
+
+    const handleClick = () => {
+        triggerHaptic();
+        onClick();
+    };
+
+    // Handle right-click for strikethrough (only when not showing results)
+    const handleContextMenu = (e: React.MouseEvent) => {
+        if (!showResult && onStrikethrough) {
+            e.preventDefault(); // Prevent default context menu
+            onStrikethrough();
+        }
+    };
     // Determine the visual state
     let buttonVariant: 'primary' | 'secondary' | 'success' | 'error' = variant;
 
@@ -75,14 +98,16 @@ export function AnswerButton({
             whileTap="tap"
             animate={animateState}
             className="w-full"
+            onContextMenu={handleContextMenu}
+            title={!showResult && onStrikethrough ? "右クリックで斜線 / Right-click to strikethrough" : undefined}
         >
             <NeumorphicButton
                 variant={buttonVariant}
-                onClick={onClick}
+                onClick={handleClick}
                 disabled={disabled}
                 fullWidth
                 className={`justify-start text-left p-4 h-auto min-h-[60px] transition-all duration-300 ${showResult && !isCorrect && !isSelected ? 'opacity-50 grayscale' : ''
-                    } ${className}`}
+                    } ${isStrikedThrough ? 'opacity-60' : ''} ${className}`}
             >
                 {children ? (
                     children
@@ -99,7 +124,7 @@ export function AnswerButton({
                             </span>
                         )}
                         <span className={`text-base font-medium break-words w-full leading-snug ${buttonVariant === 'secondary' ? 'text-text-primary' : 'text-white'
-                            }`}>
+                            } ${isStrikedThrough ? 'line-through decoration-2 decoration-red-500 dark:decoration-red-400' : ''}`}>
                             {label}
                         </span>
 

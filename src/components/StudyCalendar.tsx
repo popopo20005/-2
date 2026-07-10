@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { historyService, spacedRepetitionService, problemService } from '../lib/database';
 import type { SpacedRepetitionCard } from '../types';
-import { GlassCard } from './ui/GlassCard';
 import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface StudyCalendarProps {
@@ -23,7 +22,6 @@ export function StudyCalendar({ language = 'ja', className = '' }: StudyCalendar
   const [calendarData, setCalendarData] = useState<DayData[]>([]);
   const [hoveredDay, setHoveredDay] = useState<DayData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isDarkMode, setIsDarkMode] = useState(document.documentElement.classList.contains('dark'));
 
   const translations = {
     ja: {
@@ -65,20 +63,6 @@ export function StudyCalendar({ language = 'ja', className = '' }: StudyCalendar
   useEffect(() => {
     loadCalendarData();
   }, [currentMonth]);
-
-  useEffect(() => {
-    // ダークモード変更を監視
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains('dark'));
-    });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class'],
-    });
-
-    return () => observer.disconnect();
-  }, []);
 
   const loadCalendarData = async () => {
     try {
@@ -230,42 +214,42 @@ export function StudyCalendar({ language = 'ja', className = '' }: StudyCalendar
 
   const stats = calculateStats();
 
-  const getBackgroundColor = (studyTime: number, reviewCount: number, isDark: boolean) => {
+  const getBackgroundColor = (studyTime: number, reviewCount: number) => {
     // 復習予定のみ（学習なし）
     if (studyTime === 0 && reviewCount > 0) {
-      if (reviewCount < 5) return isDark ? '#1e3a8a' : '#dbeafe';
-      if (reviewCount < 10) return isDark ? '#1e40af' : '#93c5fd';
-      if (reviewCount < 20) return isDark ? '#2563eb' : '#60a5fa';
-      return isDark ? '#3b82f6' : '#3b82f6';
+      if (reviewCount < 5) return 'rgba(99,102,241,0.2)';
+      if (reviewCount < 10) return 'rgba(99,102,241,0.4)';
+      if (reviewCount < 20) return 'rgba(99,102,241,0.6)';
+      return 'rgba(99,102,241,0.8)';
     }
 
     // 学習済みのみ（復習予定なし）
     if (studyTime > 0 && reviewCount === 0) {
-      if (studyTime < 5) return isDark ? '#14532d' : '#dcfce7';
-      if (studyTime < 15) return isDark ? '#15803d' : '#86efac';
-      if (studyTime < 30) return isDark ? '#16a34a' : '#22c55e';
-      return isDark ? '#22c55e' : '#15803d';
+      if (studyTime < 5) return 'rgba(16,185,129,0.2)';
+      if (studyTime < 15) return 'rgba(16,185,129,0.4)';
+      if (studyTime < 30) return 'rgba(16,185,129,0.6)';
+      return 'rgba(16,185,129,0.8)';
     }
 
     // 両方（学習済み＋復習予定）- グラデーション（緑→青）
     if (studyTime > 0 && reviewCount > 0) {
-      return isDark ? '#166534' : '#6ee7b7'; // 緑青のミックス
+      return 'rgba(16,185,129,0.5)';
     }
 
     // データなし
-    return isDark ? '#1f2937' : '#ffffff';
+    return 'transparent';
   };
 
-  const getBorderColor = (studyTime: number, reviewCount: number, isDark: boolean) => {
-    if (studyTime === 0 && reviewCount === 0) return isDark ? '#4b5563' : '#d1d5db';
+  const getBorderColor = (studyTime: number, reviewCount: number) => {
+    if (studyTime === 0 && reviewCount === 0) return 'rgba(255,255,255,0.06)';
 
     // 復習予定がある場合は青系
     if (reviewCount > 0) {
-      return isDark ? '#60a5fa' : '#3b82f6';
+      return 'rgba(99,102,241,0.5)';
     }
 
     // 学習済みのみは緑系
-    return isDark ? '#4ade80' : '#22c55e';
+    return 'rgba(16,185,129,0.5)';
   };
 
   const previousMonth = () => {
@@ -310,30 +294,36 @@ export function StudyCalendar({ language = 'ja', className = '' }: StudyCalendar
 
   if (loading) {
     return (
-      <GlassCard className={className}>
+      <div
+        className={`rounded-2xl p-5 ${className}`}
+        style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}
+      >
         <div className="flex items-center gap-3 mb-4">
-          <Calendar className="size-6 text-purple-500" />
+          <Calendar className="size-6 text-[#818CF8]" />
           <div>
-            <h3 className="text-lg font-bold text-gray-900 dark:text-white">{t.title}</h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400">{t.subtitle}</p>
+            <h3 className="text-lg font-bold text-[#F8FAFC]">{t.title}</h3>
+            <p className="text-sm text-[#94A3B8]">{t.subtitle}</p>
           </div>
         </div>
         <div className="h-40 flex items-center justify-center">
-          <div className="animate-pulse text-gray-400">Loading...</div>
+          <div className="animate-pulse text-[#64748B]">Loading...</div>
         </div>
-      </GlassCard>
+      </div>
     );
   }
 
   return (
-    <GlassCard className={className}>
+    <div
+      className={`rounded-2xl p-5 ${className}`}
+      style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}
+    >
       {/* ヘッダー */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <Calendar className="size-6 text-purple-500" />
+          <Calendar className="size-6 text-[#818CF8]" />
           <div>
-            <h3 className="text-lg font-bold text-gray-900 dark:text-white">{t.title}</h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400">{t.subtitle}</p>
+            <h3 className="text-lg font-bold text-[#F8FAFC]">{t.title}</h3>
+            <p className="text-sm text-[#94A3B8]">{t.subtitle}</p>
           </div>
         </div>
 
@@ -341,18 +331,18 @@ export function StudyCalendar({ language = 'ja', className = '' }: StudyCalendar
         <div className="flex items-center gap-2">
           <button
             onClick={previousMonth}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+            className="p-2 hover:bg-white/10 rounded-lg transition-colors"
             aria-label="Previous month"
           >
-            <ChevronLeft className="size-5 text-gray-600 dark:text-gray-400" />
+            <ChevronLeft className="size-5 text-[#94A3B8]" />
           </button>
 
           <button
             onClick={goToCurrentMonth}
             disabled={isCurrentMonth()}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${isCurrentMonth()
-              ? 'bg-purple-500 text-white cursor-default'
-              : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+            className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${isCurrentMonth()
+              ? 'bg-[#6366F1] text-white cursor-default'
+              : 'bg-white/5 text-[#CBD5E1] hover:bg-white/10'
               }`}
           >
             {getMonthYearText()}
@@ -363,40 +353,50 @@ export function StudyCalendar({ language = 'ja', className = '' }: StudyCalendar
             disabled={isCurrentMonth()}
             className={`p-2 rounded-lg transition-colors ${isCurrentMonth()
               ? 'opacity-50 cursor-not-allowed'
-              : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+              : 'hover:bg-white/10'
               }`}
             aria-label="Next month"
           >
-            <ChevronRight className="size-5 text-gray-600 dark:text-gray-400" />
+            <ChevronRight className="size-5 text-[#94A3B8]" />
           </button>
         </div>
       </div>
 
       {/* 統計情報 */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        <div className="text-center p-3 bg-purple-50 dark:bg-purple-900/30 rounded-lg">
-          <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">{stats.totalDays}</div>
-          <div className="text-xs text-gray-600 dark:text-gray-400">{t.totalDays}</div>
+      <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-6">
+        <div
+          className="text-center p-2 sm:p-3 rounded-xl"
+          style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.2)' }}
+        >
+          <div className="text-xl sm:text-2xl font-bold text-[#818CF8]">{stats.totalDays}</div>
+          <div className="text-xs text-[#94A3B8]">{t.totalDays}</div>
         </div>
-        <div className="text-center p-3 bg-orange-50 dark:bg-orange-900/30 rounded-lg">
-          <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">{stats.longestStreak}</div>
-          <div className="text-xs text-gray-600 dark:text-gray-400">{t.longestStreak}</div>
+        <div
+          className="text-center p-2 sm:p-3 rounded-xl"
+          style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.2)' }}
+        >
+          <div className="text-xl sm:text-2xl font-bold text-[#F59E0B]">{stats.longestStreak}</div>
+          <div className="text-xs text-[#94A3B8]">{t.longestStreak}</div>
         </div>
-        <div className="text-center p-3 bg-green-50 dark:bg-green-900/30 rounded-lg">
-          <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.currentStreak}</div>
-          <div className="text-xs text-gray-600 dark:text-gray-400">{t.currentStreak}</div>
+        <div
+          className="text-center p-2 sm:p-3 rounded-xl"
+          style={{ background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.2)' }}
+        >
+          <div className="text-xl sm:text-2xl font-bold text-[#34D399]">{stats.currentStreak}</div>
+          <div className="text-xs text-[#94A3B8]">{t.currentStreak}</div>
         </div>
       </div>
 
       {/* カレンダー */}
-      <div className="bg-gray-100 dark:bg-gray-800 p-2 rounded-lg">
+      <div className="p-2 rounded-xl" style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(255,255,255,0.06)' }}>
         {/* 曜日ヘッダー */}
-        <div className="grid grid-cols-7 gap-2 mb-2">
+        <div className="grid grid-cols-7 gap-1 sm:gap-2 mb-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))' }}>
           {t.weekdays.map((day, index) => (
             <div
               key={day}
-              className={`text-center text-xs font-medium py-2 border border-gray-300 dark:border-gray-600 rounded ${index === 0 ? 'text-red-500 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'
+              className={`text-center text-xs font-medium py-1 sm:py-2 rounded ${index === 0 ? 'text-[#EF4444]' : 'text-[#94A3B8]'
                 }`}
+              style={{ border: '1px solid rgba(255,255,255,0.06)' }}
             >
               {day}
             </div>
@@ -404,51 +404,49 @@ export function StudyCalendar({ language = 'ja', className = '' }: StudyCalendar
         </div>
 
         {/* 日付グリッド */}
-        <div className="grid grid-cols-7 gap-2">
+        <div className="grid grid-cols-7 gap-1 sm:gap-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))' }}>
           {calendarData.map((day, index) => {
             const today = isToday(day.date);
-            const bgColor = getBackgroundColor(day.count, day.reviewCount, isDarkMode);
-            const borderColor = getBorderColor(day.count, day.reviewCount, isDarkMode);
-            const borderWidth = day.count > 0 || day.reviewCount > 0 ? 2 : 1;
+            const bgColor = getBackgroundColor(day.count, day.reviewCount);
+            const borderColor = getBorderColor(day.count, day.reviewCount);
 
             return (
               <div
                 key={`${day.date.toISOString()}-${index}`}
                 className={`relative aspect-square rounded ${!day.isCurrentMonth ? 'opacity-30' : ''
-                  } ${today ? 'ring-2 ring-purple-500 ring-offset-2 dark:ring-offset-gray-800' : ''}
+                  } ${today ? 'ring-2 ring-[#6366F1] ring-offset-2' : ''}
                 transition-all hover:scale-105 hover:z-10 cursor-pointer`}
                 style={{
                   backgroundColor: bgColor,
-                  borderColor: borderColor,
-                  borderWidth: `${borderWidth}px`,
-                  borderStyle: 'solid'
+                  border: `1px solid ${borderColor}`,
+                  ...(today ? { '--tw-ring-offset-color': '#0F172A' } as React.CSSProperties : {}),
                 }}
                 onMouseEnter={() => setHoveredDay(day)}
                 onMouseLeave={() => setHoveredDay(null)}
               >
-                <div className="absolute inset-0 flex flex-col items-center justify-center p-1">
+                <div className="absolute inset-0 flex flex-col items-center justify-center p-0.5 sm:p-1">
                   <span
-                    className={`text-base font-bold ${day.count > 0
+                    className={`text-xs sm:text-base font-bold ${day.count > 0
                       ? 'text-white'
                       : day.isCurrentMonth
-                        ? 'text-gray-700 dark:text-gray-300'
-                        : 'text-gray-400 dark:text-gray-600'
+                        ? 'text-[#CBD5E1]'
+                        : 'text-[#64748B]'
                       }`}
                   >
                     {day.date.getDate()}
                   </span>
                   {day.count > 0 && (
-                    <span className="text-xs font-bold text-white mt-0.5">{day.count}分</span>
+                    <span className="text-[10px] sm:text-xs font-bold text-white mt-0.5">{day.count}分</span>
                   )}
                   {/* 復習予定の問題名を表示（最初の1件のみ） */}
                   {day.reviewCount > 0 && day.reviewProblems.length > 0 && (
-                    <span className="text-xs font-medium text-blue-600 dark:text-blue-400 mt-0.5 truncate w-full text-center px-0.5">
-                      {day.reviewProblems[0].substring(0, 15)}{day.reviewProblems[0].length > 15 ? '...' : ''}
+                    <span className="text-[10px] sm:text-xs font-medium text-[#818CF8] mt-0.5 truncate w-full text-center px-0.5">
+                      {day.reviewProblems[0].substring(0, 10)}{day.reviewProblems[0].length > 10 ? '...' : ''}
                     </span>
                   )}
                   {/* 復習予定が複数ある場合、件数を表示 */}
                   {day.reviewCount > 1 && (
-                    <span className="text-xs text-blue-500 dark:text-blue-300">
+                    <span className="text-[10px] sm:text-xs text-[#818CF8]">
                       +{day.reviewCount - 1}
                     </span>
                   )}
@@ -460,28 +458,31 @@ export function StudyCalendar({ language = 'ja', className = '' }: StudyCalendar
       </div>
 
       {/* 凡例 */}
-      <div className="flex items-center justify-end gap-2 mt-4 text-xs text-gray-600 dark:text-gray-400">
+      <div className="flex items-center justify-end gap-2 mt-4 text-xs text-[#94A3B8]">
         <span>{t.noData}</span>
         <div className="flex gap-1">
-          <div className="w-4 h-4 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-sm"></div>
-          <div className="w-4 h-4 bg-green-100 dark:bg-green-900 border border-green-400 dark:border-green-600 rounded-sm"></div>
-          <div className="w-4 h-4 bg-green-300 dark:bg-green-700 border border-green-500 rounded-sm"></div>
-          <div className="w-4 h-4 bg-green-500 dark:bg-green-600 border border-green-600 rounded-sm"></div>
-          <div className="w-4 h-4 bg-green-700 dark:bg-green-500 border border-green-700 rounded-sm"></div>
+          <div className="w-4 h-4 rounded-sm" style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.06)' }}></div>
+          <div className="w-4 h-4 rounded-sm" style={{ background: 'rgba(16,185,129,0.2)', border: '1px solid rgba(16,185,129,0.3)' }}></div>
+          <div className="w-4 h-4 rounded-sm" style={{ background: 'rgba(16,185,129,0.4)', border: '1px solid rgba(16,185,129,0.5)' }}></div>
+          <div className="w-4 h-4 rounded-sm" style={{ background: 'rgba(16,185,129,0.6)', border: '1px solid rgba(16,185,129,0.7)' }}></div>
+          <div className="w-4 h-4 rounded-sm" style={{ background: 'rgba(16,185,129,0.8)', border: '1px solid rgba(16,185,129,0.9)' }}></div>
         </div>
         <span className="ml-1">多い</span>
       </div>
 
       {/* ホバーツールチップ */}
       {hoveredDay && (hoveredDay.count > 0 || hoveredDay.reviewCount > 0) && (
-        <div className="mt-4 p-3 bg-gray-100 dark:bg-gray-700 rounded-lg space-y-2">
-          <div className="text-sm font-bold text-gray-900 dark:text-white mb-1">
+        <div
+          className="mt-4 p-3 rounded-xl space-y-2"
+          style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}
+        >
+          <div className="text-sm font-bold text-[#F8FAFC] mb-1">
             {hoveredDay.date.toLocaleDateString(language)}
           </div>
 
           {/* 学習時間情報 */}
           {hoveredDay.count > 0 && (
-            <div className="text-xs text-gray-600 dark:text-gray-400">
+            <div className="text-xs text-[#CBD5E1]">
               {t.studyTime}: {hoveredDay.count}
               {t.minutes} • {t.quizCount}: {hoveredDay.quizCount}
               {t.quizzes}
@@ -490,7 +491,7 @@ export function StudyCalendar({ language = 'ja', className = '' }: StudyCalendar
 
           {/* 復習予定情報 */}
           {hoveredDay.reviewCount > 0 && (
-            <div className="text-xs text-blue-600 dark:text-blue-400 border-t border-gray-300 dark:border-gray-600 pt-2">
+            <div className="text-xs text-[#818CF8] pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
               <div className="font-semibold mb-1">
                 {t.reviewScheduled}: {hoveredDay.reviewCount} {t.problems}
               </div>
@@ -505,6 +506,6 @@ export function StudyCalendar({ language = 'ja', className = '' }: StudyCalendar
           )}
         </div>
       )}
-    </GlassCard>
+    </div>
   );
 }

@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { Card, CardHeader, CardContent } from './ui/Card';
-import { Button } from './ui/Button';
 import { usePomodoroContext, type PomodoroSettings } from '../contexts/PomodoroContext';
 
 interface PomodoroTimerProps {
@@ -177,22 +175,22 @@ export function PomodoroTimer({ compact = false }: PomodoroTimerProps) {
   const getModeColor = (): string => {
     switch (mode) {
       case 'work':
-        return 'text-red-600 dark:text-red-400';
+        return 'text-red-400';
       case 'break':
-        return 'text-green-600 dark:text-green-400';
+        return 'text-[#34D399]';
       case 'longBreak':
-        return 'text-blue-600 dark:text-blue-400';
+        return 'text-[#818CF8]';
     }
   };
 
-  const getModeBackground = (): string => {
+  const getModeBackgroundStyle = (): React.CSSProperties => {
     switch (mode) {
       case 'work':
-        return 'bg-red-50 dark:bg-red-900/20';
+        return { background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' };
       case 'break':
-        return 'bg-green-50 dark:bg-green-900/20';
+        return { background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)' };
       case 'longBreak':
-        return 'bg-blue-50 dark:bg-blue-900/20';
+        return { background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)' };
     }
   };
 
@@ -207,44 +205,53 @@ export function PomodoroTimer({ compact = false }: PomodoroTimerProps) {
     }
   };
 
-  const getProgressColor = (): string => {
+  const getProgressGradient = (): string => {
     switch (mode) {
       case 'work':
-        return 'bg-red-500';
+        return 'linear-gradient(90deg, #EF4444, #F87171)';
       case 'break':
-        return 'bg-green-500';
+        return 'linear-gradient(90deg, #10B981, #34D399)';
       case 'longBreak':
-        return 'bg-blue-500';
+        return 'linear-gradient(90deg, #6366F1, #818CF8)';
     }
   };
 
   if (compact) {
     return (
-      <div className={`${getModeBackground()} rounded-lg p-4`}>
+      <div className="rounded-lg p-4" style={getModeBackgroundStyle()}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="text-3xl">🍅</div>
             <div>
               <div className={`text-sm font-semibold ${getModeColor()}`}>{getModeText()}</div>
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">{formatTime(timeLeft)}</div>
+              <div className="text-2xl font-bold text-[#F8FAFC]">{formatTime(timeLeft)}</div>
             </div>
           </div>
           <div className="flex gap-2">
-            <Button variant={isRunning ? 'secondary' : 'primary'} size="sm" onClick={isRunning ? pauseTimer : startTimer}>
+            <button
+              onClick={isRunning ? pauseTimer : startTimer}
+              className={`px-3 py-1.5 text-sm font-medium rounded-xl transition-colors ${
+                isRunning
+                  ? 'bg-white/5 hover:bg-white/10 text-[#CBD5E1]'
+                  : 'bg-[#6366F1] hover:bg-[#5558E6] text-white'
+              }`}
+            >
               {isRunning ? '⏸️' : '▶️'}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={resetTimer}>
+            </button>
+            <button
+              onClick={resetTimer}
+              className="px-3 py-1.5 text-sm font-medium rounded-xl bg-white/5 hover:bg-white/10 text-[#CBD5E1] transition-colors"
+            >
               🔄
-            </Button>
+            </button>
           </div>
         </div>
-        <div className="mt-3 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+        <div className="mt-3 h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
           <motion.div
-            className={getProgressColor()}
             initial={{ width: 0 }}
             animate={{ width: `${getProgress()}%` }}
             transition={{ duration: 0.3 }}
-            style={{ height: '100%' }}
+            style={{ height: '100%', borderRadius: '9999px', background: getProgressGradient() }}
           />
         </div>
       </div>
@@ -256,87 +263,102 @@ export function PomodoroTimer({ compact = false }: PomodoroTimerProps) {
 
   return (
     <>
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-              <span className="text-2xl">🍅</span>
-              {t.title}
-            </h2>
-            <Button variant="ghost" size="sm" onClick={() => setShowSettings(true)}>
-              ⚙️ {t.settings}
-            </Button>
-          </div>
-        </CardHeader>
+      <div className="rounded-2xl p-6" style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-bold text-[#F8FAFC] flex items-center gap-2">
+            <span className="text-2xl">🍅</span>
+            {t.title}
+          </h2>
+          <button
+            onClick={() => setShowSettings(true)}
+            className="px-3 py-1.5 text-sm font-medium rounded-xl bg-white/5 hover:bg-white/10 text-[#CBD5E1] transition-colors"
+          >
+            ⚙️ {t.settings}
+          </button>
+        </div>
 
-        <CardContent>
-          <div className={`${getModeBackground()} rounded-xl p-8 mb-6`}>
-            <div className={`text-center mb-4 text-lg font-semibold ${getModeColor()}`}>{getModeText()}</div>
-            <div className="text-center mb-6">
-              <div className="text-6xl font-bold text-gray-900 dark:text-white font-mono">{formatTime(timeLeft)}</div>
-            </div>
-            <div className="mb-6 h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-              <motion.div
-                className={getProgressColor()}
-                initial={{ width: 0 }}
-                animate={{ width: `${getProgress()}%` }}
-                transition={{ duration: 0.3 }}
-                style={{ height: '100%' }}
-              />
-            </div>
-            <div className="flex justify-center gap-3">
-              <Button variant={isRunning ? 'secondary' : 'primary'} onClick={isRunning ? pauseTimer : startTimer} size="lg">
-                {isRunning ? `⏸️ ${t.pause}` : isInitialState ? `▶️ ${t.start}` : `▶️ ${t.resume}`}
-              </Button>
-              <Button variant="outline" onClick={resetTimer} size="lg">
-                🔄 {t.reset}
-              </Button>
-            </div>
+        <div className="rounded-xl p-8 mb-6" style={getModeBackgroundStyle()}>
+          <div className={`text-center mb-4 text-lg font-semibold ${getModeColor()}`}>{getModeText()}</div>
+          <div className="text-center mb-6">
+            <div className="text-6xl font-bold text-[#F8FAFC] font-mono">{formatTime(timeLeft)}</div>
           </div>
-          <div className="text-center">
-            <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">{t.sessionsCompleted}</div>
-            <div className="flex justify-center gap-1">
-              {Array.from({ length: Math.min(sessionsCompleted, 12) }).map((_, i) => (
-                <span key={i} className="text-2xl">
-                  🍅
-                </span>
-              ))}
-              {sessionsCompleted > 12 && <span className="text-lg text-gray-600 dark:text-gray-400 ml-2">+{sessionsCompleted - 12}</span>}
-            </div>
+          <div className="mb-6 h-3 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${getProgress()}%` }}
+              transition={{ duration: 0.3 }}
+              style={{ height: '100%', borderRadius: '9999px', background: getProgressGradient() }}
+            />
           </div>
-        </CardContent>
-      </Card>
+          <div className="flex justify-center gap-3">
+            <button
+              onClick={isRunning ? pauseTimer : startTimer}
+              className={`px-6 py-3 text-base font-medium rounded-xl transition-colors ${
+                isRunning
+                  ? 'bg-white/5 hover:bg-white/10 text-[#CBD5E1]'
+                  : 'bg-[#6366F1] hover:bg-[#5558E6] text-white'
+              }`}
+            >
+              {isRunning ? `⏸️ ${t.pause}` : isInitialState ? `▶️ ${t.start}` : `▶️ ${t.resume}`}
+            </button>
+            <button
+              onClick={resetTimer}
+              className="px-6 py-3 text-base font-medium rounded-xl bg-white/5 hover:bg-white/10 text-[#CBD5E1] transition-colors"
+              style={{ border: '1px solid rgba(255,255,255,0.1)' }}
+            >
+              🔄 {t.reset}
+            </button>
+          </div>
+        </div>
+        <div className="text-center">
+          <div className="text-sm text-[#94A3B8] mb-2">{t.sessionsCompleted}</div>
+          <div className="flex justify-center gap-1">
+            {Array.from({ length: Math.min(sessionsCompleted, 12) }).map((_, i) => (
+              <span key={i} className="text-2xl">
+                🍅
+              </span>
+            ))}
+            {sessionsCompleted > 12 && <span className="text-lg text-[#94A3B8] ml-2">+{sessionsCompleted - 12}</span>}
+          </div>
+        </div>
+      </div>
 
       {/* プリセットカード */}
       <div className="mt-6">
-        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-3">{t.presets}</h3>
+        <h3 className="text-lg font-bold text-[#F8FAFC] mb-3">{t.presets}</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {presets.map((preset) => (
-            <Card key={preset.id} hoverable clickable onClick={() => applyPreset(preset.settings)}>
-              <CardContent className="p-4">
-                <div className="flex items-start gap-3">
-                  <div className="text-4xl">{preset.emoji}</div>
-                  <div className="flex-1">
-                    <h4 className="font-bold text-gray-900 dark:text-white mb-1">{preset.name}</h4>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">{preset.desc}</p>
-                    <div className="grid grid-cols-2 gap-2 text-xs text-gray-700 dark:text-gray-300 mb-3">
-                      <div>
-                        <span className="font-semibold">{t.work}:</span> {preset.settings.workDuration}分
-                      </div>
-                      <div>
-                        <span className="font-semibold">{t.break}:</span> {preset.settings.breakDuration}分
-                      </div>
+            <div
+              key={preset.id}
+              className="rounded-2xl p-4 cursor-pointer transition-colors hover:bg-white/5"
+              style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}
+              onClick={() => applyPreset(preset.settings)}
+            >
+              <div className="flex items-start gap-3">
+                <div className="text-4xl">{preset.emoji}</div>
+                <div className="flex-1">
+                  <h4 className="font-bold text-[#F8FAFC] mb-1">{preset.name}</h4>
+                  <p className="text-sm text-[#94A3B8] mb-3">{preset.desc}</p>
+                  <div className="grid grid-cols-2 gap-2 text-xs text-[#CBD5E1] mb-3">
+                    <div>
+                      <span className="font-semibold">{t.work}:</span> {preset.settings.workDuration}分
                     </div>
-                    <Button variant="primary" size="sm" className="w-full" onClick={(e) => {
+                    <div>
+                      <span className="font-semibold">{t.break}:</span> {preset.settings.breakDuration}分
+                    </div>
+                  </div>
+                  <button
+                    className="w-full px-4 py-2 text-sm font-medium rounded-xl bg-[#6366F1] hover:bg-[#5558E6] text-white transition-colors"
+                    onClick={(e) => {
                       e.stopPropagation();
                       applyPreset(preset.settings);
-                    }}>
-                      {t.applyPreset}
-                    </Button>
-                  </div>
+                    }}
+                  >
+                    {t.applyPreset}
+                  </button>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           ))}
         </div>
       </div>
@@ -361,50 +383,95 @@ function SettingsModal({ settings, onSave, onCancel, translations: t }: Settings
   };
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onCancel}>
-      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6">⚙️ {t.settings}</h3>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onCancel}>
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        className="rounded-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto"
+        style={{ background: 'rgba(30,41,59,0.95)', border: '1px solid rgba(255,255,255,0.1)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-xl font-bold text-[#F8FAFC] mb-6">⚙️ {t.settings}</h3>
 
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t.workDuration}</label>
-            <input type="number" min="1" max="60" value={localSettings.workDuration} onChange={(e) => handleChange('workDuration', parseInt(e.target.value))} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+            <label className="block text-sm font-medium text-[#CBD5E1] mb-2">{t.workDuration}</label>
+            <input
+              type="number"
+              min="1"
+              max="60"
+              value={localSettings.workDuration}
+              onChange={(e) => handleChange('workDuration', parseInt(e.target.value))}
+              className="w-full px-3 py-2 rounded-lg text-[#F8FAFC] focus:outline-none focus:ring-2 focus:ring-[#6366F1]"
+              style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}
+            />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t.breakDuration}</label>
-            <input type="number" min="1" max="30" value={localSettings.breakDuration} onChange={(e) => handleChange('breakDuration', parseInt(e.target.value))} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+            <label className="block text-sm font-medium text-[#CBD5E1] mb-2">{t.breakDuration}</label>
+            <input
+              type="number"
+              min="1"
+              max="30"
+              value={localSettings.breakDuration}
+              onChange={(e) => handleChange('breakDuration', parseInt(e.target.value))}
+              className="w-full px-3 py-2 rounded-lg text-[#F8FAFC] focus:outline-none focus:ring-2 focus:ring-[#6366F1]"
+              style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}
+            />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t.longBreakDuration}</label>
-            <input type="number" min="1" max="60" value={localSettings.longBreakDuration} onChange={(e) => handleChange('longBreakDuration', parseInt(e.target.value))} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+            <label className="block text-sm font-medium text-[#CBD5E1] mb-2">{t.longBreakDuration}</label>
+            <input
+              type="number"
+              min="1"
+              max="60"
+              value={localSettings.longBreakDuration}
+              onChange={(e) => handleChange('longBreakDuration', parseInt(e.target.value))}
+              className="w-full px-3 py-2 rounded-lg text-[#F8FAFC] focus:outline-none focus:ring-2 focus:ring-[#6366F1]"
+              style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}
+            />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t.longBreakInterval}</label>
-            <input type="number" min="2" max="10" value={localSettings.longBreakInterval} onChange={(e) => handleChange('longBreakInterval', parseInt(e.target.value))} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+            <label className="block text-sm font-medium text-[#CBD5E1] mb-2">{t.longBreakInterval}</label>
+            <input
+              type="number"
+              min="2"
+              max="10"
+              value={localSettings.longBreakInterval}
+              onChange={(e) => handleChange('longBreakInterval', parseInt(e.target.value))}
+              className="w-full px-3 py-2 rounded-lg text-[#F8FAFC] focus:outline-none focus:ring-2 focus:ring-[#6366F1]"
+              style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}
+            />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-[#CBD5E1] mb-2">
               {t.volume}: {Math.round(localSettings.volume * 100)}%
             </label>
-            <input type="range" min="0" max="1" step="0.1" value={localSettings.volume} onChange={(e) => handleChange('volume', parseFloat(e.target.value))} className="w-full" />
+            <input type="range" min="0" max="1" step="0.1" value={localSettings.volume} onChange={(e) => handleChange('volume', parseFloat(e.target.value))} className="w-full accent-[#6366F1]" />
           </div>
           <div className="flex items-center justify-between">
-            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">{t.autoStart}</label>
-            <input type="checkbox" checked={localSettings.autoStart} onChange={(e) => handleChange('autoStart', e.target.checked)} className="w-5 h-5 text-blue-600 rounded" />
+            <label className="text-sm font-medium text-[#CBD5E1]">{t.autoStart}</label>
+            <input type="checkbox" checked={localSettings.autoStart} onChange={(e) => handleChange('autoStart', e.target.checked)} className="w-5 h-5 accent-[#6366F1] rounded" />
           </div>
           <div className="flex items-center justify-between">
-            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">{t.soundEnabled}</label>
-            <input type="checkbox" checked={localSettings.soundEnabled} onChange={(e) => handleChange('soundEnabled', e.target.checked)} className="w-5 h-5 text-blue-600 rounded" />
+            <label className="text-sm font-medium text-[#CBD5E1]">{t.soundEnabled}</label>
+            <input type="checkbox" checked={localSettings.soundEnabled} onChange={(e) => handleChange('soundEnabled', e.target.checked)} className="w-5 h-5 accent-[#6366F1] rounded" />
           </div>
         </div>
 
         <div className="flex gap-3 mt-6">
-          <Button variant="primary" onClick={() => onSave(localSettings)} className="flex-1">
+          <button
+            onClick={() => onSave(localSettings)}
+            className="flex-1 px-4 py-2.5 text-sm font-medium rounded-xl bg-[#6366F1] hover:bg-[#5558E6] text-white transition-colors"
+          >
             💾 {t.save}
-          </Button>
-          <Button variant="secondary" onClick={onCancel} className="flex-1">
+          </button>
+          <button
+            onClick={onCancel}
+            className="flex-1 px-4 py-2.5 text-sm font-medium rounded-xl bg-white/5 hover:bg-white/10 text-[#CBD5E1] transition-colors"
+          >
             ❌ {t.cancel}
-          </Button>
+          </button>
         </div>
       </motion.div>
     </motion.div>

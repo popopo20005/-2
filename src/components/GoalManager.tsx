@@ -7,6 +7,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
+import confetti from 'canvas-confetti';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
 import { EmptyState } from './ui/EmptyState';
@@ -21,6 +22,7 @@ import {
   TrendingUp,
   Calendar,
   Flag,
+  Sparkles,
 } from 'lucide-react';
 import {
   createGoal,
@@ -32,6 +34,7 @@ import {
 } from '../services/goalService';
 import type { Goal, GoalProgress, GoalSummary, GoalUnit, CreateGoalInput } from '../types/goal';
 import { GOAL_PRESETS } from '../types/goal';
+import { notificationService } from '../services/notificationService';
 
 interface GoalManagerProps {
   onBack: () => void;
@@ -44,6 +47,7 @@ export function GoalManager({ onBack, language = 'ja' }: GoalManagerProps) {
   const [summary, setSummary] = useState<GoalSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [celebratingGoal, setCelebratingGoal] = useState<Goal | null>(null);
 
   const translations = {
     ja: {
@@ -120,19 +124,35 @@ export function GoalManager({ onBack, language = 'ja' }: GoalManagerProps) {
     loadGoals();
   }, []);
 
-  const loadGoals = async () => {
+  const loadGoals = async (checkForNewCompletions = false) => {
     try {
       setIsLoading(true);
+      const previousGoals = goals; // 前回の目標を保存
       const allGoals = await getAllGoals();
       setGoals(allGoals);
 
       // 各目標の進捗を計算
       const progressMap = new Map<number, GoalProgress>();
+      const newlyCompletedGoals: Goal[] = [];
+
       for (const goal of allGoals) {
         const progress = await calculateGoalProgress(goal);
         progressMap.set(goal.id!, progress);
+
+        // 新しく達成した目標を検出
+        if (checkForNewCompletions && goal.status === 'completed') {
+          const previousGoal = previousGoals.find(g => g.id === goal.id);
+          if (previousGoal && previousGoal.status === 'active') {
+            newlyCompletedGoals.push(goal);
+          }
+        }
       }
       setGoalProgresses(progressMap);
+
+      // 新しく達成した目標があれば祝福
+      if (newlyCompletedGoals.length > 0) {
+        celebrateGoalCompletion(newlyCompletedGoals[0]);
+      }
 
       // サマリーを取得
       const summaryData = await getGoalSummary();
@@ -144,6 +164,57 @@ export function GoalManager({ onBack, language = 'ja' }: GoalManagerProps) {
       toast.error(language === 'ja' ? 'エラーが発生しました' : 'An error occurred');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const celebrateGoalCompletion = async (goal: Goal) => {
+    // Confetti演出
+    const duration = 3000;
+    const animationEnd = Date.now() + duration;
+    const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 0 };
+
+    function randomInRange(min: number, max: number) {
+      return Math.random() * (max - min) + min;
+    }
+
+    const interval: ReturnType<typeof setInterval> = setInterval(function() {
+      const timeLeft = animationEnd - Date.now();
+
+      if (timeLeft <= 0) {
+        return clearInterval(interval);
+      }
+
+      const particleCount = 50 * (timeLeft / duration);
+      confetti({
+        ...defaults,
+        particleCount,
+        origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 }
+      });
+      confetti({
+        ...defaults,
+        particleCount,
+        origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 }
+      });
+    }, 250);
+
+    // 達成モーダル表示
+    setCelebratingGoal(goal);
+    toast.success(
+      language === 'ja'
+        ? `🎉 目標「${goal.title}」を達成しました！`
+        : `🎉 Goal "${goal.title}" completed!`
+    );
+
+    // 通知を送信 (通知が有効な場合のみ)
+    try {
+      const settings = await notificationService.getSettings();
+      if (settings && settings.enabled && settings.goalAchievementEnabled) {
+        await notificationService.sendGoalAchievementNotification(goal.id!);
+        console.log('[GoalManager] 目標達成通知を送信しました:', goal.id);
+      }
+    } catch (error) {
+      console.error('[GoalManager] 目標達成通知の送信に失敗:', error);
+      // 通知失敗しても祝福は続行
     }
   };
 
@@ -290,6 +361,17 @@ export function GoalManager({ onBack, language = 'ja' }: GoalManagerProps) {
             <GoalCreateForm
               onSubmit={handleCreateGoal}
               onCancel={() => setShowCreateForm(false)}
+              language={language}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* 目標達成モーダル */}
+        <AnimatePresence>
+          {celebratingGoal && (
+            <GoalCelebrationModal
+              goal={celebratingGoal}
+              onClose={() => setCelebratingGoal(null)}
               language={language}
             />
           )}
@@ -591,7 +673,7 @@ function GoalCreateForm({ onSubmit, onCancel, language }: GoalCreateFormProps) {
                 type="text"
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 text-gray-900 dark:bg-gray-700 dark:text-gray-100"
                 placeholder={language === 'ja' ? '例: 今週50問解く' : 'e.g., Solve 50 problems this week'}
               />
             </div>
@@ -603,7 +685,7 @@ function GoalCreateForm({ onSubmit, onCancel, language }: GoalCreateFormProps) {
               <textarea
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 text-gray-900 dark:bg-gray-700 dark:text-gray-100"
                 rows={2}
               />
             </div>
@@ -617,7 +699,7 @@ function GoalCreateForm({ onSubmit, onCancel, language }: GoalCreateFormProps) {
                   type="number"
                   value={formData.targetValue}
                   onChange={(e) => setFormData({ ...formData, targetValue: Number(e.target.value) })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 text-gray-900 dark:bg-gray-700 dark:text-gray-100"
                   min="1"
                   step={formData.unit === 'hours' ? '0.5' : '1'}
                 />
@@ -630,7 +712,7 @@ function GoalCreateForm({ onSubmit, onCancel, language }: GoalCreateFormProps) {
                 <select
                   value={formData.unit}
                   onChange={(e) => setFormData({ ...formData, unit: e.target.value as GoalUnit })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 text-gray-900 dark:bg-gray-700 dark:text-gray-100"
                 >
                   <option value="problems">{trans.units.problems}</option>
                   <option value="hours">{trans.units.hours}</option>
@@ -651,7 +733,7 @@ function GoalCreateForm({ onSubmit, onCancel, language }: GoalCreateFormProps) {
                 onChange={(e) =>
                   setFormData({ ...formData, deadline: e.target.value ? new Date(e.target.value) : undefined })
                 }
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 text-gray-900 dark:bg-gray-700 dark:text-gray-100"
               />
             </div>
 
@@ -664,6 +746,136 @@ function GoalCreateForm({ onSubmit, onCancel, language }: GoalCreateFormProps) {
               </Button>
             </div>
           </form>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+interface GoalCelebrationModalProps {
+  goal: Goal;
+  onClose: () => void;
+  language: 'ja' | 'en';
+}
+
+function GoalCelebrationModal({ goal, onClose, language }: GoalCelebrationModalProps) {
+  const t = {
+    ja: {
+      congratulations: 'おめでとうございます！',
+      goalCompleted: '目標を達成しました',
+      achieved: '達成した目標',
+      completedAt: '達成日時',
+      close: '閉じる',
+      createNewGoal: '新しい目標を作成',
+    },
+    en: {
+      congratulations: 'Congratulations!',
+      goalCompleted: 'Goal Completed',
+      achieved: 'Achieved Goal',
+      completedAt: 'Completed At',
+      close: 'Close',
+      createNewGoal: 'Create New Goal',
+    },
+  };
+
+  const trans = t[language];
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.5, y: 50, opacity: 0 }}
+        animate={{ scale: 1, y: 0, opacity: 1 }}
+        exit={{ scale: 0.5, y: 50, opacity: 0 }}
+        transition={{ type: 'spring', duration: 0.5 }}
+        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-6 text-center">
+          {/* トロフィーアイコンとスパークル */}
+          <motion.div
+            initial={{ scale: 0, rotate: -180 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: 'spring', delay: 0.2, duration: 0.8 }}
+            className="flex justify-center mb-4"
+          >
+            <div className="relative">
+              <Trophy className="w-20 h-20 text-yellow-500" />
+              <motion.div
+                animate={{
+                  scale: [1, 1.2, 1],
+                  rotate: [0, 90, 180, 270, 360],
+                }}
+                transition={{ duration: 2, repeat: Infinity }}
+                className="absolute -top-2 -right-2"
+              >
+                <Sparkles className="w-8 h-8 text-yellow-400" />
+              </motion.div>
+              <motion.div
+                animate={{
+                  scale: [1, 1.2, 1],
+                  rotate: [360, 270, 180, 90, 0],
+                }}
+                transition={{ duration: 2, repeat: Infinity, delay: 1 }}
+                className="absolute -bottom-2 -left-2"
+              >
+                <Sparkles className="w-8 h-8 text-yellow-400" />
+              </motion.div>
+            </div>
+          </motion.div>
+
+          {/* タイトル */}
+          <motion.h2
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2"
+          >
+            {trans.congratulations}
+          </motion.h2>
+
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.4 }}
+            className="text-lg text-gray-600 dark:text-gray-400 mb-6"
+          >
+            {trans.goalCompleted}
+          </motion.p>
+
+          {/* 目標情報 */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5 }}
+            className="bg-gradient-to-r from-yellow-50 to-orange-50 dark:from-yellow-900/20 dark:to-orange-900/20 rounded-lg p-4 mb-6"
+          >
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">{trans.achieved}</p>
+            <p className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-3">{goal.title}</p>
+            {goal.description && (
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">{goal.description}</p>
+            )}
+            <p className="text-xs text-gray-500 dark:text-gray-500">
+              {trans.completedAt}: {goal.completedAt ? new Date(goal.completedAt).toLocaleString(language) : new Date().toLocaleString(language)}
+            </p>
+          </motion.div>
+
+          {/* ボタン */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.6 }}
+            className="flex gap-3"
+          >
+            <Button variant="primary" onClick={onClose} className="flex-1">
+              {trans.close}
+            </Button>
+          </motion.div>
         </div>
       </motion.div>
     </motion.div>

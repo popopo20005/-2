@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://minguella-quiz-v4.netlify.app/sitemap.xml

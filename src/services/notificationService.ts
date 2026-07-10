@@ -1,611 +1,714 @@
 /**
  * 通知サービス
- *
- * Web Push APIを利用した通知システム
- * - 復習リマインダー（SM-2アルゴリズムベース）
- * - 目標達成通知
- * - ストリーク継続アラート
- * - 弱点検出通知
+ * Web Push API、Notification APIを使用して通知を管理
  */
 
 import { db } from '../lib/database';
-import { spacedRepetitionService } from '../lib/database';
-import { getAllGoals } from './goalService';
+import type {
+  NotificationSettings,
+  NotificationData,
+  ReviewReminderData,
+  GoalAchievementData,
+  StreakAlertData,
+} from '../types';
+import { debugLog } from '../utils/debug';
 
 /**
- * 通知タイプ
+ * デフォルトの通知設定
  */
-export type NotificationType =
-  | 'review_reminder'      // 復習リマインダー
-  | 'goal_achieved'        // 目標達成
-  | 'goal_progress'        // 目標進捗
-  | 'streak_reminder'      // ストリーク継続
-  | 'streak_achievement'   // ストリーク達成
-  | 'weakness_detected'    // 弱点検出
-  | 'study_time_milestone' // 学習時間マイルストーン
-  | 'daily_reminder';      // 日次リマインダー
-
-/**
- * 通知設定
- */
-export interface NotificationSettings {
-  enabled: boolean;
-  reviewReminders: boolean;
-  goalNotifications: boolean;
-  streakReminders: boolean;
-  weaknessAlerts: boolean;
-  dailyReminder: boolean;
-  dailyReminderTime: string; // HH:MM format
-  quietHoursEnabled: boolean;
-  quietHoursStart: string; // HH:MM format
-  quietHoursEnd: string; // HH:MM format
-}
-
-/**
- * 通知ペイロード
- */
-export interface NotificationPayload {
-  type: NotificationType;
-  title: string;
-  body: string;
-  icon?: string;
-  badge?: string;
-  tag?: string;
-  data?: any;
-  requireInteraction?: boolean;
-  actions?: Array<{ action: string; title: string; icon?: string }>;
-}
-
-/**
- * 通知履歴
- */
-export interface NotificationHistory {
-  id?: number;
-  type: NotificationType;
-  title: string;
-  body: string;
-  sentAt: Date;
-  clicked: boolean;
-  clickedAt?: Date;
-}
-
-const NOTIFICATION_SETTINGS_KEY = 'notificationSettings';
-const DEFAULT_SETTINGS: NotificationSettings = {
+const DEFAULT_SETTINGS: Omit<NotificationSettings, 'id' | 'createdAt' | 'updatedAt'> = {
   enabled: false,
-  reviewReminders: true,
-  goalNotifications: true,
-  streakReminders: true,
-  weaknessAlerts: true,
-  dailyReminder: false,
-  dailyReminderTime: '09:00',
-  quietHoursEnabled: false,
-  quietHoursStart: '22:00',
-  quietHoursEnd: '07:00',
+  permission: 'default',
+  reviewReminderEnabled: true,
+  reviewReminderTime: '19:00',
+  reviewReminderFrequency: 'daily',
+  goalAchievementEnabled: true,
+  streakAlertEnabled: true,
+  streakAlertTime: '18:00',
+  subscriptionJson: null,
 };
 
 /**
- * 通知設定を取得
+ * 通知サービスクラス
  */
-export function getNotificationSettings(): NotificationSettings {
-  try {
-    const saved = localStorage.getItem(NOTIFICATION_SETTINGS_KEY);
-    if (!saved) return DEFAULT_SETTINGS;
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
-  } catch (error) {
-    console.error('[NotificationService] 設定の取得に失敗:', error);
-    return DEFAULT_SETTINGS;
-  }
-}
+class NotificationService {
+  private serviceWorkerRegistration: ServiceWorkerRegistration | null = null;
+  private settings: NotificationSettings | null = null;
 
-/**
- * 通知設定を保存
- */
-export function saveNotificationSettings(settings: NotificationSettings): void {
-  try {
-    localStorage.setItem(NOTIFICATION_SETTINGS_KEY, JSON.stringify(settings));
-    console.log('[NotificationService] 設定を保存しました:', settings);
-  } catch (error) {
-    console.error('[NotificationService] 設定の保存に失敗:', error);
-  }
-}
+  /**
+   * 初期化
+   */
+  async initialize(): Promise<void> {
+    debugLog('🔔 通知サービスを初期化中...');
 
-/**
- * 通知許可を要求
- */
-export async function requestNotificationPermission(): Promise<NotificationPermission> {
-  try {
-    console.log('[NotificationService] 通知許可を要求中...');
+    try {
+      // Service Worker登録を取得（タイムアウト付き）
+      if ('serviceWorker' in navigator) {
+        try {
+          // タイムアウト2秒でService Worker readyを待つ
+          const swResult = await Promise.race([
+            navigator.serviceWorker.ready.then(reg => reg),
+            new Promise<null>((resolve) =>
+              setTimeout(() => resolve(null), 2000)
+            )
+          ]);
+          if (swResult) {
+            this.serviceWorkerRegistration = swResult;
+            debugLog('✅ Service Worker準備完了');
+          } else {
+            debugLog('⚠️  Service Worker登録待機タイムアウト（アプリは継続）');
+            this.serviceWorkerRegistration = null;
+          }
+        } catch (swError) {
+          debugLog('⚠️  Service Worker登録エラー（アプリは継続）:', swError);
+          this.serviceWorkerRegistration = null;
+        }
+      }
+
+      // 設定を読み込み
+      await this.loadSettings();
+
+      debugLog('✅ 通知サービス初期化完了');
+    } catch (error) {
+      debugLog('❌ 通知サービス初期化エラー:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 設定を読み込み
+   */
+  private async loadSettings(): Promise<void> {
+    try {
+      const settings = await db.notificationSettings.toArray();
+
+      if (settings.length === 0) {
+        // 初回起動時: デフォルト設定を保存
+        const id = await db.notificationSettings.add({
+          ...DEFAULT_SETTINGS,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as NotificationSettings);
+        this.settings = {
+          id: id as number,
+          ...DEFAULT_SETTINGS,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        debugLog('📝 デフォルト通知設定を作成しました');
+      } else {
+        this.settings = settings[0];
+        debugLog('📝 通知設定を読み込みました:', this.settings);
+      }
+    } catch (error) {
+      debugLog('❌ 通知設定の読み込みエラー:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 通知許可をリクエスト
+   */
+  async requestPermission(): Promise<NotificationPermission> {
+    debugLog('🔔 通知許可をリクエスト中...');
 
     if (!('Notification' in window)) {
-      console.warn('[NotificationService] このブラウザは通知をサポートしていません');
-      return 'denied';
+      debugLog('❌ このブラウザは通知をサポートしていません');
+      throw new Error('Notifications are not supported in this browser');
     }
 
-    if (Notification.permission === 'granted') {
-      console.log('[NotificationService] 通知許可は既に取得済みです');
-      return 'granted';
+    try {
+      const permission = await Notification.requestPermission();
+      debugLog(`✅ 通知許可結果: ${permission}`);
+
+      // 設定を更新
+      await this.updateSettings({ permission });
+
+      return permission;
+    } catch (error) {
+      debugLog('❌ 通知許可リクエストエラー:', error);
+      throw error;
     }
-
-    const permission = await Notification.requestPermission();
-    console.log('[NotificationService] 通知許可の結果:', permission);
-
-    // 許可が得られたら設定を有効化
-    if (permission === 'granted') {
-      const settings = getNotificationSettings();
-      settings.enabled = true;
-      saveNotificationSettings(settings);
-    }
-
-    return permission;
-  } catch (error) {
-    console.error('[NotificationService] 通知許可の要求に失敗:', error);
-    return 'denied';
   }
-}
 
-/**
- * Push API サブスクリプションを登録
- */
-export async function subscribeToPushNotifications(): Promise<PushSubscription | null> {
-  try {
-    console.log('[NotificationService] Push通知をサブスクライブ中...');
+  /**
+   * Push APIにサブスクライブ
+   */
+  async subscribe(): Promise<PushSubscription | null> {
+    debugLog('📡 Push APIにサブスクライブ中...');
 
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-      console.warn('[NotificationService] Push APIがサポートされていません');
+    if (!this.serviceWorkerRegistration) {
+      debugLog('❌ Service Worker未登録');
+      throw new Error('Service Worker not registered');
+    }
+
+    if (!('PushManager' in window)) {
+      debugLog('❌ このブラウザはPush APIをサポートしていません');
       return null;
     }
 
-    // Service Workerの登録を待つ
-    const registration = await navigator.serviceWorker.ready;
+    try {
+      // 既存のサブスクリプションを確認
+      let subscription = await this.serviceWorkerRegistration.pushManager.getSubscription();
 
-    // 既存のサブスクリプションを確認
-    let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        // 新しいサブスクリプションを作成
+        // Note: VAPID公開鍵が必要（本番環境では環境変数から取得）
+        const vapidPublicKey = this.getVapidPublicKey();
 
-    if (subscription) {
-      console.log('[NotificationService] 既存のサブスクリプションが見つかりました');
-      return subscription;
-    }
-
-    // VAPID公開鍵（本番環境では環境変数から取得）
-    const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY ||
-      'BDummy-VAPID-Key-For-Development-Replace-In-Production';
-
-    // 新しいサブスクリプションを作成
-    subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-    });
-
-    console.log('[NotificationService] Push通知をサブスクライブしました:', subscription);
-
-    // サブスクリプションをサーバーに送信（本番環境では実装が必要）
-    // await sendSubscriptionToServer(subscription);
-
-    return subscription;
-  } catch (error) {
-    console.error('[NotificationService] Push通知のサブスクライブに失敗:', error);
-    return null;
-  }
-}
-
-/**
- * VAPID鍵をBase64からUint8Arrayに変換
- */
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-
-  return outputArray;
-}
-
-/**
- * 通知を表示（ローカル通知）
- */
-export async function showNotification(payload: NotificationPayload): Promise<void> {
-  try {
-    console.log('[NotificationService] 通知を表示中:', payload);
-
-    // 通知許可の確認
-    if (Notification.permission !== 'granted') {
-      console.warn('[NotificationService] 通知許可が得られていません');
-      return;
-    }
-
-    // 通知設定の確認
-    const settings = getNotificationSettings();
-    if (!settings.enabled) {
-      console.log('[NotificationService] 通知が無効化されています');
-      return;
-    }
-
-    // タイプ別の設定確認
-    if (!shouldShowNotification(payload.type, settings)) {
-      console.log('[NotificationService] この通知タイプは無効化されています:', payload.type);
-      return;
-    }
-
-    // 静音時間の確認
-    if (isQuietHours(settings)) {
-      console.log('[NotificationService] 静音時間中のため通知をスキップします');
-      return;
-    }
-
-    // Service Workerで通知を表示
-    if ('serviceWorker' in navigator) {
-      const registration = await navigator.serviceWorker.ready;
-      await registration.showNotification(payload.title, {
-        body: payload.body,
-        icon: payload.icon || '/icon-192.png',
-        badge: payload.badge || '/badge-72.png',
-        tag: payload.tag || `notification-${Date.now()}`,
-        data: payload.data,
-        requireInteraction: payload.requireInteraction || false,
-      });
-    } else {
-      // フォールバック: ブラウザ標準通知
-      new Notification(payload.title, {
-        body: payload.body,
-        icon: payload.icon || '/icon-192.png',
-      });
-    }
-
-    // 通知履歴を保存
-    await saveNotificationHistory({
-      type: payload.type,
-      title: payload.title,
-      body: payload.body,
-      sentAt: new Date(),
-      clicked: false,
-    });
-
-    console.log('[NotificationService] 通知を表示しました');
-  } catch (error) {
-    console.error('[NotificationService] 通知の表示に失敗:', error);
-  }
-}
-
-/**
- * 通知タイプが設定で有効か確認
- */
-function shouldShowNotification(type: NotificationType, settings: NotificationSettings): boolean {
-  switch (type) {
-    case 'review_reminder':
-      return settings.reviewReminders;
-    case 'goal_achieved':
-    case 'goal_progress':
-      return settings.goalNotifications;
-    case 'streak_reminder':
-    case 'streak_achievement':
-      return settings.streakReminders;
-    case 'weakness_detected':
-      return settings.weaknessAlerts;
-    case 'daily_reminder':
-      return settings.dailyReminder;
-    default:
-      return true;
-  }
-}
-
-/**
- * 現在が静音時間かチェック
- */
-function isQuietHours(settings: NotificationSettings): boolean {
-  if (!settings.quietHoursEnabled) return false;
-
-  const now = new Date();
-  const currentTime = now.getHours() * 60 + now.getMinutes();
-
-  const [startHour, startMin] = settings.quietHoursStart.split(':').map(Number);
-  const [endHour, endMin] = settings.quietHoursEnd.split(':').map(Number);
-
-  const startTime = startHour * 60 + startMin;
-  const endTime = endHour * 60 + endMin;
-
-  if (startTime <= endTime) {
-    // 同日内（例: 22:00 - 07:00の場合は日を跨ぐ）
-    return currentTime >= startTime && currentTime < endTime;
-  } else {
-    // 日を跨ぐ（例: 22:00 - 07:00）
-    return currentTime >= startTime || currentTime < endTime;
-  }
-}
-
-/**
- * 通知履歴を保存
- */
-async function saveNotificationHistory(history: NotificationHistory): Promise<void> {
-  try {
-    await db.notificationHistory.add(history);
-  } catch (error) {
-    console.error('[NotificationService] 通知履歴の保存に失敗:', error);
-  }
-}
-
-/**
- * 復習リマインダーを生成
- */
-export async function generateReviewReminders(): Promise<NotificationPayload[]> {
-  try {
-    console.log('[NotificationService] 復習リマインダーを生成中...');
-
-    const dueCards = await spacedRepetitionService.getDueCards();
-
-    if (dueCards.length === 0) {
-      console.log('[NotificationService] 復習が必要なカードがありません');
-      return [];
-    }
-
-    const notifications: NotificationPayload[] = [];
-
-    // カードが5件以上ある場合は通知
-    if (dueCards.length >= 5) {
-      notifications.push({
-        type: 'review_reminder',
-        title: '📚 復習のお時間です',
-        body: `${dueCards.length}件の問題が復習を待っています`,
-        tag: 'review-reminder',
-        requireInteraction: false,
-        actions: [
-          { action: 'review', title: '今すぐ復習' },
-          { action: 'later', title: '後で' },
-        ],
-        data: { dueCount: dueCards.length },
-      });
-    }
-
-    return notifications;
-  } catch (error) {
-    console.error('[NotificationService] 復習リマインダーの生成に失敗:', error);
-    return [];
-  }
-}
-
-/**
- * 目標達成通知を生成
- */
-export async function generateGoalNotifications(): Promise<NotificationPayload[]> {
-  try {
-    console.log('[NotificationService] 目標通知を生成中...');
-
-    const goals = await getAllGoals();
-    const notifications: NotificationPayload[] = [];
-
-    for (const goal of goals) {
-      if (goal.status !== 'active') continue;
-
-      const progress = (goal.currentValue / goal.targetValue) * 100;
-
-      // 目標達成
-      if (progress >= 100 && goal.status === 'active') {
-        notifications.push({
-          type: 'goal_achieved',
-          title: '🎉 目標達成！',
-          body: `「${goal.title}」を達成しました！`,
-          tag: `goal-${goal.id}`,
-          requireInteraction: true,
-          data: { goalId: goal.id },
+        subscription = await this.serviceWorkerRegistration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: this.urlBase64ToUint8Array(vapidPublicKey),
         });
-      }
-      // 進捗マイルストーン（50%, 75%）
-      else if (progress >= 50 && progress < 60) {
-        notifications.push({
-          type: 'goal_progress',
-          title: '📈 目標進捗 50%',
-          body: `「${goal.title}」が半分達成されました！`,
-          tag: `goal-progress-${goal.id}`,
-          data: { goalId: goal.id, progress },
-        });
-      } else if (progress >= 75 && progress < 85) {
-        notifications.push({
-          type: 'goal_progress',
-          title: '📈 目標進捗 75%',
-          body: `「${goal.title}」があと少しです！`,
-          tag: `goal-progress-${goal.id}`,
-          data: { goalId: goal.id, progress },
-        });
-      }
-    }
 
-    return notifications;
-  } catch (error) {
-    console.error('[NotificationService] 目標通知の生成に失敗:', error);
-    return [];
-  }
-}
-
-/**
- * ストリーク通知を生成
- */
-export async function generateStreakNotifications(): Promise<NotificationPayload[]> {
-  try {
-    console.log('[NotificationService] ストリーク通知を生成中...');
-
-    const histories = await db.history.toArray();
-    const notifications: NotificationPayload[] = [];
-
-    // 連続学習日数を計算
-    const sortedDates = histories
-      .map(h => {
-        const date = new Date(h.timestamp);
-        date.setHours(0, 0, 0, 0);
-        return date.getTime();
-      })
-      .filter((date, index, arr) => arr.indexOf(date) === index)
-      .sort((a, b) => b - a);
-
-    let streak = 0;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    let currentDate = today;
-
-    for (const dateTime of sortedDates) {
-      if (dateTime === currentDate.getTime()) {
-        streak++;
-        currentDate.setDate(currentDate.getDate() - 1);
-      } else if (dateTime === currentDate.getTime() - 86400000) {
-        streak++;
-        currentDate.setDate(currentDate.getDate() - 1);
+        debugLog('✅ 新しいPushサブスクリプションを作成しました');
       } else {
-        break;
+        debugLog('✅ 既存のPushサブスクリプションを使用します');
       }
-    }
 
-    // 今日まだ学習していない場合の継続リマインダー
-    if (sortedDates[0] !== today.getTime() && streak > 0) {
-      notifications.push({
-        type: 'streak_reminder',
-        title: `🔥 ${streak}日連続学習中！`,
-        body: '今日も学習してストリークを継続しましょう',
-        tag: 'streak-reminder',
-        requireInteraction: false,
-        actions: [
-          { action: 'start', title: '今すぐ始める' },
-          { action: 'dismiss', title: '後で' },
-        ],
-        data: { streak },
-      });
-    }
+      // サブスクリプションをJSON形式で保存
+      const subscriptionJson = JSON.stringify(subscription.toJSON());
+      await this.updateSettings({ subscriptionJson });
 
-    // マイルストーン達成（7日、30日、100日）
-    if ([7, 30, 100].includes(streak)) {
-      notifications.push({
-        type: 'streak_achievement',
-        title: `🎊 ${streak}日連続達成！`,
-        body: `素晴らしい継続力です！この調子で続けましょう`,
-        tag: `streak-${streak}`,
-        requireInteraction: true,
-        data: { streak },
-      });
-    }
+      // サーバーにサブスクリプションを登録（認証済みの場合）
+      await this.registerSubscriptionOnServer(subscription);
 
-    return notifications;
-  } catch (error) {
-    console.error('[NotificationService] ストリーク通知の生成に失敗:', error);
-    return [];
+      return subscription;
+    } catch (error) {
+      debugLog('❌ Pushサブスクリプションエラー:', error);
+      throw error;
+    }
   }
-}
 
-/**
- * 日次リマインダーを生成
- */
-export function generateDailyReminder(): NotificationPayload {
-  const hour = new Date().getHours();
-  let greeting = 'おはようございます';
-  if (hour >= 12 && hour < 18) greeting = 'こんにちは';
-  if (hour >= 18) greeting = 'こんばんは';
+  /**
+   * Push APIからアンサブスクライブ
+   */
+  async unsubscribe(): Promise<void> {
+    debugLog('📡 Push APIからアンサブスクライブ中...');
 
-  return {
-    type: 'daily_reminder',
-    title: `📖 ${greeting}`,
-    body: '今日も学習を始めましょう！',
-    tag: 'daily-reminder',
-    actions: [
-      { action: 'start', title: '学習を始める' },
-      { action: 'dismiss', title: '閉じる' },
-    ],
-  };
-}
-
-/**
- * すべての通知をチェックして送信
- */
-export async function checkAndSendNotifications(): Promise<void> {
-  try {
-    console.log('[NotificationService] 通知をチェック中...');
-
-    const settings = getNotificationSettings();
-    if (!settings.enabled) {
-      console.log('[NotificationService] 通知が無効化されています');
+    if (!this.serviceWorkerRegistration) {
       return;
     }
 
-    const allNotifications: NotificationPayload[] = [];
+    try {
+      const subscription = await this.serviceWorkerRegistration.pushManager.getSubscription();
 
-    // 復習リマインダー
-    if (settings.reviewReminders) {
-      const reviewNotifications = await generateReviewReminders();
-      allNotifications.push(...reviewNotifications);
+      if (subscription) {
+        // サーバーからも解除
+        await this.unregisterSubscriptionOnServer(subscription.endpoint);
+        await subscription.unsubscribe();
+        debugLog('✅ Pushサブスクリプションを解除しました');
+      }
+
+      await this.updateSettings({ subscriptionJson: null });
+    } catch (error) {
+      debugLog('❌ Pushアンサブスクリプションエラー:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 現在のサブスクリプションを取得
+   */
+  async getSubscription(): Promise<PushSubscription | null> {
+    if (!this.serviceWorkerRegistration) {
+      return null;
     }
 
-    // 目標通知
-    if (settings.goalNotifications) {
-      const goalNotifications = await generateGoalNotifications();
-      allNotifications.push(...goalNotifications);
+    try {
+      return await this.serviceWorkerRegistration.pushManager.getSubscription();
+    } catch (error) {
+      debugLog('❌ サブスクリプション取得エラー:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 通知を送信（ローカル通知）
+   */
+  async sendNotification(data: NotificationData): Promise<void> {
+    debugLog('🔔 通知を送信中:', data);
+
+    // 通知許可を確認
+    if (!this.settings || this.settings.permission !== 'granted') {
+      debugLog('❌ 通知許可がありません');
+      return;
     }
 
-    // ストリーク通知
-    if (settings.streakReminders) {
-      const streakNotifications = await generateStreakNotifications();
-      allNotifications.push(...streakNotifications);
+    try {
+      if (this.serviceWorkerRegistration) {
+        // Service Worker経由で通知を送信
+        await this.serviceWorkerRegistration.showNotification(data.title, {
+          body: data.body,
+          icon: data.icon || '/icon-192x192.png',
+          badge: data.badge || '/badge-72x72.png',
+          tag: data.tag,
+          data: { ...data.data, url: data.url },
+          requireInteraction: false,
+          silent: false,
+        });
+      } else {
+        // フォールバック: 直接通知を作成
+        new Notification(data.title, {
+          body: data.body,
+          icon: data.icon || '/icon-192x192.png',
+          tag: data.tag,
+          data: { url: data.url },
+        });
+      }
+
+      // 通知履歴を保存
+      await this.saveNotificationHistory(data);
+
+      debugLog('✅ 通知送信完了');
+    } catch (error) {
+      debugLog('❌ 通知送信エラー:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 復習リマインダーを送信
+   */
+  async sendReviewReminder(): Promise<void> {
+    debugLog('📚 復習リマインダーを送信中...');
+
+    if (!this.settings?.reviewReminderEnabled) {
+      debugLog('⏭️ 復習リマインダーは無効です');
+      return;
     }
 
-    // 各通知を表示
-    for (const notification of allNotifications) {
-      await showNotification(notification);
+    try {
+      // 復習が必要なカードを取得（isDue=trueのカード）
+      const dueCards = await db.spacedRepetitionCards
+        .where('isDue')
+        .equals(1)
+        .toArray();
+
+      if (dueCards.length === 0) {
+        debugLog('✅ 復習が必要なカードはありません');
+        return;
+      }
+
+      // カテゴリー別に集計
+      const categoryMap = new Map<string, number>();
+      for (const card of dueCards) {
+        const category = card.category || '未分類';
+        const count = categoryMap.get(category) || 0;
+        categoryMap.set(category, count + 1);
+      }
+
+      const categories = Array.from(categoryMap.entries())
+        .map(([category, count]) => ({ category, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 3); // トップ3カテゴリー
+
+      // 優先度の高いカード（easinessFactor < 2.0）を計算
+      const urgentCards = dueCards.filter((card) => card.easinessFactor < 2.0).length;
+
+      const data: NotificationData = {
+        type: 'review_reminder',
+        title: '📚 復習の時間です！',
+        body: `${dueCards.length}枚のカードが復習待ちです`,
+        icon: '/icon-192x192.png',
+        badge: '/badge-72x72.png',
+        tag: 'review-reminder',
+        url: '/spacedRepetitionReview',
+        data: {
+          type: 'review_reminder',
+          cardCount: dueCards.length,
+          categories,
+          urgentCards,
+        } as ReviewReminderData,
+      };
+
+      await this.sendNotification(data);
+
+      debugLog(`✅ 復習リマインダー送信完了: ${dueCards.length}枚`);
+    } catch (error) {
+      debugLog('❌ 復習リマインダー送信エラー:', error);
+    }
+  }
+
+  /**
+   * 目標達成通知を送信
+   */
+  async sendGoalAchievementNotification(goalId: number): Promise<void> {
+    debugLog(`🎉 目標達成通知を送信中: goalId=${goalId}`);
+
+    if (!this.settings?.goalAchievementEnabled) {
+      debugLog('⏭️ 目標達成通知は無効です');
+      return;
     }
 
-    console.log(`[NotificationService] ${allNotifications.length}件の通知を送信しました`);
-  } catch (error) {
-    console.error('[NotificationService] 通知のチェックと送信に失敗:', error);
+    try {
+      // 目標を取得
+      const goal = await db.goals.get(goalId);
+
+      if (!goal) {
+        debugLog('❌ 目標が見つかりません');
+        return;
+      }
+
+      const data: NotificationData = {
+        type: 'goal_achievement',
+        title: '🎉 目標達成おめでとうございます！',
+        body: `「${goal.title}」を達成しました！`,
+        icon: '/icon-192x192.png',
+        badge: '/badge-72x72.png',
+        tag: `goal-${goalId}`,
+        url: '/goalManager',
+        data: {
+          type: 'goal_achievement',
+          goalId,
+          goalTitle: goal.title,
+          targetValue: goal.targetValue,
+          currentValue: goal.currentValue,
+        } as GoalAchievementData,
+      };
+
+      await this.sendNotification(data);
+
+      debugLog('✅ 目標達成通知送信完了');
+    } catch (error) {
+      debugLog('❌ 目標達成通知送信エラー:', error);
+    }
+  }
+
+  /**
+   * ストリーク継続アラートを送信
+   */
+  async sendStreakAlert(): Promise<void> {
+    debugLog('🔥 ストリーク継続アラートを送信中...');
+
+    if (!this.settings?.streakAlertEnabled) {
+      debugLog('⏭️ ストリーク継続アラートは無効です');
+      return;
+    }
+
+    try {
+      // 今日の学習履歴を確認
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const todayHistory = await db.history
+        .where('timestamp')
+        .above(today)
+        .count();
+
+      // 今日すでに学習している場合はアラート不要
+      if (todayHistory > 0) {
+        debugLog('✅ 今日はすでに学習しています');
+        return;
+      }
+
+      // ストリーク日数を計算（簡易版）
+      const allHistory = await db.history
+        .orderBy('timestamp')
+        .reverse()
+        .toArray();
+
+      let streakDays = 0;
+      let currentDate = new Date();
+      currentDate.setDate(currentDate.getDate() - 1); // 昨日から
+      currentDate.setHours(0, 0, 0, 0);
+
+      for (const entry of allHistory) {
+        const entryDate = new Date(entry.timestamp);
+        entryDate.setHours(0, 0, 0, 0);
+
+        if (entryDate.getTime() === currentDate.getTime()) {
+          streakDays++;
+          currentDate.setDate(currentDate.getDate() - 1);
+        } else if (entryDate.getTime() < currentDate.getTime()) {
+          break;
+        }
+      }
+
+      // ストリークがない場合はアラート不要
+      if (streakDays === 0) {
+        debugLog('✅ 現在ストリークはありません');
+        return;
+      }
+
+      const data: NotificationData = {
+        type: 'streak_alert',
+        title: '🔥 ストリーク継続中！',
+        body: `${streakDays}日連続学習中です。今日も続けましょう！`,
+        icon: '/icon-192x192.png',
+        badge: '/badge-72x72.png',
+        tag: 'streak-alert',
+        url: '/quiz',
+        data: {
+          type: 'streak_alert',
+          streakDays,
+          message: `${streakDays}日連続で学習しています。素晴らしいです！`,
+        } as StreakAlertData,
+      };
+
+      await this.sendNotification(data);
+
+      debugLog(`✅ ストリーク継続アラート送信完了: ${streakDays}日`);
+    } catch (error) {
+      debugLog('❌ ストリーク継続アラート送信エラー:', error);
+    }
+  }
+
+  /**
+   * 通知スケジュールを設定
+   */
+  async scheduleNotifications(): Promise<void> {
+    debugLog('⏰ 通知スケジュールを設定中...');
+
+    if (!this.settings) {
+      debugLog('❌ 通知設定が読み込まれていません');
+      return;
+    }
+
+    try {
+      // 復習リマインダーのスケジュール
+      if (this.settings.reviewReminderEnabled) {
+        this.scheduleReviewReminder();
+      }
+
+      // ストリーク継続アラートのスケジュール
+      if (this.settings.streakAlertEnabled) {
+        this.scheduleStreakAlert();
+      }
+
+      debugLog('✅ 通知スケジュール設定完了');
+    } catch (error) {
+      debugLog('❌ 通知スケジュール設定エラー:', error);
+    }
+  }
+
+  /**
+   * 復習リマインダーをスケジュール
+   */
+  private scheduleReviewReminder(): void {
+    if (!this.settings) return;
+
+    const [hours, minutes] = this.settings.reviewReminderTime.split(':').map(Number);
+    const now = new Date();
+    const scheduledTime = new Date();
+    scheduledTime.setHours(hours, minutes, 0, 0);
+
+    // 今日の時刻を過ぎている場合は明日に設定
+    if (scheduledTime <= now) {
+      scheduledTime.setDate(scheduledTime.getDate() + 1);
+    }
+
+    const delay = scheduledTime.getTime() - now.getTime();
+
+    setTimeout(() => {
+      this.sendReviewReminder();
+      // 次の日のスケジュールを設定（daily の場合）
+      if (this.settings?.reviewReminderFrequency === 'daily') {
+        this.scheduleReviewReminder();
+      }
+    }, delay);
+
+    debugLog(`📅 復習リマインダーをスケジュール: ${scheduledTime.toLocaleString()}`);
+  }
+
+  /**
+   * ストリーク継続アラートをスケジュール
+   */
+  private scheduleStreakAlert(): void {
+    if (!this.settings) return;
+
+    const [hours, minutes] = this.settings.streakAlertTime.split(':').map(Number);
+    const now = new Date();
+    const scheduledTime = new Date();
+    scheduledTime.setHours(hours, minutes, 0, 0);
+
+    // 今日の時刻を過ぎている場合は明日に設定
+    if (scheduledTime <= now) {
+      scheduledTime.setDate(scheduledTime.getDate() + 1);
+    }
+
+    const delay = scheduledTime.getTime() - now.getTime();
+
+    setTimeout(() => {
+      this.sendStreakAlert();
+      // 次の日のスケジュールを設定
+      this.scheduleStreakAlert();
+    }, delay);
+
+    debugLog(`📅 ストリーク継続アラートをスケジュール: ${scheduledTime.toLocaleString()}`);
+  }
+
+  /**
+   * 設定を取得
+   */
+  async getSettings(): Promise<NotificationSettings | null> {
+    if (!this.settings) {
+      await this.loadSettings();
+    }
+    return this.settings;
+  }
+
+  /**
+   * 設定を更新
+   */
+  async updateSettings(updates: Partial<NotificationSettings>): Promise<void> {
+    debugLog('📝 通知設定を更新中:', updates);
+
+    try {
+      if (!this.settings) {
+        await this.loadSettings();
+      }
+
+      if (this.settings) {
+        const updatedSettings = {
+          ...this.settings,
+          ...updates,
+          updatedAt: new Date(),
+        };
+
+        await db.notificationSettings.put(updatedSettings);
+        this.settings = updatedSettings;
+
+        // スケジュールを再設定
+        if (updates.reviewReminderEnabled !== undefined ||
+            updates.reviewReminderTime !== undefined ||
+            updates.streakAlertEnabled !== undefined ||
+            updates.streakAlertTime !== undefined) {
+          await this.scheduleNotifications();
+        }
+
+        debugLog('✅ 通知設定更新完了');
+      }
+    } catch (error) {
+      debugLog('❌ 通知設定更新エラー:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 通知履歴を保存
+   */
+  private async saveNotificationHistory(data: NotificationData): Promise<void> {
+    try {
+      await db.notificationHistory.add({
+        type: data.type,
+        title: data.title,
+        body: data.body,
+        sentAt: new Date(),
+        clicked: false,
+      } as any);
+    } catch (error) {
+      debugLog('❌ 通知履歴保存エラー:', error);
+    }
+  }
+
+  /**
+   * サーバーにPushサブスクリプションを登録
+   */
+  private async registerSubscriptionOnServer(subscription: PushSubscription): Promise<void> {
+    try {
+      const { getAuth } = await import('firebase/auth');
+      const auth = getAuth();
+      const user = auth.currentUser;
+      if (!user) {
+        debugLog('⚠️ 未ログインのためサーバー登録スキップ');
+        return;
+      }
+
+      const idToken = await user.getIdToken();
+      const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'minguella-5f151';
+      const baseUrl = import.meta.env.VITE_FUNCTIONS_URL ||
+        `https://us-central1-${projectId}.cloudfunctions.net`;
+
+      const response = await fetch(`${baseUrl}/registerPushSubscription`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ subscription: subscription.toJSON() }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server registration failed: ${response.status}`);
+      }
+
+      debugLog('✅ サーバーにPushサブスクリプション登録完了');
+    } catch (error) {
+      debugLog('⚠️ サーバー登録エラー（ローカル通知は継続）:', error);
+    }
+  }
+
+  /**
+   * サーバーからPushサブスクリプションを解除
+   */
+  private async unregisterSubscriptionOnServer(endpoint: string): Promise<void> {
+    try {
+      const { getAuth } = await import('firebase/auth');
+      const auth = getAuth();
+      const user = auth.currentUser;
+      if (!user) return;
+
+      const idToken = await user.getIdToken();
+      const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'minguella-5f151';
+      const baseUrl = import.meta.env.VITE_FUNCTIONS_URL ||
+        `https://us-central1-${projectId}.cloudfunctions.net`;
+
+      await fetch(`${baseUrl}/unregisterPushSubscription`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ endpoint }),
+      });
+
+      debugLog('✅ サーバーからPushサブスクリプション解除完了');
+    } catch (error) {
+      debugLog('⚠️ サーバー解除エラー:', error);
+    }
+  }
+
+  /**
+   * VAPID公開鍵を取得
+   */
+  private getVapidPublicKey(): string {
+    return import.meta.env.VITE_VAPID_PUBLIC_KEY || '';
+  }
+
+  /**
+   * Base64エンコードされたVAPID鍵をUint8Arrayに変換
+   */
+  private urlBase64ToUint8Array(base64String: string): Uint8Array {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+      .replace(/-/g, '+')
+      .replace(/_/g, '/');
+
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  }
+
+  /**
+   * テスト通知を送信
+   */
+  async sendTestNotification(): Promise<void> {
+    const data: NotificationData = {
+      type: 'test',
+      title: '🔔 テスト通知',
+      body: '通知システムは正常に動作しています！',
+      icon: '/icon-192x192.png',
+      tag: 'test-notification',
+    };
+
+    await this.sendNotification(data);
   }
 }
 
-/**
- * 通知履歴を取得
- */
-export async function getNotificationHistory(limit: number = 50): Promise<NotificationHistory[]> {
-  try {
-    const history = await db.notificationHistory
-      .orderBy('sentAt')
-      .reverse()
-      .limit(limit)
-      .toArray();
-    return history;
-  } catch (error) {
-    console.error('[NotificationService] 通知履歴の取得に失敗:', error);
-    return [];
-  }
-}
-
-/**
- * 通知をクリック済みにマーク
- */
-export async function markNotificationAsClicked(id: number): Promise<void> {
-  try {
-    await db.notificationHistory.update(id, {
-      clicked: true,
-      clickedAt: new Date(),
-    });
-  } catch (error) {
-    console.error('[NotificationService] 通知のマークに失敗:', error);
-  }
-}
-
-/**
- * 古い通知履歴を削除（30日より古いもの）
- */
-export async function cleanupOldNotifications(): Promise<void> {
-  try {
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-    const oldNotifications = await db.notificationHistory
-      .where('sentAt')
-      .below(thirtyDaysAgo)
-      .toArray();
-
-    if (oldNotifications.length > 0) {
-      await db.notificationHistory.bulkDelete(oldNotifications.map(n => n.id!));
-      console.log(`[NotificationService] ${oldNotifications.length}件の古い通知を削除しました`);
-    }
-  } catch (error) {
-    console.error('[NotificationService] 古い通知の削除に失敗:', error);
-  }
-}
+// シングルトンインスタンス
+export const notificationService = new NotificationService();

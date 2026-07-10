@@ -166,29 +166,47 @@ self.addEventListener('notificationclick', (event) => {
 
   // アクションに応じたURLを決定
   let url = '/';
-  switch (event.action) {
-    case 'quiz':
-    case 'start':
-      url = '/?action=quiz';
+
+  // 通知データから type を取得して適切なURLを設定
+  const notifData = event.notification.data || {};
+  const notifType = notifData.type;
+
+  switch (notifType) {
+    case 'review_reminder':
+      url = notifData.url || '/spacedRepetitionReview';
       break;
-    case 'review':
-      url = '/?action=review';
+    case 'goal_achievement':
+      url = notifData.url || '/goalManager';
       break;
-    case 'stats':
-      url = '/?action=stats';
+    case 'streak_alert':
+      url = notifData.url || '/quiz';
       break;
-    case 'later':
-    case 'dismiss':
-      // 何もしない
-      return;
     default:
-      // カスタムデータからURLを取得
-      if (event.notification.data && event.notification.data.url) {
-        url = event.notification.data.url;
-      } else if (event.notification.data && event.notification.data.goalId) {
-        url = `/?view=goalManager&goalId=${event.notification.data.goalId}`;
+      // 従来の action ベース処理
+      switch (event.action) {
+        case 'quiz':
+        case 'start':
+          url = '/?action=quiz';
+          break;
+        case 'review':
+          url = '/?action=review';
+          break;
+        case 'stats':
+          url = '/?action=stats';
+          break;
+        case 'later':
+        case 'dismiss':
+          // 何もしない
+          return;
+        default:
+          // カスタムデータからURLを取得
+          if (notifData.url) {
+            url = notifData.url;
+          } else if (notifData.goalId) {
+            url = `/?view=goalManager&goalId=${notifData.goalId}`;
+          }
+          break;
       }
-      break;
   }
 
   // クリック追跡用のメッセージを送信
@@ -207,7 +225,8 @@ self.addEventListener('notificationclick', (event) => {
               client.postMessage({
                 type: 'NOTIFICATION_CLICKED',
                 action: event.action,
-                data: event.notification.data
+                notificationType: notifType,
+                data: notifData
               });
               return client.focus();
             }
@@ -222,6 +241,16 @@ self.addEventListener('notificationclick', (event) => {
       // 通知クリックをIndexedDBに記録
       recordNotificationClick(event.notification)
     ])
+  );
+});
+
+// 通知閉じる時の処理
+self.addEventListener('notificationclose', (event) => {
+  console.log('[SW] Notification closed');
+
+  // 通知が閉じられたことを記録（分析用）
+  event.waitUntil(
+    recordNotificationClose(event.notification)
   );
 });
 
@@ -254,6 +283,32 @@ async function recordNotificationClick(notification) {
     console.log('[SW] Notification click recorded');
   } catch (error) {
     console.error('[SW] Failed to record notification click:', error);
+  }
+}
+
+// 通知閉じるイベントを記録
+async function recordNotificationClose(notification) {
+  try {
+    console.log('[SW] Recording notification close:', notification.tag);
+
+    // 分析用に閉じたイベントをログ
+    // 将来的に通知の効果測定に使用可能
+    const cache = await caches.open('notification-analytics');
+    const analytics = {
+      type: notification.data?.type || 'unknown',
+      tag: notification.tag,
+      closedAt: new Date().toISOString(),
+      wasClicked: false // closeイベントの場合はクリックされていない
+    };
+
+    await cache.put(
+      `/analytics-close-${Date.now()}`,
+      new Response(JSON.stringify(analytics))
+    );
+
+    console.log('[SW] Notification close recorded');
+  } catch (error) {
+    console.error('[SW] Failed to record notification close:', error);
   }
 }
 

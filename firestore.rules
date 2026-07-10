@@ -1,0 +1,25 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ユーザーデータ: 自分のデータのみ読み書き可能
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // サブスクリプション: Cloud Functionsのみ書き込み可（クライアントは読み取り不可）
+    match /subscriptions/{customerId} {
+      allow read, write: if false; // Cloud Functions (admin SDK) のみアクセス可
+    }
+
+    // Pushサブスクリプション: Cloud Functionsのみ（admin SDK経由）
+    match /pushSubscriptions/{uid}/{document=**} {
+      allow read, write: if false; // Cloud Functions (admin SDK) のみアクセス可
+    }
+
+    // その他すべて拒否
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

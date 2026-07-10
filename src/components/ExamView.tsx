@@ -23,6 +23,7 @@ export const ExamView: React.FC<ExamViewProps> = ({ onBack }) => {
     const [questions, setQuestions] = useState<Problem[]>([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [answers, setAnswers] = useState<(boolean | number)[]>([]);
+    const [strikethroughStates, setStrikethroughStates] = useState<boolean[][]>([]); // Track strikethrough for each question's options
     const [flagged, setFlagged] = useState<Set<number>>(new Set());
     const [timeLeft, setTimeLeft] = useState<number>(0);
     const [startTime, setStartTime] = useState<Date | null>(null);
@@ -50,6 +51,9 @@ export const ExamView: React.FC<ExamViewProps> = ({ onBack }) => {
         const generatedQuestions = await examService.generateExam(newSettings);
         setQuestions(generatedQuestions);
         setAnswers(new Array(generatedQuestions.length).fill(undefined));
+        setStrikethroughStates(generatedQuestions.map(q =>
+            q.options ? new Array(q.options.length).fill(false) : []
+        ));
         setCurrentIndex(0);
         setFlagged(new Set());
 
@@ -74,6 +78,17 @@ export const ExamView: React.FC<ExamViewProps> = ({ onBack }) => {
                 setCurrentIndex(currentIndex + 1);
             }
         }, 300);
+    };
+
+    const handleToggleStrikethrough = (optionIndex: number) => {
+        const newStrikethroughStates = [...strikethroughStates];
+        if (!newStrikethroughStates[currentIndex]) {
+            newStrikethroughStates[currentIndex] = [];
+        }
+        const currentStrikethrough = [...(newStrikethroughStates[currentIndex] || [])];
+        currentStrikethrough[optionIndex] = !currentStrikethrough[optionIndex];
+        newStrikethroughStates[currentIndex] = currentStrikethrough;
+        setStrikethroughStates(newStrikethroughStates);
     };
 
     const toggleFlag = () => {
@@ -253,6 +268,8 @@ export const ExamView: React.FC<ExamViewProps> = ({ onBack }) => {
                                             isSelected={answers[currentIndex] === idx}
                                             onClick={() => handleAnswer(idx)}
                                             disabled={false}
+                                            isStrikedThrough={strikethroughStates[currentIndex]?.[idx] || false}
+                                            onStrikethrough={() => handleToggleStrikethrough(idx)}
                                         />
                                     ))
                                 ) : (

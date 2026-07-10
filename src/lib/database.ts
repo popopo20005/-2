@@ -1,8 +1,32 @@
 import Dexie, { type Table } from 'dexie';
-import type { Category, Problem, HistoryEntry, QuizSet, BackupData, QuizSession, StudyDiaryEntry, StudyGoal, AnswerAnalytics, SessionAnalytics, LearningPattern, ReliabilityAssessment, SpacedRepetitionCard, ReviewSession, QuizSetGroupName, StudyTimeSession } from '../types';
+import type { Category, Problem, HistoryEntry, QuizSet, BackupData, QuizSession, StudyDiaryEntry, StudyGoal, AnswerAnalytics, SessionAnalytics, LearningPattern, ReliabilityAssessment, SpacedRepetitionCard, ReviewSession, QuizSetGroupName, StudyTimeSession, NoteTemplate, PodcastPlaylist, StudyPlan, DailyGoal, MockExamResult, Milestone } from '../types';
 import type { CategoryStat } from '../types/weakness';
 import type { Goal } from '../types/goal';
-import type { NotificationHistory } from '../services/notificationService';
+import type { NotificationHistory, NotificationSettings } from '../types/notification';
+import type { BackgroundTaskLog, DailyStatistics, WeeklyStatistics, MonthlyStatistics, SyncQueueItem } from '../types/backgroundTask';
+import type { UserPreset } from '../types/userPreset';
+import type { PersonalSubtopicAnalysis } from '../types/subtopicAnalysis';
+import type { PlanAdjustmentRecord } from '../types/studyPlan';
+import type { MistakeReasonRecord, SmartNote } from '../types/smartNote';
+import type { UserProgress, UnlockedBadge, Achievement, StreakRecord } from '../types/gamification';
+
+// 同期キュー追加（遅延インポートで循環依存を回避）
+function enqueueSyncItem(
+  operation: 'create' | 'update' | 'delete',
+  entityType: SyncQueueItem['entityType'],
+  entityId: number,
+  data: unknown
+): void {
+  // 非同期で実行、失敗してもローカル操作には影響させない
+  import('../workers/syncQueue').then(({ addToSyncQueue }) => {
+    import('../services/syncService').then(({ syncService }) => {
+      if (!syncService.canSync()) return;
+      addToSyncQueue({ operation, entityType, entityId, data }).catch((err) =>
+        console.warn('[DB] 同期キュー追加失敗:', err)
+      );
+    });
+  });
+}
 
 export class QuizAppDatabase extends Dexie {
     categories!: Table<Category>;
@@ -30,6 +54,37 @@ export class QuizAppDatabase extends Dexie {
     goals!: Table<Goal>;
     // 通知履歴テーブル
     notificationHistory!: Table<NotificationHistory>;
+    // 通知設定テーブル
+    notificationSettings!: Table<NotificationSettings>;
+    // バックグラウンドタスクテーブル
+    backgroundTaskLog!: Table<BackgroundTaskLog>;
+    dailyStatistics!: Table<DailyStatistics>;
+    weeklyStatistics!: Table<WeeklyStatistics>;
+    monthlyStatistics!: Table<MonthlyStatistics>;
+    syncQueue!: Table<SyncQueueItem>;
+    // ノートテンプレートテーブル
+    noteTemplates!: Table<NoteTemplate>;
+    // ポッドキャストプレイリストテーブル
+    playlists!: Table<PodcastPlaylist>;
+    // 学習プランテーブル (Phase 1: 試験日ベース学習プランナー)
+    studyPlans!: Table<StudyPlan>;
+    dailyGoals!: Table<DailyGoal>;
+    // カスタムプリセット & サブトピック分析テーブル
+    userPresets!: Table<UserPreset>;
+    personalSubtopicAnalyses!: Table<PersonalSubtopicAnalysis>;
+    // ACTフェーズ: プラン調整履歴
+    planAdjustmentHistory!: Table<PlanAdjustmentRecord>;
+    // スマートノート: 間違い理由タグ + 自動生成ノート
+    mistakeReasonTags!: Table<MistakeReasonRecord>;
+    smartNotes!: Table<SmartNote>;
+    // ゲーミフィケーション: XP/Level/Badge/Achievement/Streak
+    userProgress!: Table<UserProgress>;
+    unlockedBadges!: Table<UnlockedBadge>;
+    achievements!: Table<Achievement>;
+    streakRecords!: Table<StreakRecord>;
+    // PDCA: 模試結果 + マイルストーン
+    mockExamResults!: Table<MockExamResult>;
+    milestones!: Table<Milestone>;
 
     constructor() {
         super('QuizAppDB');
@@ -275,6 +330,224 @@ export class QuizAppDatabase extends Dexie {
             // Compound index for notification filtering
             notificationHistory: '++id, type, sentAt, clicked, clickedAt, [type+sentAt], [clicked+sentAt]'
         });
+
+        // Version 15: Add notificationSettings table for notification configuration
+        this.version(15).stores({
+            categories: 'name',
+            problems: '++id, category, question, type, [category+type]',
+            history: '++id, problemId, category, isCorrect, timestamp, [category+isCorrect], [problemId+timestamp], [timestamp+isCorrect]',
+            quizSets: '++id, name, createdAt',
+            backups: '++id, timestamp, type',
+            quizSessions: '&id, quizSetId, category, isCompleted, isPaused, [quizSetId+isCompleted]',
+            studyDiary: '++id, date, createdAt',
+            studyGoals: '++id, isCompleted, createdAt, targetDate',
+            answerAnalytics: '++id, sessionId, problemId, answerStartTime, createdAt, [sessionId+problemId]',
+            sessionAnalytics: '++id, &sessionId, sessionStartTime, createdAt',
+            learningPatterns: '++id, userId, lastUpdated',
+            reliabilityAssessments: '++id, answerAnalyticsId, reliabilityScore, createdAt',
+            spacedRepetitionCards: '++id, problemId, quizSetId, nextReviewDate, isDue, isNew, category, name, [quizSetId+isDue], [quizSetId+nextReviewDate], [category+isDue]',
+            reviewSessions: '++id, &sessionId, startTime, createdAt',
+            quizSetGroupNames: '++id, &quizSetId, createdAt',
+            studyTimeSessions: '++id, startTime, sessionType, quizSetId, category, createdAt, [startTime+sessionType], [quizSetId+startTime], [category+startTime]',
+            categoryStats: '++id, category, accuracy, lastStudyDate, analyzedAt, [category+analyzedAt]',
+            goals: '++id, type, status, deadline, createdAt, updatedAt, category, quizSetId, [status+deadline], [type+status], [category+status]',
+            notificationHistory: '++id, type, sentAt, clicked, clickedAt, [type+sentAt], [clicked+sentAt]',
+            // New: Notification settings for push notifications
+            notificationSettings: '++id, enabled, permission, updatedAt'
+        });
+
+        // Version 16: Add background task tables for data aggregation and cleanup
+        this.version(16).stores({
+            categories: 'name',
+            problems: '++id, category, question, type, [category+type]',
+            history: '++id, problemId, category, isCorrect, timestamp, [category+isCorrect], [problemId+timestamp], [timestamp+isCorrect]',
+            quizSets: '++id, name, createdAt',
+            backups: '++id, timestamp, type',
+            quizSessions: '&id, quizSetId, category, isCompleted, isPaused, [quizSetId+isCompleted]',
+            studyDiary: '++id, date, createdAt',
+            studyGoals: '++id, isCompleted, createdAt, targetDate',
+            answerAnalytics: '++id, sessionId, problemId, answerStartTime, createdAt, [sessionId+problemId]',
+            sessionAnalytics: '++id, &sessionId, sessionStartTime, createdAt',
+            learningPatterns: '++id, userId, lastUpdated',
+            reliabilityAssessments: '++id, answerAnalyticsId, reliabilityScore, createdAt',
+            spacedRepetitionCards: '++id, problemId, quizSetId, nextReviewDate, isDue, isNew, category, name, [quizSetId+isDue], [quizSetId+nextReviewDate], [category+isDue]',
+            reviewSessions: '++id, &sessionId, startTime, createdAt',
+            quizSetGroupNames: '++id, &quizSetId, createdAt',
+            studyTimeSessions: '++id, startTime, sessionType, quizSetId, category, createdAt, [startTime+sessionType], [quizSetId+startTime], [category+startTime]',
+            categoryStats: '++id, category, accuracy, lastStudyDate, analyzedAt, [category+analyzedAt]',
+            goals: '++id, type, status, deadline, createdAt, updatedAt, category, quizSetId, [status+deadline], [type+status], [category+status]',
+            notificationHistory: '++id, type, sentAt, clicked, clickedAt, [type+sentAt], [clicked+sentAt]',
+            notificationSettings: '++id, enabled, permission, updatedAt',
+            // New: Background task tables
+            backgroundTaskLog: '++id, taskType, status, startedAt, completedAt, [taskType+status], [startedAt+taskType]',
+            dailyStatistics: '++id, date, createdAt, [date+createdAt]',
+            weeklyStatistics: '++id, weekStart, weekEnd, createdAt, [weekStart+weekEnd]',
+            monthlyStatistics: '++id, [year+month], year, month, createdAt',
+            syncQueue: '++id, operation, entityType, entityId, createdAt, syncedAt, retryCount, [operation+entityType], [syncedAt+retryCount]'
+        });
+
+        // Version 17: Add noteTemplates table for custom note templates
+        this.version(17).stores({
+            categories: 'name',
+            problems: '++id, category, question, type, [category+type]',
+            history: '++id, problemId, category, isCorrect, timestamp, [category+isCorrect], [problemId+timestamp], [timestamp+isCorrect]',
+            quizSets: '++id, name, createdAt',
+            backups: '++id, timestamp, type',
+            quizSessions: '&id, quizSetId, category, isCompleted, isPaused, [quizSetId+isCompleted]',
+            studyDiary: '++id, date, createdAt',
+            studyGoals: '++id, isCompleted, createdAt, targetDate',
+            answerAnalytics: '++id, sessionId, problemId, answerStartTime, createdAt, [sessionId+problemId]',
+            sessionAnalytics: '++id, &sessionId, sessionStartTime, createdAt',
+            learningPatterns: '++id, userId, lastUpdated',
+            reliabilityAssessments: '++id, answerAnalyticsId, reliabilityScore, createdAt',
+            spacedRepetitionCards: '++id, problemId, quizSetId, nextReviewDate, isDue, isNew, category, name, [quizSetId+isDue], [quizSetId+nextReviewDate], [category+isDue]',
+            reviewSessions: '++id, &sessionId, startTime, createdAt',
+            quizSetGroupNames: '++id, &quizSetId, createdAt',
+            studyTimeSessions: '++id, startTime, sessionType, quizSetId, category, createdAt, [startTime+sessionType], [quizSetId+startTime], [category+startTime]',
+            categoryStats: '++id, category, accuracy, lastStudyDate, analyzedAt, [category+analyzedAt]',
+            goals: '++id, type, status, deadline, createdAt, updatedAt, category, quizSetId, [status+deadline], [type+status], [category+status]',
+            notificationHistory: '++id, type, sentAt, clicked, clickedAt, [type+sentAt], [clicked+sentAt]',
+            notificationSettings: '++id, enabled, permission, updatedAt',
+            backgroundTaskLog: '++id, taskType, status, startedAt, completedAt, [taskType+status], [startedAt+taskType]',
+            dailyStatistics: '++id, date, createdAt, [date+createdAt]',
+            weeklyStatistics: '++id, weekStart, weekEnd, createdAt, [weekStart+weekEnd]',
+            monthlyStatistics: '++id, [year+month], year, month, createdAt',
+            syncQueue: '++id, operation, entityType, entityId, createdAt, syncedAt, retryCount, [operation+entityType], [syncedAt+retryCount]',
+            // New: Note templates table
+            noteTemplates: '++id, name, category, isDefault, createdAt, updatedAt'
+        });
+
+        // Version 18: Add playlists table for podcast playlists
+        this.version(18).stores({
+            categories: 'name',
+            problems: '++id, category, question, type, [category+type]',
+            history: '++id, problemId, category, isCorrect, timestamp, [category+isCorrect], [problemId+timestamp], [timestamp+isCorrect]',
+            quizSets: '++id, name, createdAt',
+            backups: '++id, timestamp, type',
+            quizSessions: '&id, quizSetId, category, isCompleted, isPaused, [quizSetId+isCompleted]',
+            studyDiary: '++id, date, createdAt',
+            studyGoals: '++id, isCompleted, createdAt, targetDate',
+            answerAnalytics: '++id, sessionId, problemId, answerStartTime, createdAt, [sessionId+problemId]',
+            sessionAnalytics: '++id, &sessionId, sessionStartTime, createdAt',
+            learningPatterns: '++id, userId, lastUpdated',
+            reliabilityAssessments: '++id, answerAnalyticsId, reliabilityScore, createdAt',
+            spacedRepetitionCards: '++id, problemId, quizSetId, nextReviewDate, isDue, isNew, category, name, [quizSetId+isDue], [quizSetId+nextReviewDate], [category+isDue]',
+            reviewSessions: '++id, &sessionId, startTime, createdAt',
+            quizSetGroupNames: '++id, &quizSetId, createdAt',
+            studyTimeSessions: '++id, startTime, sessionType, quizSetId, category, createdAt, [startTime+sessionType], [quizSetId+startTime], [category+startTime]',
+            categoryStats: '++id, category, accuracy, lastStudyDate, analyzedAt, [category+analyzedAt]',
+            goals: '++id, type, status, deadline, createdAt, updatedAt, category, quizSetId, [status+deadline], [type+status], [category+status]',
+            notificationHistory: '++id, type, sentAt, clicked, clickedAt, [type+sentAt], [clicked+sentAt]',
+            notificationSettings: '++id, enabled, permission, updatedAt',
+            backgroundTaskLog: '++id, taskType, status, startedAt, completedAt, [taskType+status], [startedAt+taskType]',
+            dailyStatistics: '++id, date, createdAt, [date+createdAt]',
+            weeklyStatistics: '++id, weekStart, weekEnd, createdAt, [weekStart+weekEnd]',
+            monthlyStatistics: '++id, [year+month], year, month, createdAt',
+            syncQueue: '++id, operation, entityType, entityId, createdAt, syncedAt, retryCount, [operation+entityType], [syncedAt+retryCount]',
+            noteTemplates: '++id, name, category, isDefault, createdAt, updatedAt',
+            // New: Podcast playlists table
+            playlists: '++id, name, createdAt, updatedAt, lastPlayedAt'
+        });
+
+        // Version 19: Add studyPlans and dailyGoals tables for exam-based study planning
+        this.version(19).stores({
+            categories: 'name',
+            problems: '++id, category, question, type, [category+type]',
+            history: '++id, problemId, category, isCorrect, timestamp, [category+isCorrect], [problemId+timestamp], [timestamp+isCorrect]',
+            quizSets: '++id, name, createdAt',
+            backups: '++id, timestamp, type',
+            quizSessions: '&id, quizSetId, category, isCompleted, isPaused, [quizSetId+isCompleted]',
+            studyDiary: '++id, date, createdAt',
+            studyGoals: '++id, isCompleted, createdAt, targetDate',
+            answerAnalytics: '++id, sessionId, problemId, answerStartTime, createdAt, [sessionId+problemId]',
+            sessionAnalytics: '++id, &sessionId, sessionStartTime, createdAt',
+            learningPatterns: '++id, userId, lastUpdated',
+            reliabilityAssessments: '++id, answerAnalyticsId, reliabilityScore, createdAt',
+            spacedRepetitionCards: '++id, problemId, quizSetId, nextReviewDate, isDue, isNew, category, name, [quizSetId+isDue], [quizSetId+nextReviewDate], [category+isDue]',
+            reviewSessions: '++id, &sessionId, startTime, createdAt',
+            quizSetGroupNames: '++id, &quizSetId, createdAt',
+            studyTimeSessions: '++id, startTime, sessionType, quizSetId, category, createdAt, [startTime+sessionType], [quizSetId+startTime], [category+startTime]',
+            categoryStats: '++id, category, accuracy, lastStudyDate, analyzedAt, [category+analyzedAt]',
+            goals: '++id, type, status, deadline, createdAt, updatedAt, category, quizSetId, [status+deadline], [type+status], [category+status]',
+            notificationHistory: '++id, type, sentAt, clicked, clickedAt, [type+sentAt], [clicked+sentAt]',
+            notificationSettings: '++id, enabled, permission, updatedAt',
+            backgroundTaskLog: '++id, taskType, status, startedAt, completedAt, [taskType+status], [startedAt+taskType]',
+            dailyStatistics: '++id, date, createdAt, [date+createdAt]',
+            weeklyStatistics: '++id, weekStart, weekEnd, createdAt, [weekStart+weekEnd]',
+            monthlyStatistics: '++id, [year+month], year, month, createdAt',
+            syncQueue: '++id, operation, entityType, entityId, createdAt, syncedAt, retryCount, [operation+entityType], [syncedAt+retryCount]',
+            noteTemplates: '++id, name, category, isDefault, createdAt, updatedAt',
+            playlists: '++id, name, createdAt, updatedAt, lastPlayedAt',
+            // New: Study plan tables
+            studyPlans: '++id, examDate, isActive, isCompleted, createdAt, [isActive+isCompleted], [examDate+isActive]',
+            dailyGoals: '++id, planId, date, isCompleted, isStudyDay, createdAt, [planId+date], [planId+isCompleted], [date+isCompleted]'
+        });
+
+        // Version 20: Add userPresets & personalSubtopicAnalyses for subtopic importance growth
+        this.version(20).stores({
+            categories: 'name',
+            problems: '++id, category, question, type, [category+type]',
+            history: '++id, problemId, category, isCorrect, timestamp, [category+isCorrect], [problemId+timestamp], [timestamp+isCorrect]',
+            quizSets: '++id, name, createdAt',
+            backups: '++id, timestamp, type',
+            quizSessions: '&id, quizSetId, category, isCompleted, isPaused, [quizSetId+isCompleted]',
+            studyDiary: '++id, date, createdAt',
+            studyGoals: '++id, isCompleted, createdAt, targetDate',
+            answerAnalytics: '++id, sessionId, problemId, answerStartTime, createdAt, [sessionId+problemId]',
+            sessionAnalytics: '++id, &sessionId, sessionStartTime, createdAt',
+            learningPatterns: '++id, userId, lastUpdated',
+            reliabilityAssessments: '++id, answerAnalyticsId, reliabilityScore, createdAt',
+            spacedRepetitionCards: '++id, problemId, quizSetId, nextReviewDate, isDue, isNew, category, name, [quizSetId+isDue], [quizSetId+nextReviewDate], [category+isDue]',
+            reviewSessions: '++id, &sessionId, startTime, createdAt',
+            quizSetGroupNames: '++id, &quizSetId, createdAt',
+            studyTimeSessions: '++id, startTime, sessionType, quizSetId, category, createdAt, [startTime+sessionType], [quizSetId+startTime], [category+startTime]',
+            categoryStats: '++id, category, accuracy, lastStudyDate, analyzedAt, [category+analyzedAt]',
+            goals: '++id, type, status, deadline, createdAt, updatedAt, category, quizSetId, [status+deadline], [type+status], [category+status]',
+            notificationHistory: '++id, type, sentAt, clicked, clickedAt, [type+sentAt], [clicked+sentAt]',
+            notificationSettings: '++id, enabled, permission, updatedAt',
+            backgroundTaskLog: '++id, taskType, status, startedAt, completedAt, [taskType+status], [startedAt+taskType]',
+            dailyStatistics: '++id, date, createdAt, [date+createdAt]',
+            weeklyStatistics: '++id, weekStart, weekEnd, createdAt, [weekStart+weekEnd]',
+            monthlyStatistics: '++id, [year+month], year, month, createdAt',
+            syncQueue: '++id, operation, entityType, entityId, createdAt, syncedAt, retryCount, [operation+entityType], [syncedAt+retryCount]',
+            noteTemplates: '++id, name, category, isDefault, createdAt, updatedAt',
+            playlists: '++id, name, createdAt, updatedAt, lastPlayedAt',
+            studyPlans: '++id, examDate, isActive, isCompleted, createdAt, [isActive+isCompleted], [examDate+isActive]',
+            dailyGoals: '++id, planId, date, isCompleted, isStudyDay, createdAt, [planId+date], [planId+isCompleted], [date+isCompleted]',
+            // New: Custom presets & subtopic analysis
+            userPresets: '++id, &presetId, name, category, createdAt, updatedAt',
+            personalSubtopicAnalyses: '++id, examId, category, confidence, updatedAt, [examId+category]'
+        });
+
+        // Version 21: Add compound index for batch past-exam analysis
+        this.version(21).stores({
+            problems: '++id, category, question, type, [category+type], [category+sourceExamYear]',
+        });
+
+        // ACTフェーズ: プラン調整履歴テーブル
+        this.version(22).stores({
+            planAdjustmentHistory: '++id, planId, trigger, status, createdAt, [planId+status], [planId+trigger+status]',
+        });
+
+        // スマートノート: 間違い理由タグ + 自動生成ノート
+        this.version(23).stores({
+            mistakeReasonTags: '++id, historyId, problemId, category, reasonTag, createdAt, [problemId+reasonTag], [category+reasonTag]',
+            smartNotes: '++id, type, category, generatedAt',
+        });
+
+        // Version 24: ゲーミフィケーション (XP/Level/Badge/Achievement/Streak)
+        this.version(24).stores({
+            userProgress: 'id',
+            unlockedBadges: '++id, badgeId, unlockedAt',
+            achievements: '++id, type, completedAt',
+            streakRecords: '++id, date',
+        });
+
+        // Version 25: PDCA模試結果 + マイルストーン
+        this.version(25).stores({
+            mockExamResults: '++id, planId, examDate, createdAt',
+            milestones: '++id, planId, phase, targetDate, [planId+phase]',
+        });
     }
 }
 
@@ -315,7 +588,9 @@ export const problemService = {
             throw new Error('問題データが無効です');
         }
 
-        return await db.problems.add(problem);
+        const id = await db.problems.add(problem);
+        enqueueSyncItem('create', 'problem', id, { ...problem, id });
+        return id;
     },
 
     async update(problem: Problem): Promise<void> {
@@ -324,10 +599,12 @@ export const problemService = {
         }
 
         await db.problems.put(problem);
+        enqueueSyncItem('update', 'problem', problem.id, problem);
     },
 
     async delete(id: number): Promise<void> {
         await db.problems.delete(id);
+        enqueueSyncItem('delete', 'problem', id, null);
     },
 
     async getAll(): Promise<Problem[]> {
@@ -371,7 +648,8 @@ export const historyService = {
             timestamp: new Date()
         };
 
-        await db.history.add(historyEntry);
+        const id = await db.history.add(historyEntry);
+        enqueueSyncItem('create', 'history', id as number, { ...historyEntry, id });
     },
 
     async getAll(): Promise<HistoryEntry[]> {
@@ -496,9 +774,12 @@ export const quizSetService = {
 
         if ('id' in quizSet && quizSet.id) {
             await db.quizSets.put(setWithTimestamps);
+            enqueueSyncItem('update', 'quizSet', quizSet.id, setWithTimestamps);
             return quizSet.id;
         } else {
-            return await db.quizSets.add(setWithTimestamps);
+            const id = await db.quizSets.add(setWithTimestamps);
+            enqueueSyncItem('create', 'quizSet', id, { ...setWithTimestamps, id });
+            return id;
         }
     },
 
@@ -512,6 +793,7 @@ export const quizSetService = {
 
     async delete(id: number): Promise<void> {
         await db.quizSets.delete(id);
+        enqueueSyncItem('delete', 'quizSet', id, null);
     },
 
     async updateStats(quizSetId: number, subject: string | null, totalAnswered: number, totalCorrect: number): Promise<void> {
@@ -1744,6 +2026,88 @@ export const statisticsService = {
     }
 };
 
+// プレイリスト管理
+export const playlistService = {
+    async getAll(): Promise<PodcastPlaylist[]> {
+        return await db.playlists.toArray();
+    },
+
+    async getById(id: number): Promise<PodcastPlaylist | undefined> {
+        return await db.playlists.get(id);
+    },
+
+    async create(playlist: Omit<PodcastPlaylist, 'id'>): Promise<number> {
+        // 問題集から合計問題数を計算
+        const quizSets = await Promise.all(
+            playlist.quizSetIds.map(id => db.quizSets.get(id))
+        );
+        const totalProblems = quizSets
+            .filter((qs): qs is QuizSet => qs !== undefined)
+            .reduce((sum, qs) => sum + qs.problemIds.length, 0);
+
+        const id = await db.playlists.add({
+            ...playlist,
+            totalProblems,
+            createdAt: new Date(),
+            playCount: 0
+        });
+        return id;
+    },
+
+    async update(id: number, updates: Partial<PodcastPlaylist>): Promise<void> {
+        // quizSetIdsが更新された場合、totalProblemsを再計算
+        if (updates.quizSetIds) {
+            const quizSets = await Promise.all(
+                updates.quizSetIds.map(qsId => db.quizSets.get(qsId))
+            );
+            updates.totalProblems = quizSets
+                .filter((qs): qs is QuizSet => qs !== undefined)
+                .reduce((sum, qs) => sum + qs.problemIds.length, 0);
+        }
+
+        await db.playlists.update(id, {
+            ...updates,
+            updatedAt: new Date()
+        });
+    },
+
+    async delete(id: number): Promise<void> {
+        await db.playlists.delete(id);
+    },
+
+    async incrementPlayCount(id: number): Promise<void> {
+        const playlist = await db.playlists.get(id);
+        if (playlist) {
+            await db.playlists.update(id, {
+                playCount: (playlist.playCount || 0) + 1,
+                lastPlayedAt: new Date()
+            });
+        }
+    },
+
+    async getProblemsFromPlaylist(id: number): Promise<Problem[]> {
+        const playlist = await db.playlists.get(id);
+        if (!playlist) return [];
+
+        const allProblems: Problem[] = [];
+        for (const quizSetId of playlist.quizSetIds) {
+            const quizSet = await db.quizSets.get(quizSetId);
+            if (quizSet) {
+                const problems = await db.problems
+                    .where('id')
+                    .anyOf(quizSet.problemIds)
+                    .toArray();
+                allProblems.push(...problems);
+            }
+        }
+        return allProblems;
+    },
+
+    async getPlaylistsCount(): Promise<number> {
+        return await db.playlists.count();
+    }
+};
+
 // データベース初期化
 export const initializeDatabase = async (): Promise<void> => {
     try {
@@ -1760,6 +2124,269 @@ export const initializeDatabase = async (): Promise<void> => {
     }
 };
 
+// 学習プラン操作 (Phase 1: 試験日ベース学習プランナー)
+export const studyPlanService = {
+    // プラン作成
+    async create(plan: Omit<StudyPlan, 'id'>): Promise<number> {
+        const now = new Date();
+        return await db.studyPlans.add({
+            ...plan,
+            createdAt: now,
+            updatedAt: now
+        } as StudyPlan);
+    },
+
+    // プラン取得（ID指定）
+    async getById(id: number): Promise<StudyPlan | undefined> {
+        return await db.studyPlans.get(id);
+    },
+
+    // アクティブなプラン一覧
+    async getActivePlans(): Promise<StudyPlan[]> {
+        const all = await db.studyPlans.toArray();
+        return all.filter(p => p.isActive && !p.isCompleted);
+    },
+
+    // 全プラン一覧（最新優先）
+    async getAll(): Promise<StudyPlan[]> {
+        return await db.studyPlans
+            .orderBy('createdAt')
+            .reverse()
+            .toArray();
+    },
+
+    // 試験日でソート（直近の試験が先頭）
+    async getByExamDateAsc(): Promise<StudyPlan[]> {
+        return await db.studyPlans
+            .orderBy('examDate')
+            .toArray();
+    },
+
+    // プラン更新
+    async update(id: number, updates: Partial<StudyPlan>): Promise<number> {
+        return await db.studyPlans.update(id, {
+            ...updates,
+            updatedAt: new Date()
+        });
+    },
+
+    // プラン削除
+    async delete(id: number): Promise<void> {
+        // 関連する日次目標も削除
+        await db.transaction('rw', [db.studyPlans, db.dailyGoals], async () => {
+            await db.dailyGoals.where('planId').equals(id).delete();
+            await db.studyPlans.delete(id);
+        });
+    },
+
+    // プラン完了マーク
+    async markCompleted(id: number): Promise<void> {
+        await db.studyPlans.update(id, {
+            isCompleted: true,
+            isActive: false,
+            completedAt: new Date(),
+            updatedAt: new Date()
+        });
+    },
+
+    // プラン一時停止/再開
+    async setPaused(id: number, paused: boolean): Promise<void> {
+        await db.studyPlans.update(id, {
+            isPaused: paused,
+            updatedAt: new Date()
+        });
+    }
+};
+
+// 日次目標操作
+export const dailyGoalService = {
+    // 日次目標バッチ作成
+    async createBatch(goals: Omit<DailyGoal, 'id'>[]): Promise<number[]> {
+        const now = new Date();
+        const goalsWithDates = goals.map(g => ({
+            ...g,
+            createdAt: now,
+            updatedAt: now
+        })) as DailyGoal[];
+        return await db.dailyGoals.bulkAdd(goalsWithDates, { allKeys: true }) as number[];
+    },
+
+    // 単一目標作成
+    async create(goal: Omit<DailyGoal, 'id'>): Promise<number> {
+        const now = new Date();
+        return await db.dailyGoals.add({
+            ...goal,
+            createdAt: now,
+            updatedAt: now
+        } as DailyGoal);
+    },
+
+    // プランIDで全日次目標取得（日付順）
+    async getByPlanId(planId: number): Promise<DailyGoal[]> {
+        return await db.dailyGoals
+            .where('planId')
+            .equals(planId)
+            .sortBy('date');
+    },
+
+    // プランIDで未完了の日次目標取得
+    async getIncompleteByPlanId(planId: number): Promise<DailyGoal[]> {
+        return await db.dailyGoals
+            .where('[planId+isCompleted]')
+            .equals([planId, 0])
+            .sortBy('date');
+    },
+
+    // 日付で目標取得（今日のタスク表示用）
+    async getByDate(date: Date): Promise<DailyGoal[]> {
+        const dateStr = date.toISOString().split('T')[0];
+        const goals = await db.dailyGoals
+            .where('date')
+            .between(
+                new Date(dateStr + 'T00:00:00'),
+                new Date(dateStr + 'T23:59:59'),
+                true, true
+            )
+            .toArray();
+        return goals.filter(g => g.isStudyDay);
+    },
+
+    // 今日の学習目標取得
+    async getTodayGoals(): Promise<DailyGoal[]> {
+        return await dailyGoalService.getByDate(new Date());
+    },
+
+    // 目標更新
+    async update(id: number, updates: Partial<DailyGoal>): Promise<number> {
+        return await db.dailyGoals.update(id, {
+            ...updates,
+            updatedAt: new Date()
+        });
+    },
+
+    // 目標完了マーク
+    async markCompleted(id: number, actualData: { actualNewProblems: number; actualReviewProblems: number; actualTime?: number; accuracy?: number }): Promise<void> {
+        await db.dailyGoals.update(id, {
+            isCompleted: true,
+            completedAt: new Date(),
+            ...actualData,
+            updatedAt: new Date()
+        });
+    },
+
+    // プラン削除時に使用（バルク削除）
+    async deleteByPlanId(planId: number): Promise<void> {
+        await db.dailyGoals.where('planId').equals(planId).delete();
+    }
+};
+
+// プラン調整履歴操作
+export const planAdjustmentService = {
+    async add(record: Omit<PlanAdjustmentRecord, 'id'>): Promise<number> {
+        return await db.planAdjustmentHistory.add(record as PlanAdjustmentRecord);
+    },
+
+    async getPendingByPlanId(planId: number): Promise<PlanAdjustmentRecord[]> {
+        return await db.planAdjustmentHistory
+            .where('[planId+status]')
+            .equals([planId, 'pending'])
+            .toArray();
+    },
+
+    async getAllPending(): Promise<PlanAdjustmentRecord[]> {
+        return await db.planAdjustmentHistory
+            .where('status')
+            .equals('pending')
+            .toArray();
+    },
+
+    async hasPendingTrigger(planId: number, trigger: PlanAdjustmentRecord['trigger']): Promise<boolean> {
+        const count = await db.planAdjustmentHistory
+            .where('[planId+trigger+status]')
+            .equals([planId, trigger, 'pending'])
+            .count();
+        return count > 0;
+    },
+
+    async updateStatus(id: number, status: PlanAdjustmentRecord['status']): Promise<void> {
+        await db.planAdjustmentHistory.update(id, {
+            status,
+            resolvedAt: new Date(),
+        });
+    },
+
+    async getByPlanId(planId: number): Promise<PlanAdjustmentRecord[]> {
+        return await db.planAdjustmentHistory
+            .where('planId')
+            .equals(planId)
+            .reverse()
+            .sortBy('createdAt');
+    },
+};
+
+// 間違い理由タグサービス
+export const mistakeReasonTagService = {
+    async add(record: Omit<MistakeReasonRecord, 'id'>): Promise<number> {
+        return await db.mistakeReasonTags.add(record as MistakeReasonRecord);
+    },
+
+    async getByProblemId(problemId: number): Promise<MistakeReasonRecord[]> {
+        return await db.mistakeReasonTags
+            .where('problemId')
+            .equals(problemId)
+            .toArray();
+    },
+
+    async getByCategory(category: string): Promise<MistakeReasonRecord[]> {
+        return await db.mistakeReasonTags
+            .where('category')
+            .equals(category)
+            .toArray();
+    },
+
+    async getByReason(reasonTag: string): Promise<MistakeReasonRecord[]> {
+        return await db.mistakeReasonTags
+            .where('reasonTag')
+            .equals(reasonTag)
+            .toArray();
+    },
+
+    async getAll(): Promise<MistakeReasonRecord[]> {
+        return await db.mistakeReasonTags.toArray();
+    },
+};
+
+// スマートノートサービス (DB CRUD)
+export const smartNoteDbService = {
+    async add(note: Omit<SmartNote, 'id'>): Promise<number> {
+        return await db.smartNotes.add(note as SmartNote);
+    },
+
+    async getByType(type: string): Promise<SmartNote[]> {
+        return await db.smartNotes
+            .where('type')
+            .equals(type)
+            .reverse()
+            .sortBy('generatedAt');
+    },
+
+    async getLatestByType(type: string): Promise<SmartNote | undefined> {
+        const notes = await db.smartNotes
+            .where('type')
+            .equals(type)
+            .reverse()
+            .sortBy('generatedAt');
+        return notes[0];
+    },
+
+    async deleteOlderThan(date: Date): Promise<number> {
+        return await db.smartNotes
+            .where('generatedAt')
+            .below(date)
+            .delete();
+    },
+};
+
 // データベースリセット
 export const resetDatabase = async (): Promise<void> => {
     await db.transaction('rw', [db.problems, db.categories, db.history, db.quizSets, db.studyDiary, db.studyGoals, db.quizSessions], async () => {
@@ -1773,4 +2400,45 @@ export const resetDatabase = async (): Promise<void> => {
             db.quizSessions.clear()
         ]);
     });
+};
+
+// 模試結果サービス
+export const mockExamService = {
+    async create(result: Omit<MockExamResult, 'id'>): Promise<number> {
+        return await db.mockExamResults.add(result);
+    },
+
+    async getByPlanId(planId: number): Promise<MockExamResult[]> {
+        return await db.mockExamResults
+            .where('planId')
+            .equals(planId)
+            .sortBy('createdAt');
+    },
+
+    async getLatest(planId: number): Promise<MockExamResult | undefined> {
+        const results = await db.mockExamResults
+            .where('planId')
+            .equals(planId)
+            .reverse()
+            .sortBy('createdAt');
+        return results[0];
+    },
+};
+
+// マイルストーンサービス
+export const milestoneService = {
+    async createBatch(milestones: Omit<Milestone, 'id'>[]): Promise<number[]> {
+        return await db.milestones.bulkAdd(milestones, { allKeys: true }) as number[];
+    },
+
+    async getByPlanId(planId: number): Promise<Milestone[]> {
+        return await db.milestones
+            .where('planId')
+            .equals(planId)
+            .sortBy('targetDate');
+    },
+
+    async update(id: number, updates: Partial<Milestone>): Promise<void> {
+        await db.milestones.update(id, updates);
+    },
 };

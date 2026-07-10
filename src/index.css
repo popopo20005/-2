@@ -127,6 +127,15 @@
       opacity: .5;
     }
   }
+
+  @keyframes quick5-shimmer {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
+  }
 }
 
 @layer base {
@@ -143,6 +152,22 @@
       radial-gradient(circle at 0% 0%, rgba(99, 102, 241, 0.15) 0%, transparent 50%),
       radial-gradient(circle at 100% 100%, rgba(16, 185, 129, 0.1) 0%, transparent 50%);
     background-attachment: fixed;
+    /* モバイル対応: ビューポート全体を使用 */
+    min-height: 100vh;
+    min-height: 100dvh; /* 動的ビューポート高さ */
+  }
+
+  /* モバイル対応: タッチターゲットの最小サイズ */
+  button, a, input, select, textarea {
+    min-height: 44px; /* iOS推奨サイズ */
+    min-width: 44px;
+  }
+
+  /* モバイル対応: テキスト選択の無効化（誤操作防止） */
+  button, .no-select {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
   }
 
   /* Custom Scrollbar */
@@ -221,4 +246,232 @@
 
 .flip-card-back {
   transform: rotateY(180deg);
+}
+
+/* ========================================
+   モバイルレスポンシブ対応
+   ======================================== */
+
+/* ボタンのモバイル対応 */
+@media (max-width: 640px) {
+  /* すべてのボタンを画面内に収める（強制） */
+  button {
+    max-width: 100% !important;
+    width: auto !important;
+    word-wrap: break-word !important;
+    overflow-wrap: break-word !important;
+    hyphens: auto;
+    /* デフォルトでテキスト折り返しを許可 */
+    white-space: normal !important;
+    line-height: 1.4;
+    /* パディングを自動調整 */
+    padding: 0.5rem 0.75rem !important;
+    /* テキストが長い場合はフォントサイズを少し小さく */
+    font-size: clamp(0.75rem, 3vw, 1rem);
+    /* はみ出し防止 */
+    box-sizing: border-box !important;
+    overflow: hidden;
+  }
+
+  /* ボタン内のテキストオーバーフロー防止（強化版） */
+  button span,
+  button div,
+  button p {
+    max-width: 100%;
+    overflow: hidden;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    /* 長すぎる場合は省略記号を表示しない（折り返す） */
+    white-space: normal;
+    display: inline;
+  }
+
+  /* 1行のみのボタン（アイコン+テキスト等）のテキスト省略 */
+  button.single-line {
+    white-space: nowrap !important;
+  }
+
+  button.single-line span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* 長いテキストを持つボタンは折り返しを確実に */
+  button.allow-wrap {
+    white-space: normal !important;
+    line-height: 1.5;
+    padding-top: 0.75rem !important;
+    padding-bottom: 0.75rem !important;
+  }
+
+  /* モーダル内のボタン調整 */
+  [role="dialog"] button,
+  .modal button {
+    font-size: 0.875rem; /* text-sm */
+  }
+
+  /* アクションボタンの調整 */
+  .quiz-action-button,
+  .action-button {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+    font-size: 0.875rem;
+  }
+
+  /* 全幅ボタンの確保 */
+  .w-full {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* フレックスコンテナ内のボタン（強化版） */
+  .flex button,
+  .grid button {
+    min-width: 0 !important;
+    flex-shrink: 1 !important;
+    flex-basis: auto !important;
+  }
+
+  /* 複数ボタンが並ぶコンテナ（確実に折り返す） */
+  .flex.gap-2,
+  .flex.gap-3,
+  .flex.gap-4,
+  .space-x-2,
+  .space-x-3,
+  .space-x-4 {
+    flex-wrap: wrap !important;
+  }
+
+  /* すべてのflexコンテナを折り返し可能に */
+  .flex {
+    flex-wrap: wrap;
+  }
+
+  /* ボタングループコンテナの最大幅制限 */
+  .flex:has(button),
+  .grid:has(button) {
+    max-width: 100% !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  /* テキストのオーバーフロー防止 */
+  h1, h2, h3, h4, h5, h6, p, span, div {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+
+  /* 長いタイトルの調整 */
+  h1 {
+    font-size: 1.5rem; /* text-2xl */
+    line-height: 2rem;
+  }
+
+  h2 {
+    font-size: 1.25rem; /* text-xl */
+    line-height: 1.75rem;
+  }
+
+  /* カードコンテンツの調整 */
+  .card,
+  [class*="Card"] {
+    padding: 1rem;
+  }
+
+  /* 入力フィールドの調整 */
+  input,
+  textarea,
+  select {
+    max-width: 100%;
+    font-size: 16px; /* iOS zoom prevention */
+  }
+
+  /* select要素のテキストオーバーフロー */
+  select {
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  /* テーブルのレスポンシブ対応 */
+  table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  /* グリッドレイアウトの調整 */
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* 2カラムグリッドも1カラムに */
+  .grid-cols-2,
+  .grid-cols-3,
+  .grid-cols-4 {
+    grid-template-columns: 1fr;
+  }
+
+  /* フレックスアイテムの最小幅 */
+  .flex > * {
+    min-width: 0;
+  }
+
+  /* 画面からはみ出すコンテンツを防ぐ（超強力版） */
+  * {
+    max-width: 100vw !important;
+    box-sizing: border-box;
+  }
+
+  /* 長い単語の強制改行（URL、メールアドレス等） */
+  * {
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  /* すべての要素の横スクロール防止 */
+  html, body {
+    overflow-x: hidden !important;
+    max-width: 100vw !important;
+  }
+
+  /* コンテナの最大幅調整 */
+  .container,
+  .max-w-6xl,
+  .max-w-5xl,
+  .max-w-4xl,
+  .max-w-3xl,
+  .max-w-2xl {
+    max-width: 100%;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  /* 縦書きテキストを防ぐ */
+  * {
+    writing-mode: horizontal-tb !important;
+  }
+
+  /* モーダルの調整 */
+  [role="dialog"],
+  .modal {
+    max-width: 95vw;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+
+  /* タッチターゲットサイズの確保（44×44px以上） */
+  button,
+  a,
+  input[type="checkbox"],
+  input[type="radio"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* アイコンボタンの調整 */
+  button:has(svg:only-child) {
+    padding: 0.75rem;
+  }
 }

@@ -7,8 +7,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { Card } from './ui/Card';
-import { Button } from './ui/Button';
 import { EmptyState } from './ui/EmptyState';
 import { SkeletonCard, SkeletonStatGrid, SkeletonList } from './ui/Skeleton';
 import {
@@ -111,7 +109,13 @@ export function WeaknessAnalysis({
 
   const handleStartPractice = async (category: string) => {
     try {
+      console.log('[WeaknessAnalysis] 練習開始:', category);
+      toast.loading(language === 'ja' ? '推奨問題を取得中...' : 'Loading recommended problems...', { id: 'loading-problems' });
+
       const problemIds = await getRecommendedProblemsForWeakness(category, quizSetId, 10);
+      console.log('[WeaknessAnalysis] 取得した問題IDs:', problemIds);
+
+      toast.dismiss('loading-problems');
 
       if (problemIds.length === 0) {
         toast.error(
@@ -123,7 +127,11 @@ export function WeaknessAnalysis({
       }
 
       if (onStartRecommendedQuiz) {
+        console.log('[WeaknessAnalysis] クイズを開始:', problemIds);
         onStartRecommendedQuiz(problemIds);
+      } else {
+        console.error('[WeaknessAnalysis] onStartRecommendedQuiz コールバックがありません');
+        toast.error(language === 'ja' ? 'クイズを開始できませんでした' : 'Failed to start quiz');
       }
 
       toast.success(
@@ -133,6 +141,7 @@ export function WeaknessAnalysis({
       );
     } catch (error) {
       console.error('[WeaknessAnalysis] 推奨問題取得エラー:', error);
+      toast.dismiss('loading-problems');
       toast.error(t.error);
     }
   };
@@ -175,24 +184,24 @@ export function WeaknessAnalysis({
         className="flex justify-between items-start"
       >
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-            <TrendingDown className="w-8 h-8 text-red-500" />
+          <h2 className="text-2xl font-bold text-[#F8FAFC] flex items-center gap-2">
+            <TrendingDown className="w-8 h-8 text-[#EF4444]" />
             {t.title}
           </h2>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">{t.description}</p>
-          <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
+          <p className="text-[#CBD5E1] mt-1">{t.description}</p>
+          <p className="text-sm text-[#64748B] mt-1">
             {t.lastAnalyzed}: {summary.lastAnalyzedAt.toLocaleString(language)}
           </p>
         </div>
-        <Button
-          variant="secondary"
+        <button
           onClick={handleReanalyze}
           disabled={isAnalyzing}
-          className="flex items-center gap-2"
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-[#CBD5E1] hover:bg-white/5 transition-colors disabled:opacity-50"
+          style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}
         >
           <RefreshCw className={`w-4 h-4 ${isAnalyzing ? 'animate-spin' : ''}`} />
           {isAnalyzing ? t.analyzing : t.reanalyze}
-        </Button>
+        </button>
       </motion.div>
 
       {/* 統計カード */}
@@ -202,14 +211,17 @@ export function WeaknessAnalysis({
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.5, delay: 0.1 }}
         >
-          <Card padding="md" hoverable className="h-full">
+          <div
+            className="rounded-2xl p-5 h-full transition-transform hover:scale-[1.02]"
+            style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
             <div className="text-center">
-              <p className="text-sm text-gray-600 dark:text-gray-400">{t.overallAccuracy}</p>
-              <p className="text-3xl font-bold text-blue-600 dark:text-blue-400 mt-2">
+              <p className="text-sm text-[#94A3B8]">{t.overallAccuracy}</p>
+              <p className="text-3xl font-bold text-[#818CF8] mt-2">
                 {(summary.overallAccuracy * 100).toFixed(1)}%
               </p>
             </div>
-          </Card>
+          </div>
         </motion.div>
 
         <motion.div
@@ -217,14 +229,17 @@ export function WeaknessAnalysis({
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.5, delay: 0.2 }}
         >
-          <Card padding="md" hoverable className="h-full">
+          <div
+            className="rounded-2xl p-5 h-full transition-transform hover:scale-[1.02]"
+            style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
             <div className="text-center">
-              <p className="text-sm text-gray-600 dark:text-gray-400">{t.totalCategories}</p>
-              <p className="text-3xl font-bold text-green-600 dark:text-green-400 mt-2">
+              <p className="text-sm text-[#94A3B8]">{t.totalCategories}</p>
+              <p className="text-3xl font-bold text-[#34D399] mt-2">
                 {summary.totalCategories}
               </p>
             </div>
-          </Card>
+          </div>
         </motion.div>
 
         <motion.div
@@ -232,21 +247,24 @@ export function WeaknessAnalysis({
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.5, delay: 0.3 }}
         >
-          <Card padding="md" hoverable className="h-full">
+          <div
+            className="rounded-2xl p-5 h-full transition-transform hover:scale-[1.02]"
+            style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
             <div className="text-center">
-              <p className="text-sm text-gray-600 dark:text-gray-400">{t.improvableAreas}</p>
-              <p className="text-3xl font-bold text-orange-600 dark:text-orange-400 mt-2">
+              <p className="text-sm text-[#94A3B8]">{t.improvableAreas}</p>
+              <p className="text-3xl font-bold text-[#F59E0B] mt-2">
                 {summary.improvableAreas}
               </p>
             </div>
-          </Card>
+          </div>
         </motion.div>
       </div>
 
       {/* 苦手分野リスト */}
       <div>
-        <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-          <BookOpen className="w-6 h-6 text-purple-500" />
+        <h3 className="text-lg font-bold text-[#F8FAFC] mb-4 flex items-center gap-2">
+          <BookOpen className="w-6 h-6 text-[#818CF8]" />
           {t.topWeaknesses}
         </h3>
 
@@ -276,18 +294,36 @@ interface WeaknessCardProps {
 }
 
 function WeaknessCard({ weakness, rank, onStartPractice, language, delay = 0 }: WeaknessCardProps) {
-  const getRankColor = (rank: number) => {
+  const getRankStyle = (rank: number) => {
     switch (rank) {
       case 1:
-        return 'bg-red-100 dark:bg-red-900/20 border-red-500 text-red-700 dark:text-red-300';
+        return {
+          borderColor: '#EF4444',
+          badgeBg: 'rgba(239,68,68,0.15)',
+          badgeText: '#EF4444',
+        };
       case 2:
-        return 'bg-orange-100 dark:bg-orange-900/20 border-orange-500 text-orange-700 dark:text-orange-300';
+        return {
+          borderColor: '#F59E0B',
+          badgeBg: 'rgba(245,158,11,0.15)',
+          badgeText: '#F59E0B',
+        };
       case 3:
-        return 'bg-yellow-100 dark:bg-yellow-900/20 border-yellow-500 text-yellow-700 dark:text-yellow-300';
+        return {
+          borderColor: '#F59E0B',
+          badgeBg: 'rgba(245,158,11,0.15)',
+          badgeText: '#F59E0B',
+        };
       default:
-        return 'bg-gray-100 dark:bg-gray-800 border-gray-500 text-gray-700 dark:text-gray-300';
+        return {
+          borderColor: 'rgba(255,255,255,0.1)',
+          badgeBg: 'rgba(255,255,255,0.08)',
+          badgeText: '#94A3B8',
+        };
     }
   };
+
+  const rankStyle = getRankStyle(rank);
 
   return (
     <motion.div
@@ -295,72 +331,79 @@ function WeaknessCard({ weakness, rank, onStartPractice, language, delay = 0 }: 
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.5, delay }}
     >
-      <Card
-        padding="md"
-        hoverable
-        className={`border-l-4 ${getRankColor(rank)}`}
+      <div
+        className="rounded-2xl p-5 transition-transform hover:scale-[1.01]"
+        style={{
+          background: 'rgba(30,41,59,0.7)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          borderLeftWidth: '4px',
+          borderLeftColor: rankStyle.borderColor,
+        }}
       >
         <div className="flex items-center justify-between">
           <div className="flex-1">
             <div className="flex items-center gap-3 mb-3">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-lg ${getRankColor(rank)}`}>
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-lg"
+                style={{ background: rankStyle.badgeBg, color: rankStyle.badgeText }}
+              >
                 {rank}
               </div>
-              <h4 className="text-lg font-bold text-gray-900 dark:text-gray-100">
+              <h4 className="text-lg font-bold text-[#F8FAFC]">
                 {weakness.category}
               </h4>
             </div>
 
             <div className="grid grid-cols-3 gap-4 text-sm">
               <div>
-                <p className="text-gray-600 dark:text-gray-400">
+                <p className="text-[#94A3B8]">
                   {language === 'ja' ? '正解率' : 'Accuracy'}
                 </p>
-                <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                <p className="text-lg font-semibold text-[#F8FAFC]">
                   {(weakness.accuracy * 100).toFixed(1)}%
                 </p>
               </div>
               <div>
-                <p className="text-gray-600 dark:text-gray-400">
+                <p className="text-[#94A3B8]">
                   {language === 'ja' ? '解答回数' : 'Attempts'}
                 </p>
-                <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                <p className="text-lg font-semibold text-[#F8FAFC]">
                   {weakness.totalAttempts}
                 </p>
               </div>
               <div>
-                <p className="text-gray-600 dark:text-gray-400">
+                <p className="text-[#94A3B8]">
                   {language === 'ja' ? '弱点スコア' : 'Weakness Score'}
                 </p>
-                <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                <p className="text-lg font-semibold text-[#F8FAFC]">
                   {weakness.weaknessScore.toFixed(1)}
                 </p>
               </div>
             </div>
           </div>
 
-          <Button
-            variant="primary"
+          <button
             onClick={() => onStartPractice(weakness.category)}
-            className="ml-4 flex items-center gap-2"
+            className="ml-4 flex items-center gap-2 px-4 py-2 rounded-xl text-white transition-colors bg-[#6366F1] hover:bg-[#5558E6]"
           >
             {language === 'ja' ? '練習する' : 'Practice'}
             <ChevronRight className="w-4 h-4" />
-          </Button>
+          </button>
         </div>
 
         {/* プログレスバー */}
         <div className="mt-4">
-          <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
+          <div className="w-full rounded-full h-2 overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
             <motion.div
               initial={{ width: 0 }}
               animate={{ width: `${weakness.accuracy * 100}%` }}
               transition={{ duration: 1, delay: delay + 0.5 }}
-              className="h-full bg-gradient-to-r from-red-500 via-yellow-500 to-green-500"
+              className="h-full"
+              style={{ background: 'linear-gradient(to right, #EF4444, #F59E0B, #10B981)' }}
             />
           </div>
         </div>
-      </Card>
+      </div>
     </motion.div>
   );
 }

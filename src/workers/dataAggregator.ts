@@ -8,9 +8,11 @@
  * - パフォーマンスメトリクスの収集
  */
 
-import { db } from '../lib/database';
+import { db, studyPlanService } from '../lib/database';
 import { calculateDailyStatistics } from '../services/statisticsAggregator';
-import { cleanupOldNotifications } from '../services/notificationService';
+import { evaluateAllTriggers } from '../services/planAdjustmentService';
+// TODO: Task#19 - Implement cleanupOldNotifications in notificationService
+// import { cleanupOldNotifications } from '../services/notificationService';
 
 /**
  * 集計タスクの結果
@@ -40,6 +42,7 @@ export interface AggregationConfig {
   enableDailyStats: boolean;
   enableCleanup: boolean;
   enableCacheOptimization: boolean;
+  enableActEvaluation: boolean;
   dataRetentionDays: number;
   cacheRetentionDays: number;
 }
@@ -48,6 +51,7 @@ const DEFAULT_CONFIG: AggregationConfig = {
   enableDailyStats: true,
   enableCleanup: true,
   enableCacheOptimization: true,
+  enableActEvaluation: true,
   dataRetentionDays: 365, // 1年間保持
   cacheRetentionDays: 7, // 7日間保持
 };
@@ -107,6 +111,8 @@ export async function runAggregationTasks(): Promise<AggregationResult> {
     }
 
     // 3. 通知履歴のクリーンアップ
+    // TODO: Task#19 - Implement cleanupOldNotifications
+    /*
     if (config.enableCleanup) {
       try {
         await cleanupOldNotifications();
@@ -118,6 +124,7 @@ export async function runAggregationTasks(): Promise<AggregationResult> {
         console.error('[DataAggregator]', message);
       }
     }
+    */
 
     // 4. キャッシュ最適化
     if (config.enableCacheOptimization) {
@@ -141,6 +148,24 @@ export async function runAggregationTasks(): Promise<AggregationResult> {
       const message = `データベース最適化エラー: ${error}`;
       errors.push(message);
       console.error('[DataAggregator]', message);
+    }
+
+    // 6. ACTトリガー評価（学習プラン自動調整）
+    if (config.enableActEvaluation) {
+      try {
+        const activePlans = await studyPlanService.getActivePlans();
+        let totalAdjustments = 0;
+        for (const plan of activePlans) {
+          const adjustments = await evaluateAllTriggers(plan);
+          totalAdjustments += adjustments.length;
+        }
+        tasksCompleted.push(`ACTトリガー評価 (${totalAdjustments}件の調整)`);
+        console.log(`[DataAggregator] ACTトリガー評価完了: ${activePlans.length}プラン, ${totalAdjustments}件の調整`);
+      } catch (error) {
+        const message = `ACTトリガー評価エラー: ${error}`;
+        errors.push(message);
+        console.error('[DataAggregator]', message);
+      }
     }
 
     const duration = Date.now() - startTime;

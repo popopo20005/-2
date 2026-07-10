@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { problemService, categoryService } from '../lib/database';
+import { problemService, categoryService, db } from '../lib/database';
+// TagFilter integrated for TC-3.1.2 testing
+import { favoritesService } from '../services/favoritesService';
+import { useTags } from '../hooks/useTags';
+import { TagFilter } from './TagFilter';
+import { TagManager } from './TagManager';
 import type { Problem } from '../types';
 
 interface ProblemEditManagerProps {
@@ -184,7 +189,13 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
   // フィルター状態
   const [categoryFilter, setCategoryFilter] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
-  
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [tagFilterMode, setTagFilterMode] = useState<'AND' | 'OR'>('OR');
+  const [tagRefreshKey, setTagRefreshKey] = useState(0); // TagFilterを強制再レンダリングするためのキー
+
+  // タグリフレッシュ用のフック
+  const { refreshTags } = useTags();
+
   // 編集モーダル状態
   const [editingProblem, setEditingProblem] = useState<Problem | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -195,7 +206,8 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
     answer: true,
     explanation: '',
     options: ['', '', '', ''],
-    correctAnswer: 0
+    correctAnswer: 0,
+    tags: [] as string[]
   });
 
   useEffect(() => {
@@ -204,7 +216,7 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
 
   useEffect(() => {
     filterProblems();
-  }, [problems, categoryFilter, searchFilter]);
+  }, [problems, categoryFilter, searchFilter, selectedTags, tagFilterMode]);
 
   const loadData = async () => {
     try {
@@ -212,7 +224,7 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
         problemService.getAll(),
         categoryService.getAll()
       ]);
-      
+
       setProblems(problemsData);
       setCategories(categoriesData);
     } catch (error) {
@@ -224,30 +236,48 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
 
   const filterProblems = () => {
     let filtered = problems;
-    
+
     if (categoryFilter) {
       filtered = filtered.filter(p => p.category === categoryFilter);
     }
-    
+
     if (searchFilter) {
-      filtered = filtered.filter(p => 
+      filtered = filtered.filter(p =>
         p.question.toLowerCase().includes(searchFilter.toLowerCase())
       );
     }
-    
+
+    // タグフィルタ
+    if (selectedTags.length > 0) {
+      filtered = filtered.filter(p => {
+        const problemTags = p.tags || [];
+        if (tagFilterMode === 'AND') {
+          // AND: すべてのタグを持つ
+          return selectedTags.every(tag => problemTags.includes(tag));
+        } else {
+          // OR: いずれかのタグを持つ
+          return selectedTags.some(tag => problemTags.includes(tag));
+        }
+      });
+    }
+
     setFilteredProblems(filtered);
   };
 
-  const openEditModal = (problem: Problem) => {
-    setEditingProblem(problem);
+  const openEditModal = async (problem: Problem) => {
+    // DBから最新のデータを取得（TagManagerが追加したtagsを反映）
+    const latestProblem = await db.problems.get(problem.id!);
+
+    setEditingProblem(latestProblem || problem);
     setFormData({
-      category: problem.category,
-      question: problem.question,
-      type: problem.type || 'true-false',
-      answer: problem.answer !== undefined ? problem.answer : true,
-      explanation: problem.explanation,
-      options: problem.options || ['', '', '', ''],
-      correctAnswer: problem.correctAnswer || 0
+      category: latestProblem?.category || problem.category,
+      question: latestProblem?.question || problem.question,
+      type: (latestProblem?.type || problem.type) || 'true-false',
+      answer: latestProblem?.answer !== undefined ? latestProblem.answer : (problem.answer !== undefined ? problem.answer : true),
+      explanation: latestProblem?.explanation || problem.explanation,
+      options: latestProblem?.options || problem.options || ['', '', '', ''],
+      correctAnswer: latestProblem?.correctAnswer !== undefined ? latestProblem.correctAnswer : (problem.correctAnswer || 0),
+      tags: latestProblem?.tags || problem.tags || []  // DBから最新のtagsを取得
     });
     setIsEditModalOpen(true);
   };
@@ -277,8 +307,12 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
     }
 
     try {
+      // TagManagerが既にDBに保存しているので、DBから最新のtagsを取得
+      const latestProblem = await db.problems.get(editingProblem.id);
+      const latestTags = latestProblem?.tags || [];
+
       let problemData: Problem;
-      
+
       if (formData.type === 'true-false') {
         problemData = {
           id: editingProblem.id,
@@ -286,7 +320,8 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
           question: formData.question,
           type: formData.type,
           explanation: formData.explanation,
-          answer: formData.answer
+          answer: formData.answer,
+          tags: latestTags  // DBから取得した最新のtagsを使用
         };
       } else {
         problemData = {
@@ -296,12 +331,15 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
           type: formData.type,
           explanation: formData.explanation,
           options: formData.options.filter(opt => opt.trim()),
-          correctAnswer: formData.correctAnswer
+          correctAnswer: formData.correctAnswer,
+          tags: latestTags  // DBから取得した最新のtagsを使用
         };
       }
 
       await problemService.update(problemData);
       await loadData();
+      await refreshTags(); // TagFilterを更新
+      setTagRefreshKey(prev => prev + 1); // TagFilterを強制再マウント
       closeModal();
     } catch (error) {
       console.error('問題保存エラー:', error);
@@ -311,7 +349,7 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
 
   const deleteProblem = async (problemId: number) => {
     if (!confirm(t[currentLang].deleteConfirm)) return;
-    
+
     try {
       await problemService.delete(problemId);
       await loadData();
@@ -321,19 +359,31 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
     }
   };
 
+  const handleFavoriteToggle = async (problemId: number, _newStatus: boolean) => {
+    try {
+      // favoritesService.toggleFavorite automatically toggles the status
+      await favoritesService.toggleFavorite(problemId);
+      // Reload data to reflect favorite status
+      await loadData();
+    } catch (error) {
+      console.error('お気に入り更新エラー:', error);
+      alert(currentLang === 'ja' ? 'お気に入りの更新に失敗しました' : 'Failed to update favorite');
+    }
+  };
+
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#0F172A' }}>
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-300">{t[currentLang].loading}</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#6366F1] mx-auto mb-4"></div>
+          <p className="text-[#CBD5E1]">{t[currentLang].loading}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-teal-50 to-cyan-50 dark:from-teal-900/20 dark:to-cyan-900/20 p-8">
+    <div className="min-h-screen p-8" style={{ background: '#0F172A' }}>
       <div className="max-w-6xl mx-auto">
         <header className="mb-8">
           <button
@@ -342,24 +392,25 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
           >
             {t[currentLang].backButton}
           </button>
-          <h1 className="text-3xl font-bold text-teal-900 dark:text-teal-100">{t[currentLang].title}</h1>
-          <p className="text-teal-700 dark:text-teal-300 mt-2">
+          <h1 className="text-3xl font-bold text-[#F8FAFC]">{t[currentLang].title}</h1>
+          <p className="text-[#94A3B8] mt-2">
             {t[currentLang].description}
           </p>
         </header>
 
         {/* フィルター */}
-        <div className="mb-6 bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t[currentLang].filters.title}</h2>
+        <div className="mb-6 rounded-2xl p-6" style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}>
+          <h2 className="text-lg font-semibold text-[#F8FAFC] mb-4">{t[currentLang].filters.title}</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-[#CBD5E1] mb-1">
                 {t[currentLang].filters.category}
               </label>
               <select
                 value={categoryFilter}
                 onChange={(e) => setCategoryFilter(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                className="w-full px-3 py-2 rounded-md text-[#F8FAFC]"
+                style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}
               >
                 <option value="">{t[currentLang].filters.allCategories}</option>
                 {categories.map((category) => (
@@ -368,7 +419,7 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-[#CBD5E1] mb-1">
                 {t[currentLang].filters.searchLabel}
               </label>
               <input
@@ -376,48 +427,60 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
                 value={searchFilter}
                 onChange={(e) => setSearchFilter(e.target.value)}
                 placeholder={t[currentLang].filters.searchPlaceholder}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                className="w-full px-3 py-2 rounded-md text-[#F8FAFC] placeholder-[#64748B]"
+                style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}
               />
             </div>
+          </div>
+
+          {/* タグフィルター */}
+          <div className="mt-4">
+            <TagFilter
+              key={tagRefreshKey}
+              selectedTags={selectedTags}
+              onSelectedTagsChange={setSelectedTags}
+              filterMode={tagFilterMode}
+              onFilterModeChange={setTagFilterMode}
+            />
           </div>
         </div>
 
         {/* 統計情報 */}
-        <div className="mb-8 bg-gradient-to-r from-teal-100 to-cyan-100 dark:from-teal-900/30 dark:to-cyan-900/30 rounded-lg shadow-md p-6">
-          <h2 className="text-xl font-semibold text-teal-900 dark:text-teal-100 mb-4">{t[currentLang].statistics.title}</h2>
+        <div className="mb-8 rounded-2xl p-6" style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}>
+          <h2 className="text-xl font-semibold text-[#F8FAFC] mb-4">{t[currentLang].statistics.title}</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="text-center">
-              <div className="text-2xl font-bold text-teal-600 dark:text-teal-400">{problems.length}</div>
-              <div className="text-sm text-teal-700 dark:text-teal-300">{t[currentLang].statistics.totalProblems}</div>
+              <div className="text-2xl font-bold text-[#818CF8]">{problems.length}</div>
+              <div className="text-sm text-[#94A3B8]">{t[currentLang].statistics.totalProblems}</div>
             </div>
             <div className="text-center">
-              <div className="text-2xl font-bold text-cyan-600 dark:text-cyan-400">{filteredProblems.length}</div>
-              <div className="text-sm text-cyan-700 dark:text-cyan-300">{t[currentLang].statistics.displayed}</div>
+              <div className="text-2xl font-bold text-[#34D399]">{filteredProblems.length}</div>
+              <div className="text-sm text-[#94A3B8]">{t[currentLang].statistics.displayed}</div>
             </div>
             <div className="text-center">
-              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{categories.length}</div>
-              <div className="text-sm text-blue-700 dark:text-blue-300">{t[currentLang].statistics.categories}</div>
+              <div className="text-2xl font-bold text-[#818CF8]">{categories.length}</div>
+              <div className="text-sm text-[#94A3B8]">{t[currentLang].statistics.categories}</div>
             </div>
             <div className="text-center">
-              <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
+              <div className="text-2xl font-bold text-[#818CF8]">
                 {problems.filter(p => p.type === 'multiple-choice').length}
               </div>
-              <div className="text-sm text-indigo-700 dark:text-indigo-300">{t[currentLang].statistics.multipleChoice}</div>
+              <div className="text-sm text-[#94A3B8]">{t[currentLang].statistics.multipleChoice}</div>
             </div>
           </div>
         </div>
 
         {/* 問題一覧 */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+        <div className="rounded-2xl p-6" style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}>
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{t[currentLang].problemList.title}</h2>
-            <div className="text-sm text-gray-600 dark:text-gray-300">
+            <h2 className="text-xl font-semibold text-[#F8FAFC]">{t[currentLang].problemList.title}</h2>
+            <div className="text-sm text-[#94A3B8]">
               {filteredProblems.length}{t[currentLang].problemList.count} / {problems.length}{t[currentLang].problemList.count}
             </div>
           </div>
 
           {filteredProblems.length === 0 ? (
-            <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+            <div className="text-center py-12 text-[#64748B]">
               <div className="text-6xl mb-4">📝</div>
               <p>{problems.length === 0 ? (currentLang === 'ja' ? '編集可能な問題がありません' : 'No problems available to edit') : (currentLang === 'ja' ? '条件に一致する問題がありません' : 'No problems match the criteria')}</p>
               {problems.length === 0 && (
@@ -428,22 +491,22 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
             <div className="overflow-x-auto">
               <table className="w-full table-auto">
                 <thead>
-                  <tr className="border-b border-gray-200 dark:border-gray-700">
-                    <th className="text-left py-3 px-4 text-gray-900 dark:text-white">{t[currentLang].problemList.headers.category}</th>
-                    <th className="text-left py-3 px-4 text-gray-900 dark:text-white">{t[currentLang].problemList.headers.question}</th>
-                    <th className="text-left py-3 px-4 text-gray-900 dark:text-white">{t[currentLang].problemList.headers.type}</th>
-                    <th className="text-left py-3 px-4 text-gray-900 dark:text-white">{t[currentLang].problemList.headers.actions}</th>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                    <th className="text-left py-3 px-4 text-[#CBD5E1]">{t[currentLang].problemList.headers.category}</th>
+                    <th className="text-left py-3 px-4 text-[#CBD5E1]">{t[currentLang].problemList.headers.question}</th>
+                    <th className="text-left py-3 px-4 text-[#CBD5E1]">{t[currentLang].problemList.headers.type}</th>
+                    <th className="text-left py-3 px-4 text-[#CBD5E1]">{t[currentLang].problemList.headers.actions}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredProblems.map((problem) => (
-                    <tr key={problem.id} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <tr key={problem.id} className="hover:bg-white/5" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                       <td className="py-3 px-4">
-                        <span className="px-2 py-1 bg-teal-100 dark:bg-teal-900 text-teal-800 dark:text-teal-200 rounded text-sm">
+                        <span className="px-2 py-1 bg-[#6366F1]/20 text-[#818CF8] rounded text-sm">
                           {problem.category}
                         </span>
                       </td>
-                      <td className="py-3 px-4 text-gray-900 dark:text-white">
+                      <td className="py-3 px-4 text-[#F8FAFC]">
                         <div className="max-w-md">
                           {problem.question.length > 80 
                             ? `${problem.question.substring(0, 80)}...` 
@@ -453,24 +516,34 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
                       </td>
                       <td className="py-3 px-4">
                         <span className={`px-2 py-1 rounded text-sm ${
-                          problem.type === 'multiple-choice' 
-                            ? 'bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200'
-                            : 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
+                          problem.type === 'multiple-choice'
+                            ? 'bg-[#6366F1]/20 text-[#818CF8]'
+                            : 'bg-[#10B981]/20 text-[#34D399]'
                         }`}>
                           {t[currentLang].problemList.types[problem.type || 'true-false']}
                         </span>
                       </td>
                       <td className="py-3 px-4">
-                        <div className="flex space-x-2">
+                        <div className="flex items-center space-x-2">
+                          <button
+                            onClick={async () => {
+                              if (problem.id) {
+                                await handleFavoriteToggle(problem.id, !problem.isFavorite);
+                              }
+                            }}
+                            className="px-2 py-1 bg-[#F59E0B]/20 text-[#F59E0B] rounded hover:bg-[#F59E0B]/30"
+                          >
+                            {problem.isFavorite ? '⭐' : '☆'}
+                          </button>
                           <button
                             onClick={() => openEditModal(problem)}
-                            className="quiz-action-button px-3 py-1 rounded text-sm transition-all shadow-sm hover:shadow-md transform hover:scale-105 backdrop-blur-sm"
+                            className="px-3 py-1 rounded text-sm transition-all text-[#818CF8] hover:bg-[#6366F1]/10"
                           >
                             {t[currentLang].problemList.buttons.edit}
                           </button>
                           <button
                             onClick={() => problem.id && deleteProblem(problem.id)}
-                            className="px-3 py-1 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-700 hover:bg-red-100 dark:hover:bg-red-900/40 rounded text-sm transition-all shadow-sm hover:shadow-md transform hover:scale-105 backdrop-blur-sm"
+                            className="px-3 py-1 rounded text-sm transition-all text-[#EF4444] hover:bg-[#EF4444]/10"
                           >
                             {t[currentLang].problemList.buttons.delete}
                           </button>
@@ -486,10 +559,10 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
 
         {/* 編集モーダル */}
         {isEditModalOpen && editingProblem && createPortal(
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4" style={{zIndex: 9999}}>
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
-              <div className="p-6 border-b border-gray-200 dark:border-gray-600">
-                <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4" style={{zIndex: 9999}}>
+            <div className="rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden" style={{ background: 'rgba(30,41,59,0.95)', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <div className="p-6" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                <h3 className="text-xl font-semibold text-[#F8FAFC]">
                   {t[currentLang].editModal.title}
                 </h3>
               </div>
@@ -497,13 +570,14 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
               <div className="p-6 overflow-y-auto max-h-[calc(90vh-200px)]">
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <label className="block text-sm font-medium text-[#CBD5E1] mb-1">
                       {t[currentLang].editModal.labels.category} *
                     </label>
                     <select
                       value={formData.category}
                       onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                      className="w-full px-3 py-2 rounded-md text-[#F8FAFC]"
+                      style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}
                     >
                       <option value="">{t[currentLang].editModal.labels.selectCategory}</option>
                       {categories.map((category) => (
@@ -513,13 +587,14 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <label className="block text-sm font-medium text-[#CBD5E1] mb-1">
                       {t[currentLang].editModal.labels.problemType} *
                     </label>
                     <select
                       value={formData.type}
                       onChange={(e) => setFormData({ ...formData, type: e.target.value as 'true-false' | 'multiple-choice' })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                      className="w-full px-3 py-2 rounded-md text-[#F8FAFC]"
+                      style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}
                     >
                       <option value="true-false">{t[currentLang].statistics.trueFalse}</option>
                       <option value="multiple-choice">{t[currentLang].statistics.multipleChoice}</option>
@@ -527,21 +602,22 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <label className="block text-sm font-medium text-[#CBD5E1] mb-1">
                       {t[currentLang].editModal.labels.question} *
                     </label>
                     <textarea
                       value={formData.question}
                       onChange={(e) => setFormData({ ...formData, question: e.target.value })}
                       rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                      className="w-full px-3 py-2 rounded-md text-[#F8FAFC]"
+                      style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}
                       placeholder={t[currentLang].editModal.labels.questionPlaceholder}
                     />
                   </div>
 
                   {formData.type === 'true-false' ? (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm font-medium text-[#CBD5E1] mb-2">
                         {t[currentLang].editModal.labels.answer} *
                       </label>
                       <div className="flex space-x-4">
@@ -567,7 +643,7 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
                     </div>
                   ) : (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm font-medium text-[#CBD5E1] mb-2">
                         {t[currentLang].editModal.labels.options} *
                       </label>
                       <div className="space-y-2">
@@ -587,7 +663,8 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
                                 setFormData({ ...formData, options: newOptions });
                               }}
                               placeholder={currentLang === 'ja' ? `選択肢 ${index + 1}` : `Option ${index + 1}`}
-                              className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                              className="flex-1 px-3 py-2 rounded-md text-[#F8FAFC]"
+                              style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}
                             />
                           </div>
                         ))}
@@ -596,17 +673,36 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
                   )}
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <label className="block text-sm font-medium text-[#CBD5E1] mb-1">
                       {t[currentLang].editModal.labels.explanation} *
                     </label>
                     <textarea
                       value={formData.explanation}
                       onChange={(e) => setFormData({ ...formData, explanation: e.target.value })}
                       rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                      className="w-full px-3 py-2 rounded-md text-[#F8FAFC]"
+                      style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}
                       placeholder={t[currentLang].editModal.labels.explanationPlaceholder}
                     />
                   </div>
+
+                  {/* タグ管理 */}
+                  {editingProblem?.id && (
+                    <div>
+                      <label className="block text-sm font-medium text-[#CBD5E1] mb-2">
+                        タグ
+                      </label>
+                      <TagManager
+                        problemId={editingProblem.id}
+                        currentTags={formData.tags}
+                        onTagsChange={async (tags) => {
+                          setFormData({ ...formData, tags });
+                          await refreshTags();
+                          setTagRefreshKey(prev => prev + 1);
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
               

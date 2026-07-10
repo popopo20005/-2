@@ -9,15 +9,13 @@
 
 import { db } from '../lib/database';
 import Fuse from 'fuse.js';
-import type { Problem } from '../types';
+import type { Problem, NotebookTemplateType, NotebookTemplate } from '../types';
 
 /**
  * メモ付き問題の型
  */
 export interface ProblemWithNote extends Problem {
-  userNotes?: string;
-  noteUpdatedAt?: Date;
-  noteTags?: string[];
+  userNotes: string; // 必須にする（メモ付きなので）
 }
 
 /**
@@ -496,4 +494,480 @@ export function markdownToHTML(markdown: string): string {
   html = '<p>' + html + '</p>';
 
   return html;
+}
+
+/**
+ * 問題集のメモ付き問題数を取得
+ */
+export async function getQuizSetsWithNoteCount(): Promise<Array<{
+  id: number;
+  name: string;
+  noteCount: number;
+}>> {
+  try {
+    // まず全ての問題を取得してメモがあるものをフィルタリング
+    const allProblems = await db.problems.toArray();
+    const problemsWithNotes = allProblems.filter(p => p.userNotes && p.userNotes.trim().length > 0);
+
+    console.log('[NoteService] メモがある問題数:', problemsWithNotes.length);
+
+    if (problemsWithNotes.length === 0) {
+      return [];
+    }
+
+    // メモがある問題のIDセット
+    const problemIdsWithNotes = new Set(problemsWithNotes.map(p => p.id!).filter(id => id !== undefined));
+    console.log('[NoteService] メモがある問題ID:', Array.from(problemIdsWithNotes));
+
+    // 全ての問題集を取得
+    const quizSets = await db.quizSets.toArray();
+    console.log('[NoteService] 全問題集:', quizSets.map(q => ({ name: q.name, problemCount: q.problemIds.length })));
+
+    // 各問題集のメモ数を計算
+    const quizSetsWithCount = quizSets.map(quizSet => {
+      // 問題集に含まれる問題のうち、メモがある問題の数をカウント
+      const noteCount = quizSet.problemIds.filter(id => problemIdsWithNotes.has(id)).length;
+
+      console.log(`[NoteService] 問題集「${quizSet.name}」: ${quizSet.problemIds.length}問題中 ${noteCount}メモ`);
+
+      return {
+        id: quizSet.id!,
+        name: quizSet.name,
+        noteCount,
+      };
+    });
+
+    const result = quizSetsWithCount.filter(qs => qs.noteCount > 0);
+    console.log('[NoteService] メモがある問題集:', result);
+
+    return result;
+  } catch (error) {
+    console.error('[NoteService] 問題集のメモ数取得に失敗:', error);
+    return [];
+  }
+}
+
+/**
+ * 問題集のノートブックを生成
+ */
+export async function generateNotebook(quizSetId: number): Promise<string> {
+  try {
+    console.log(`[NoteService] 問題集 ${quizSetId} のノートブックを生成中...`);
+
+    const quizSet = await db.quizSets.get(quizSetId);
+    if (!quizSet) {
+      throw new Error(`問題集が見つかりません: ID=${quizSetId}`);
+    }
+
+    console.log(`[NoteService] 問題集「${quizSet.name}」の問題ID:`, quizSet.problemIds);
+
+    // 問題集に含まれる問題を取得
+    const allProblems = await db.problems.bulkGet(quizSet.problemIds);
+
+    // undefined を除外してメモがある問題のみフィルタリング
+    const quizSetProblems = allProblems
+      .filter(p => p !== undefined && p.userNotes && p.userNotes.trim().length > 0) as ProblemWithNote[];
+
+    console.log(`[NoteService] メモがある問題数: ${quizSetProblems.length}`);
+
+    if (quizSetProblems.length === 0) {
+      throw new Error('この問題集にはメモがありません');
+    }
+
+    // カテゴリ別にグループ化
+    const problemsByCategory = new Map<string, ProblemWithNote[]>();
+    quizSetProblems.forEach(p => {
+      const category = p.category || 'その他';
+      if (!problemsByCategory.has(category)) {
+        problemsByCategory.set(category, []);
+      }
+      problemsByCategory.get(category)!.push(p);
+    });
+
+    // Markdown生成
+    let markdown = '';
+
+    // 表紙
+    markdown += `# 📚 ${quizSet.name} - 学習ノートブック\n\n`;
+    markdown += `---\n\n`;
+    markdown += `**作成日時**: ${new Date().toLocaleString('ja-JP')}\n\n`;
+    markdown += `**総メモ数**: ${quizSetProblems.length}問\n\n`;
+    markdown += `**カテゴリ数**: ${problemsByCategory.size}\n\n`;
+    markdown += `---\n\n`;
+
+    // 目次
+    markdown += `## 📑 目次\n\n`;
+    let problemIndex = 1;
+    for (const [category, problems] of problemsByCategory) {
+      markdown += `### ${category} (${problems.length}問)\n\n`;
+      problems.forEach(p => {
+        markdown += `${problemIndex}. ${p.question.substring(0, 50)}${p.question.length > 50 ? '...' : ''}\n`;
+        problemIndex++;
+      });
+      markdown += `\n`;
+    }
+    markdown += `---\n\n`;
+
+    // 本文
+    problemIndex = 1;
+    for (const [category, problems] of problemsByCategory) {
+      markdown += `## 📂 ${category}\n\n`;
+
+      problems.forEach(p => {
+        markdown += `### ${problemIndex}. ${p.question}\n\n`;
+
+        // メタ情報
+        markdown += `**カテゴリ**: ${p.category}\n\n`;
+        if (p.noteTags && p.noteTags.length > 0) {
+          markdown += `**タグ**: ${p.noteTags.map(t => `\`${t}\``).join(', ')}\n\n`;
+        }
+        if (p.noteUpdatedAt) {
+          markdown += `**更新日時**: ${new Date(p.noteUpdatedAt).toLocaleString('ja-JP')}\n\n`;
+        }
+
+        // 問題詳細
+        if (p.options && p.options.length > 0) {
+          markdown += `**選択肢**:\n\n`;
+          p.options.forEach((choice: string, idx: number) => {
+            const marker = idx === p.correctAnswer ? '✅' : '○';
+            markdown += `${marker} ${String.fromCharCode(65 + idx)}. ${choice}\n`;
+          });
+          markdown += `\n`;
+        }
+
+        // 解説
+        if (p.explanation) {
+          markdown += `**解説**: ${p.explanation}\n\n`;
+        }
+
+        // ユーザーメモ
+        markdown += `#### 📝 学習メモ\n\n`;
+        markdown += `${p.userNotes}\n\n`;
+
+        markdown += `---\n\n`;
+        problemIndex++;
+      });
+    }
+
+    // フッター
+    markdown += `\n\n*Generated by Minguella - Interactive Quiz Application*\n`;
+
+    console.log(`[NoteService] ノートブック生成完了: ${quizSetProblems.length}問`);
+    return markdown;
+  } catch (error) {
+    console.error('[NoteService] ノートブック生成に失敗:', error);
+    throw error;
+  }
+}
+
+/**
+ * ノートブックをダウンロード
+ */
+export async function downloadNotebook(quizSetId: number): Promise<void> {
+  try {
+    const quizSet = await db.quizSets.get(quizSetId);
+    if (!quizSet) {
+      throw new Error('問題集が見つかりません');
+    }
+
+    const content = await generateNotebook(quizSetId);
+
+    const blob = new Blob([content], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+
+    const timestamp = new Date().toISOString().split('T')[0];
+    const sanitizedName = quizSet.name.replace(/[/\\?%*:|"<>]/g, '-');
+    link.download = `notebook-${sanitizedName}-${timestamp}.md`;
+
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    URL.revokeObjectURL(url);
+
+    console.log(`[NoteService] ノートブックをダウンロードしました: ${link.download}`);
+  } catch (error) {
+    console.error('[NoteService] ノートブックのダウンロードに失敗:', error);
+    throw error;
+  }
+}
+
+/**
+ * ノートブックテンプレート一覧
+ */
+export const NOTEBOOK_TEMPLATES: NotebookTemplate[] = [
+  {
+    type: 'standard',
+    name: '標準版',
+    emoji: '📚',
+    description: '問題・解答・メモを完全網羅。復習に最適な基本形式'
+  },
+  {
+    type: 'review',
+    name: '復習特化版',
+    emoji: '🔄',
+    description: '重要ポイントと間違えやすい箇所を抽出。効率的な復習向け'
+  },
+  {
+    type: 'exam',
+    name: '試験対策版',
+    emoji: '📝',
+    description: 'カテゴリー別サマリーと頻出ポイント。試験直前に最適'
+  },
+  {
+    type: 'flashcard',
+    name: 'フラッシュカード版',
+    emoji: '🗂️',
+    description: '表面（問題）裏面（答え+メモ）形式。暗記学習向け'
+  },
+  {
+    type: 'diary',
+    name: '学習日記版',
+    emoji: '📖',
+    description: '振り返りと気づきを記録。学習の軌跡を残したい方向け'
+  }
+];
+
+/**
+ * テンプレートに応じたノートブックを生成
+ */
+export async function generateNotebookWithTemplate(
+  quizSetId: number,
+  templateType: NotebookTemplateType = 'standard'
+): Promise<string> {
+  try {
+    console.log(`[NoteService] テンプレート「${templateType}」でノートブックを生成中...`);
+
+    const quizSet = await db.quizSets.get(quizSetId);
+    if (!quizSet) {
+      throw new Error(`問題集が見つかりません: ID=${quizSetId}`);
+    }
+
+    // 問題集に含まれる問題を取得
+    const allProblems = await db.problems.bulkGet(quizSet.problemIds);
+    const quizSetProblems = allProblems
+      .filter(p => p !== undefined && p.userNotes && p.userNotes.trim().length > 0) as ProblemWithNote[];
+
+    if (quizSetProblems.length === 0) {
+      throw new Error('この問題集にはメモがありません');
+    }
+
+    // テンプレートに応じた生成
+    switch (templateType) {
+      case 'standard':
+        return generateStandardNotebook(quizSet.name, quizSetProblems);
+      case 'review':
+        return generateReviewNotebook(quizSet.name, quizSetProblems);
+      case 'exam':
+        return generateExamNotebook(quizSet.name, quizSetProblems);
+      case 'flashcard':
+        return generateFlashcardNotebook(quizSet.name, quizSetProblems);
+      case 'diary':
+        return generateDiaryNotebook(quizSet.name, quizSetProblems);
+      default:
+        return generateStandardNotebook(quizSet.name, quizSetProblems);
+    }
+  } catch (error) {
+    console.error('[NoteService] ノートブック生成に失敗:', error);
+    throw error;
+  }
+}
+
+/**
+ * 標準版ノートブック生成
+ */
+function generateStandardNotebook(quizSetName: string, problems: ProblemWithNote[]): string {
+  const problemsByCategory = groupProblemsByCategory(problems);
+
+  let markdown = '';
+  markdown += `# 📚 ${quizSetName} - 学習ノートブック（標準版）\n\n`;
+  markdown += `---\n\n`;
+  markdown += `**作成日時**: ${new Date().toLocaleString('ja-JP')}\n\n`;
+  markdown += `**総メモ数**: ${problems.length}問\n\n`;
+  markdown += `**カテゴリ数**: ${problemsByCategory.size}\n\n`;
+  markdown += `---\n\n`;
+
+  // 目次
+  markdown += `## 📑 目次\n\n`;
+  let problemIndex = 1;
+  for (const [category, probs] of problemsByCategory) {
+    markdown += `### ${category} (${probs.length}問)\n\n`;
+    probs.forEach(p => {
+      markdown += `${problemIndex}. ${p.question.substring(0, 50)}${p.question.length > 50 ? '...' : ''}\n`;
+      problemIndex++;
+    });
+    markdown += `\n`;
+  }
+  markdown += `---\n\n`;
+
+  // 本文
+  problemIndex = 1;
+  for (const [category, probs] of problemsByCategory) {
+    markdown += `## ${category}\n\n`;
+    probs.forEach(p => {
+      markdown += `### 問題 ${problemIndex}: ${p.question}\n\n`;
+
+      if (p.type === 'multiple-choice' && p.options && p.options.length > 0) {
+        markdown += `**選択肢:**\n\n`;
+        p.options.forEach((choice: string, idx: number) => {
+          const isCorrect = idx === p.correctAnswer;
+          markdown += `${idx + 1}. ${choice} ${isCorrect ? '✅' : ''}\n`;
+        });
+        markdown += `\n`;
+      } else if (p.type === 'true-false') {
+        markdown += `**正解**: ${p.answer ? '⭕ 正しい' : '❌ 誤り'}\n\n`;
+      }
+
+      if (p.explanation) {
+        markdown += `**解説:**\n\n${p.explanation}\n\n`;
+      }
+
+      markdown += `**📝 学習メモ:**\n\n${p.userNotes}\n\n`;
+      markdown += `---\n\n`;
+      problemIndex++;
+    });
+  }
+
+  return markdown;
+}
+
+/**
+ * 復習特化版ノートブック生成
+ */
+function generateReviewNotebook(quizSetName: string, problems: ProblemWithNote[]): string {
+  let markdown = '';
+  markdown += `# 🔄 ${quizSetName} - 復習特化版ノート\n\n`;
+  markdown += `**作成日時**: ${new Date().toLocaleString('ja-JP')}\n\n`;
+  markdown += `**重要ポイント抽出**: ${problems.length}問\n\n`;
+  markdown += `---\n\n`;
+
+  markdown += `## ⚠️ 間違えやすいポイント\n\n`;
+  problems.forEach((p, idx) => {
+    markdown += `### ${idx + 1}. ${p.question.substring(0, 80)}${p.question.length > 80 ? '...' : ''}\n\n`;
+    markdown += `**カテゴリー**: ${p.category}\n\n`;
+    markdown += `**重要メモ:**\n\n`;
+    markdown += `${p.userNotes}\n\n`;
+
+    if (p.explanation) {
+      markdown += `<details>\n<summary>💡 解説を表示</summary>\n\n${p.explanation}\n\n</details>\n\n`;
+    }
+    markdown += `---\n\n`;
+  });
+
+  return markdown;
+}
+
+/**
+ * 試験対策版ノートブック生成
+ */
+function generateExamNotebook(quizSetName: string, problems: ProblemWithNote[]): string {
+  const problemsByCategory = groupProblemsByCategory(problems);
+
+  let markdown = '';
+  markdown += `# 📝 ${quizSetName} - 試験対策ノート\n\n`;
+  markdown += `**作成日時**: ${new Date().toLocaleString('ja-JP')}\n\n`;
+  markdown += `---\n\n`;
+
+  markdown += `## 📊 カテゴリー別サマリー\n\n`;
+  for (const [category, probs] of problemsByCategory) {
+    markdown += `### ${category} (${probs.length}問)\n\n`;
+    markdown += `**頻出ポイント:**\n\n`;
+    probs.forEach((p, idx) => {
+      markdown += `${idx + 1}. ${p.question.substring(0, 60)}${p.question.length > 60 ? '...' : ''}\n`;
+      const firstLine = p.userNotes.split('\n')[0];
+      markdown += `   - ${firstLine.substring(0, 100)}\n`;
+    });
+    markdown += `\n`;
+  }
+
+  markdown += `---\n\n`;
+  markdown += `## 📌 詳細ノート\n\n`;
+
+  for (const [category, probs] of problemsByCategory) {
+    markdown += `### ${category}\n\n`;
+    probs.forEach((p, idx) => {
+      markdown += `#### ${idx + 1}. ${p.question}\n\n`;
+      markdown += `${p.userNotes}\n\n`;
+    });
+  }
+
+  return markdown;
+}
+
+/**
+ * フラッシュカード版ノートブック生成
+ */
+function generateFlashcardNotebook(quizSetName: string, problems: ProblemWithNote[]): string {
+  let markdown = '';
+  markdown += `# 🗂️ ${quizSetName} - フラッシュカード\n\n`;
+  markdown += `**カード総数**: ${problems.length}枚\n\n`;
+  markdown += `---\n\n`;
+
+  problems.forEach((p, idx) => {
+    markdown += `## カード ${idx + 1}\n\n`;
+    markdown += `### 表面（Question）\n\n`;
+    markdown += `\`\`\`\n${p.question}\n\`\`\`\n\n`;
+    markdown += `---\n\n`;
+    markdown += `### 裏面（Answer + Notes）\n\n`;
+
+    if (p.type === 'multiple-choice' && p.correctAnswer !== undefined && p.options) {
+      markdown += `**正解:** ${p.options[p.correctAnswer]}\n\n`;
+    } else if (p.type === 'true-false') {
+      markdown += `**正解:** ${p.answer ? '⭕ 正しい' : '❌ 誤り'}\n\n`;
+    }
+
+    markdown += `**解説:** ${p.explanation}\n\n`;
+    markdown += `**メモ:**\n\n${p.userNotes}\n\n`;
+    markdown += `---\n\n`;
+  });
+
+  return markdown;
+}
+
+/**
+ * 学習日記版ノートブック生成
+ */
+function generateDiaryNotebook(quizSetName: string, problems: ProblemWithNote[]): string {
+  let markdown = '';
+  markdown += `# 📖 ${quizSetName} - 学習日記\n\n`;
+  markdown += `**記録日**: ${new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}\n\n`;
+  markdown += `---\n\n`;
+
+  markdown += `## 今日の学習内容\n\n`;
+  markdown += `**学習した問題数**: ${problems.length}問\n\n`;
+
+  const categories = [...new Set(problems.map(p => p.category))];
+  markdown += `**学習カテゴリー**: ${categories.join(', ')}\n\n`;
+  markdown += `---\n\n`;
+
+  markdown += `## 💡 学びと気づき\n\n`;
+  problems.forEach((p, idx) => {
+    markdown += `### ${idx + 1}. ${p.category} - ${p.question.substring(0, 50)}...\n\n`;
+    markdown += `**気づき:**\n\n${p.userNotes}\n\n`;
+  });
+
+  markdown += `---\n\n`;
+  markdown += `## 📝 振り返り\n\n`;
+  markdown += `- 理解できたこと:\n\n`;
+  markdown += `- まだ理解が必要なこと:\n\n`;
+  markdown += `- 次回の学習計画:\n\n`;
+
+  return markdown;
+}
+
+/**
+ * カテゴリー別に問題をグループ化
+ */
+function groupProblemsByCategory(problems: ProblemWithNote[]): Map<string, ProblemWithNote[]> {
+  const problemsByCategory = new Map<string, ProblemWithNote[]>();
+  problems.forEach(p => {
+    const category = p.category || 'その他';
+    if (!problemsByCategory.has(category)) {
+      problemsByCategory.set(category, []);
+    }
+    problemsByCategory.get(category)!.push(p);
+  });
+  return problemsByCategory;
 }

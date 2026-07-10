@@ -1,6 +1,6 @@
 import { useState, useEffect, memo } from 'react';
 import { motion, useMotionValue, useTransform, animate } from 'framer-motion';
-import { Play, BarChart3, Plus, Share2, Clock, X } from 'lucide-react';
+import { Play, BarChart3, Plus, Share2, Clock, X, Star, Menu, TrendingDown, FileSearch } from 'lucide-react';
 import type { View, QuizSession } from '../types';
 import { db, historyService, spacedRepetitionService, quizSetService, quizSessionService } from '../lib/database';
 import { calculatePersonalizedTime } from '../services/responseTimeService';
@@ -8,6 +8,21 @@ import { getRecommendationPenalty } from '../services/quizCompletionService';
 import type { QuizSet } from '../types';
 import { StudyCalendar } from './StudyCalendar';
 import { debugLog } from '../utils/debug';
+import { PerformanceMonitor } from '../services/performanceOptimizer';
+import { detectTopWeaknesses } from '../services/weaknessDetectionService';
+import type { WeakArea } from '../types/weakness';
+import { generateRecommendedProblems } from '../services/recommendationEngine';
+import type { RecommendedProblem } from '../types/recommendation';
+import { SmartReviewPanel } from './SmartReviewPanel';
+import { XPProgressWidget } from './gamification/XPProgressWidget';
+import { getUserProgress } from '../services/gamificationService';
+import { Quick5Button } from './Quick5Button';
+import { StreakIndicator } from './gamification/StreakIndicator';
+import { WeeklyReviewCard } from './WeeklyReviewCard';
+import { CategoryMasteryLevels } from './CategoryMasteryLevels';
+
+// Performance monitoring instance
+const performanceMonitor = new PerformanceMonitor();
 
 interface DashboardV2Props {
   onNavigate: (view: View, options?: { quizSetId?: number; problemIds?: number[]; sessionId?: string }) => void;
@@ -38,6 +53,8 @@ const DashboardV2 = ({ onNavigate, language = 'ja' }: DashboardV2Props) => {
   const [dueCardsCount, setDueCardsCount] = useState(5);
   const [savedSessions, setSavedSessions] = useState<QuizSession[]>([]);
   const [sessionQuizSetNames, setSessionQuizSetNames] = useState<Map<string, string>>(new Map());
+  const [topWeaknesses, setTopWeaknesses] = useState<WeakArea[]>([]);
+  const [recommendedProblems, setRecommendedProblems] = useState<RecommendedProblem[]>([]);
 
   // Memory stage statistics
   const [memoryStages, setMemoryStages] = useState<{
@@ -109,19 +126,18 @@ const DashboardV2 = ({ onNavigate, language = 'ja' }: DashboardV2Props) => {
   }, []);
 
   const loadDashboardData = async () => {
-    try {
-      // Load user name from localStorage
-      const savedUserName = localStorage.getItem('userName') || '田中 太郎';
-      setUserName(savedUserName);
+    return performanceMonitor.measure('Dashboard: Load All Data', async () => {
+      try {
+        // Load user name from localStorage
+        const savedUserName = localStorage.getItem('userName') || '田中 太郎';
+        setUserName(savedUserName);
 
-      // Load history and calculate stats
-      const allHistory = await historyService.getAll();
-      const totalXp = allHistory.reduce((acc, h) => acc + (h.isCorrect ? 10 : 0), 0);
-      setXp(totalXp);
-
-      // Calculate level (100 XP per level)
-      const calculatedLevel = Math.floor(totalXp / 100) + 1;
-      setLevel(calculatedLevel);
+        // Load history and calculate stats
+        const allHistory = await performanceMonitor.measure('Dashboard: Load History', () => historyService.getAll());
+      // Load gamification progress from IndexedDB (persistent)
+      const userProgress = await getUserProgress();
+      setXp(userProgress.totalXP);
+      setLevel(userProgress.level);
 
       // Calculate total problems attempted
       setTotalProblems(allHistory.length);
@@ -134,34 +150,17 @@ const DashboardV2 = ({ onNavigate, language = 'ja' }: DashboardV2Props) => {
       // Calculate total study time (mock for now)
       setTotalStudyTime(25); // hours
 
-      // Calculate streak (consecutive days)
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      let currentStreak = 0;
-      for (let i = 0; i < 365; i++) {
-        const checkDate = new Date(today);
-        checkDate.setDate(checkDate.getDate() - i);
-        const dayHistory = allHistory.filter(h => {
-          const historyDate = new Date(h.timestamp);
-          historyDate.setHours(0, 0, 0, 0);
-          return historyDate.getTime() === checkDate.getTime();
-        });
-        if (dayHistory.length > 0) {
-          currentStreak++;
-        } else if (i > 0) {
-          break;
-        }
-      }
-      setStreak(currentStreak);
+      // Streak from gamification service (persistent)
+      setStreak(userProgress.currentStreak);
 
       // Load weekly study time data
-      await loadWeeklyData();
+      await performanceMonitor.measure('Dashboard: Load Weekly Data', () => loadWeeklyData());
 
       // Load recommended quiz set and due cards count
-      const allQuizSets = await quizSetService.getAll();
+      const allQuizSets = await performanceMonitor.measure('Dashboard: Load Quiz Sets', () => quizSetService.getAll());
 
       // すべての復習期限カードを取得（問題集に紐付いていないカードも含む）
-      const allDueCards = await spacedRepetitionService.getDueCards(1000);
+      const allDueCards = await performanceMonitor.measure('Dashboard: Load Due Cards', () => spacedRepetitionService.getDueCards(1000));
       setDueCardsCount(allDueCards.length);
       debugLog('📊 Total due cards (all):', allDueCards.length);
 
@@ -199,7 +198,7 @@ const DashboardV2 = ({ onNavigate, language = 'ja' }: DashboardV2Props) => {
       }
 
       // Load saved sessions
-      const pausedSessions = await quizSessionService.getPausedSessions();
+      const pausedSessions = await performanceMonitor.measure('Dashboard: Load Paused Sessions', () => quizSessionService.getPausedSessions());
 
       // 各セッションの問題集名を取得
       const namesMap = new Map<string, string>();
@@ -235,15 +234,30 @@ const DashboardV2 = ({ onNavigate, language = 'ja' }: DashboardV2Props) => {
       debugLog('💾 Saved sessions:', pausedSessions.length);
 
       // Load memory stage statistics
-      const stageStats = await spacedRepetitionService.getMemoryStageStats();
+      const stageStats = await performanceMonitor.measure('Dashboard: Load Memory Stats', () => spacedRepetitionService.getMemoryStageStats());
       debugLog('🧠 Memory stage stats:', stageStats);
       setMemoryStages(stageStats);
 
+      // Load weakness data
+      const weaknesses = await performanceMonitor.measure('Dashboard: Load Weaknesses', () => detectTopWeaknesses());
+      debugLog('📉 Top weaknesses:', weaknesses);
+      setTopWeaknesses(weaknesses);
+
+      // Load recommended problems (Top 10)
+      const recommended = await performanceMonitor.measure('Dashboard: Load Recommendations', () => generateRecommendedProblems(10));
+      debugLog('🎯 Recommended problems:', recommended);
+      setRecommendedProblems(recommended);
+
       setIsLoading(false);
+
+      // Log performance summary
+      const summaryStats = performanceMonitor.getAllStats();
+      debugLog('📊 Dashboard Performance Summary:', summaryStats);
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
       setIsLoading(false);
     }
+    });
   };
 
   const loadWeeklyData = async () => {
@@ -261,10 +275,12 @@ const DashboardV2 = ({ onNavigate, language = 'ja' }: DashboardV2Props) => {
       tomorrow.setHours(0, 0, 0, 0);
 
       // 🚀 Performance: Single query for all 7 days (was 7 separate queries)
-      const allSessions = await db.studyTimeSessions
-        .where('startTime')
-        .between(sevenDaysAgo, tomorrow, true, false)
-        .toArray();
+      const allSessions = await performanceMonitor.measure('Weekly Data: Query Sessions', () =>
+        db.studyTimeSessions
+          .where('startTime')
+          .between(sevenDaysAgo, tomorrow, true, false)
+          .toArray()
+      );
 
       debugLog(`🚀 Fetched ${allSessions.length} sessions in single query for 7 days`);
 
@@ -530,25 +546,8 @@ const DashboardV2 = ({ onNavigate, language = 'ja' }: DashboardV2Props) => {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Streak Counter */}
-            {streak > 0 && (
-              <div
-                className="flex items-center gap-2 px-3 py-2 rounded-full"
-                style={{
-                  background: 'linear-gradient(135deg, rgba(251, 146, 60, 0.15) 0%, rgba(249, 115, 22, 0.15) 100%)',
-                  border: '1px solid rgba(251, 146, 60, 0.3)',
-                }}
-              >
-                <motion.span
-                  className="text-base"
-                  animate={{ scale: [1, 1.2, 1] }}
-                  transition={{ duration: 0.6, repeat: Infinity, repeatDelay: 3 }}
-                >
-                  🔥
-                </motion.span>
-                <span className="font-bold text-orange-700 text-sm">{streak}</span>
-              </div>
-            )}
+            {/* Streak Counter - Persistent */}
+            <StreakIndicator />
 
             {/* XP Counter */}
             <div
@@ -581,7 +580,7 @@ const DashboardV2 = ({ onNavigate, language = 'ja' }: DashboardV2Props) => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="rounded-3xl p-8 text-white relative overflow-hidden cursor-pointer"
+          className="rounded-3xl p-4 sm:p-8 text-white relative overflow-hidden cursor-pointer"
           style={{
             background: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
             boxShadow: '0 16px 48px rgba(245, 158, 11, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.2) inset',
@@ -648,12 +647,24 @@ const DashboardV2 = ({ onNavigate, language = 'ja' }: DashboardV2Props) => {
           </div>
         </motion.div>
 
+        {/* Quick 5 Button */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+        >
+          <Quick5Button
+            onStart={(problemIds) => onNavigate('quiz', { problemIds })}
+            language={language}
+          />
+        </motion.div>
+
         {/* Level Progress Card */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15 }}
-          className="rounded-3xl p-8 relative overflow-hidden"
+          className="rounded-3xl p-4 sm:p-8 relative overflow-hidden"
           style={{
             background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.9) 0%, rgba(99, 102, 241, 0.9) 100%)',
             backdropFilter: 'blur(20px)',
@@ -752,11 +763,11 @@ const DashboardV2 = ({ onNavigate, language = 'ja' }: DashboardV2Props) => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
-          className="grid grid-cols-2 gap-4"
+          className="grid grid-cols-1 sm:grid-cols-2 gap-4"
         >
           {/* Total Problems */}
           <motion.div
-            className="rounded-2xl p-6"
+            className="rounded-2xl p-4 sm:p-6"
             whileHover={{ y: -4, scale: 1.02 }}
             transition={{ duration: 0.2 }}
             style={{
@@ -786,7 +797,7 @@ const DashboardV2 = ({ onNavigate, language = 'ja' }: DashboardV2Props) => {
 
           {/* Accuracy */}
           <motion.div
-            className="rounded-2xl p-6"
+            className="rounded-2xl p-4 sm:p-6"
             whileHover={{ y: -4, scale: 1.02 }}
             transition={{ duration: 0.2 }}
             style={{
@@ -816,7 +827,7 @@ const DashboardV2 = ({ onNavigate, language = 'ja' }: DashboardV2Props) => {
 
           {/* Study Time */}
           <motion.div
-            className="rounded-2xl p-6"
+            className="rounded-2xl p-4 sm:p-6"
             whileHover={{ y: -4, scale: 1.02 }}
             transition={{ duration: 0.2 }}
             style={{
@@ -846,7 +857,7 @@ const DashboardV2 = ({ onNavigate, language = 'ja' }: DashboardV2Props) => {
 
           {/* Streak */}
           <motion.div
-            className="rounded-2xl p-6"
+            className="rounded-2xl p-4 sm:p-6"
             whileHover={{ y: -4, scale: 1.02 }}
             transition={{ duration: 0.2 }}
             style={{
@@ -879,6 +890,298 @@ const DashboardV2 = ({ onNavigate, language = 'ja' }: DashboardV2Props) => {
               </div>
             </div>
           </motion.div>
+        </motion.div>
+
+        {/* Weakness Analysis Card */}
+        {topWeaknesses.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.24 }}
+            className="rounded-2xl p-4 sm:p-6"
+            style={{
+              background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(243, 244, 246, 0.9) 100%)',
+              backdropFilter: 'blur(20px)',
+              boxShadow: '0 8px 32px rgba(239, 68, 68, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.3) inset',
+            }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div
+                  className="w-8 h-8 rounded-full flex items-center justify-center"
+                  style={{
+                    background: 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
+                    boxShadow: '0 2px 8px rgba(239, 68, 68, 0.3)',
+                  }}
+                >
+                  <TrendingDown className="w-4 h-4 text-white" />
+                </div>
+                <h3 className="text-lg font-bold text-gray-900">
+                  {language === 'ja' ? '苦手分野分析' : 'Weakness Analysis'}
+                </h3>
+              </div>
+              <button
+                onClick={() => onNavigate('weaknessAnalysis')}
+                className="text-sm font-medium px-3 py-1.5 rounded-lg"
+                style={{
+                  background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(220, 38, 38, 0.1) 100%)',
+                  color: '#DC2626',
+                  border: '1px solid rgba(239, 68, 68, 0.2)',
+                }}
+              >
+                {language === 'ja' ? '詳細分析' : 'View Details'}
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {topWeaknesses.slice(0, 3).map((weakness, index) => (
+                <div
+                  key={weakness.category}
+                  className="p-3 rounded-lg border"
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.5)',
+                    borderColor: 'rgba(239, 68, 68, 0.2)',
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <div
+                          className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white"
+                          style={{
+                            background: index === 0
+                              ? 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)'
+                              : index === 1
+                              ? 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)'
+                              : 'linear-gradient(135deg, #FBBF24 0%, #F59E0B 100%)',
+                          }}
+                        >
+                          {index + 1}
+                        </div>
+                        <span className="font-semibold text-gray-900">{weakness.category}</span>
+                      </div>
+                      <div className="flex items-center gap-4 text-xs text-gray-600">
+                        <span>
+                          {language === 'ja' ? '正解率: ' : 'Accuracy: '}
+                          <span className="font-semibold text-red-600">
+                            {(weakness.accuracy * 100).toFixed(1)}%
+                          </span>
+                        </span>
+                        <span>
+                          {language === 'ja' ? '解答: ' : 'Attempts: '}
+                          <span className="font-semibold">{weakness.totalAttempts}</span>
+                          {language === 'ja' ? '回' : ''}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => onNavigate('weaknessAnalysis')}
+                      className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                      style={{
+                        background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(220, 38, 38, 0.15) 100%)',
+                        color: '#DC2626',
+                      }}
+                    >
+                      {language === 'ja' ? '練習' : 'Practice'}
+                    </button>
+                  </div>
+                  {/* Progress bar */}
+                  <div className="mt-2 w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                    <motion.div
+                      initial={{ width: 0 }}
+                      animate={{ width: `${weakness.accuracy * 100}%` }}
+                      transition={{ duration: 1, delay: 0.3 + index * 0.1 }}
+                      className="h-full"
+                      style={{
+                        background: 'linear-gradient(90deg, #EF4444 0%, #FBBF24 50%, #10B981 100%)',
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <p className="text-xs text-gray-500 mt-3">
+              {language === 'ja'
+                ? '「詳細分析」をクリックして全ての弱点分野を確認し、推奨問題を解きましょう'
+                : 'Click "View Details" to see all weaknesses and practice recommended problems'}
+            </p>
+          </motion.div>
+        )}
+
+        {/* Past Exam Analysis Card */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.26 }}
+          className="rounded-2xl p-4 sm:p-5 cursor-pointer"
+          onClick={() => onNavigate('pastExamAnalysis')}
+          whileHover={{ scale: 1.01 }}
+          whileTap={{ scale: 0.99 }}
+          style={{
+            background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.08) 0%, rgba(99, 102, 241, 0.08) 100%)',
+            backdropFilter: 'blur(20px)',
+            boxShadow: '0 4px 16px rgba(139, 92, 246, 0.1), 0 0 0 1px rgba(139, 92, 246, 0.15) inset',
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center"
+              style={{
+                background: 'linear-gradient(135deg, #8B5CF6 0%, #6366F1 100%)',
+                boxShadow: '0 2px 8px rgba(139, 92, 246, 0.3)',
+              }}
+            >
+              <FileSearch className="w-5 h-5 text-white" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                {language === 'ja' ? '過去問一括分析' : 'Batch Past-Exam Analysis'}
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {language === 'ja'
+                  ? '複数年度の過去問をAIで一括分析し、出題傾向を把握'
+                  : 'Analyze multiple years with AI to see subtopic trends'}
+              </p>
+            </div>
+            <div className="text-gray-400 dark:text-gray-500">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Today's Recommendations CTA */}
+        {recommendedProblems.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl p-6 text-white shadow-lg cursor-pointer"
+            onClick={() => onNavigate('recommendations')}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            style={{
+              boxShadow: '0 0 30px rgba(59, 130, 246, 0.3)',
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
+                    <motion.span
+                      animate={{ scale: [1, 1.2, 1] }}
+                      transition={{ duration: 2, repeat: Infinity }}
+                    >
+                      ✨
+                    </motion.span>
+                  </div>
+                  <div className="bg-white/20 px-2 py-0.5 rounded-full text-xs font-bold">
+                    {language === 'ja' ? 'AIおすすめ' : 'AI Picks'}
+                  </div>
+                </div>
+                <h3 className="text-lg font-bold mb-1">
+                  {language === 'ja' ? '今日のおすすめ' : "Today's Picks"}
+                </h3>
+                <p className="text-white/90 text-sm">
+                  {recommendedProblems.length} {language === 'ja' ? '問の推奨問題' : 'recommended problems'}
+                </p>
+                <p className="text-white/70 text-xs mt-1">
+                  {language === 'ja' ? 'あなたに最適化された問題' : 'Personalized for you'}
+                </p>
+              </div>
+              <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center">
+                <Star className="w-6 h-6 text-white" fill="white" />
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* XP Progress Widget */}
+        <XPProgressWidget
+          language={language}
+          onBadgesClick={() => onNavigate('badges')}
+        />
+
+        {/* Smart Review Panel */}
+        <SmartReviewPanel
+          language={language}
+          onStartReview={(problemIds) => {
+            onNavigate('spacedRepetitionReview', { problemIds });
+          }}
+        />
+
+        {/* Weekly PDCA Review Card */}
+        <WeeklyReviewCard
+          language={language}
+          onDismiss={() => {}}
+          onNavigate={(view) => onNavigate(view as View)}
+        />
+
+        {/* Category Mastery Levels */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.27 }}
+          className="rounded-2xl p-4 sm:p-5"
+          style={{
+            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(59, 130, 246, 0.08) 100%)',
+            border: '1px solid rgba(16, 185, 129, 0.2)',
+          }}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-bold text-white">
+              {language === 'ja' ? '📈 習熟度レベル' : '📈 Mastery Levels'}
+            </h3>
+            <button
+              onClick={() => onNavigate('stats')}
+              className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
+            >
+              {language === 'ja' ? '詳細' : 'Details'} →
+            </button>
+          </div>
+          <CategoryMasteryLevels language={language} compact={false} maxItems={5} />
+        </motion.div>
+
+        {/* PDCA Learning Flow */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.26 }}
+          className="rounded-2xl p-4 sm:p-5"
+          style={{
+            background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.08) 0%, rgba(59, 130, 246, 0.08) 100%)',
+            border: '1px solid rgba(139, 92, 246, 0.2)',
+          }}
+        >
+          <h3 className="text-sm font-bold text-white mb-3">
+            {language === 'ja' ? '📚 学習サイクル' : '📚 Learning Cycle'}
+          </h3>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { view: 'promptGenerator' as View, label: language === 'ja' ? 'プロンプト生成' : 'Prompt', emoji: '✏️', color: '#8B5CF6' },
+              { view: 'editor' as View, label: language === 'ja' ? '問題インポート' : 'Import', emoji: '📥', color: '#3B82F6' },
+              { view: 'studyPlanDashboard' as View, label: language === 'ja' ? '学習プラン' : 'Plan', emoji: '📋', color: '#10B981' },
+              { view: 'stats' as View, label: language === 'ja' ? '統計・分析' : 'Statistics', emoji: '📊', color: '#EF4444' },
+              { view: 'subtopicAnalysis' as View, label: language === 'ja' ? 'サブトピック' : 'Subtopics', emoji: '🔍', color: '#14B8A6' },
+              { view: 'smartNotes' as View, label: language === 'ja' ? 'スマートノート' : 'Notes', emoji: '💡', color: '#F59E0B' },
+              { view: 'pdcaCycle' as View, label: language === 'ja' ? 'PDCAサイクル' : 'PDCA', emoji: '🔄', color: '#EC4899' },
+            ].map((item) => (
+              <motion.button
+                key={item.view}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                onClick={() => onNavigate(item.view)}
+                className="flex items-center gap-2 p-3 rounded-xl text-left transition-colors"
+                style={{
+                  background: `${item.color}20`,
+                  border: `1px solid ${item.color}40`,
+                }}
+              >
+                <span className="text-base shrink-0">{item.emoji}</span>
+                <span className="text-xs font-semibold text-white leading-tight truncate">{item.label}</span>
+              </motion.button>
+            ))}
+          </div>
         </motion.div>
 
         {/* Today's Review CTA */}
@@ -1492,7 +1795,38 @@ const DashboardV2 = ({ onNavigate, language = 'ja' }: DashboardV2Props) => {
       </div>
 
       {/* Floating Action Buttons (FABs) */}
-      <div className="fixed bottom-6 right-6 flex flex-col gap-3 z-50">
+      <div
+        className="flex flex-col z-50"
+        style={{
+          position: 'fixed',
+          right: '24px',
+          bottom: '24px',
+          left: 'auto',
+          top: 'auto',
+          margin: '0',
+          transform: 'none',
+          gap: '12px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          justifyContent: 'flex-end'
+        }}
+      >
+        {/* Menu Button - Teal */}
+        <motion.button
+          whileHover={{ scale: 1.1, y: -2 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => onNavigate('allFeatures')}
+          className="w-14 h-14 rounded-full flex items-center justify-center text-white"
+          style={{
+            background: 'linear-gradient(135deg, #14B8A6 0%, #0D9488 100%)',
+            boxShadow: '0 8px 24px rgba(20, 184, 166, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.2) inset, 0 1px 2px rgba(0, 0, 0, 0.1)',
+          }}
+          title={language === 'ja' ? 'メニュー' : 'Menu'}
+        >
+          <Menu className="w-6 h-6" />
+        </motion.button>
+
         {/* Stats Button - Blue */}
         <motion.button
           whileHover={{ scale: 1.1, y: -2 }}
@@ -1521,6 +1855,21 @@ const DashboardV2 = ({ onNavigate, language = 'ja' }: DashboardV2Props) => {
           title={language === 'ja' ? '共有' : 'Share'}
         >
           <Share2 className="w-6 h-6" />
+        </motion.button>
+
+        {/* Favorites Button - Yellow */}
+        <motion.button
+          whileHover={{ scale: 1.1, y: -2 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => onNavigate('favorites')}
+          className="w-14 h-14 rounded-full flex items-center justify-center text-white"
+          style={{
+            background: 'linear-gradient(135deg, #FBBF24 0%, #F59E0B 100%)',
+            boxShadow: '0 8px 24px rgba(251, 191, 36, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.2) inset, 0 1px 2px rgba(0, 0, 0, 0.1)',
+          }}
+          title={language === 'ja' ? 'お気に入り' : 'Favorites'}
+        >
+          <Star className="w-6 h-6" />
         </motion.button>
 
         {/* Add Button - Green */}

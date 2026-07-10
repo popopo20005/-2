@@ -221,6 +221,7 @@ export const effects = {
  * タイポグラフィ
  */
 export const typography = {
+  // 既存のTailwindクラス形式（後方互換性のため維持）
   heading: 'text-xl font-bold text-gray-900 dark:text-gray-100',
   headingLarge: 'text-2xl font-bold text-gray-900 dark:text-gray-100',
   headingSmall: 'text-lg font-semibold text-gray-900 dark:text-gray-100',
@@ -229,6 +230,110 @@ export const typography = {
   label: 'text-sm font-medium text-gray-700 dark:text-gray-300',
   value: 'text-3xl font-bold',
   valueSmall: 'text-2xl font-bold',
+} as const;
+
+/**
+ * 完全なタイポグラフィスケール
+ * デザインシステムに基づく体系的な定義
+ */
+export const typographyScale = {
+  // フォントファミリー
+  fontFamily: {
+    sans: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+    mono: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace',
+    ja: '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", "Meiryo", sans-serif',
+  },
+
+  // フォントサイズとライン高さ
+  scale: {
+    displayLarge: {
+      size: '3rem',        // 48px
+      lineHeight: '1.1',
+      weight: '700',
+      letterSpacing: '-0.02em',
+      className: 'text-5xl font-bold tracking-tight',
+    },
+    display: {
+      size: '2.25rem',     // 36px
+      lineHeight: '1.2',
+      weight: '700',
+      letterSpacing: '-0.02em',
+      className: 'text-4xl font-bold tracking-tight',
+    },
+    h1: {
+      size: '1.875rem',    // 30px
+      lineHeight: '1.3',
+      weight: '700',
+      letterSpacing: '-0.01em',
+      className: 'text-3xl font-bold',
+    },
+    h2: {
+      size: '1.5rem',      // 24px
+      lineHeight: '1.4',
+      weight: '700',
+      letterSpacing: '0',
+      className: 'text-2xl font-bold',
+    },
+    h3: {
+      size: '1.25rem',     // 20px
+      lineHeight: '1.4',
+      weight: '600',
+      letterSpacing: '0',
+      className: 'text-xl font-semibold',
+    },
+    h4: {
+      size: '1.125rem',    // 18px
+      lineHeight: '1.4',
+      weight: '600',
+      letterSpacing: '0',
+      className: 'text-lg font-semibold',
+    },
+    bodyLarge: {
+      size: '1rem',        // 16px
+      lineHeight: '1.6',
+      weight: '400',
+      letterSpacing: '0',
+      className: 'text-base',
+    },
+    body: {
+      size: '0.875rem',    // 14px
+      lineHeight: '1.6',
+      weight: '400',
+      letterSpacing: '0',
+      className: 'text-sm',
+    },
+    bodySmall: {
+      size: '0.75rem',     // 12px
+      lineHeight: '1.5',
+      weight: '400',
+      letterSpacing: '0',
+      className: 'text-xs',
+    },
+    caption: {
+      size: '0.6875rem',   // 11px
+      lineHeight: '1.4',
+      weight: '400',
+      letterSpacing: '0.02em',
+      className: 'text-[11px] tracking-wide',
+    },
+  },
+
+  // フォントウェイト
+  fontWeight: {
+    light: '300',
+    regular: '400',
+    medium: '500',
+    semibold: '600',
+    bold: '700',
+  },
+
+  // Letter Spacing
+  letterSpacing: {
+    tight: '-0.02em',
+    normal: '0',
+    wide: '0.02em',
+    wider: '0.05em',
+  },
 } as const;
 
 /**
@@ -369,7 +474,334 @@ export const darkModeTransition = {
 } as const;
 
 /**
+ * ブレークポイント
+ * Tailwind CSSデフォルトブレークポイント
+ */
+export const breakpoints = {
+  sm: '640px',   // タブレット縦
+  md: '768px',   // タブレット横
+  lg: '1024px',  // デスクトップ小
+  xl: '1280px',  // デスクトップ中
+  '2xl': '1536px', // デスクトップ大
+
+  // 数値版（JavaScriptでの比較用）
+  values: {
+    sm: 640,
+    md: 768,
+    lg: 1024,
+    xl: 1280,
+    '2xl': 1536,
+  },
+} as const;
+
+/**
+ * z-index階層
+ * 一貫したレイヤー管理のための定義
+ */
+export const zIndex = {
+  base: 0,
+  dropdown: 1000,
+  sticky: 1100,
+  fixed: 1200,
+  modalBackdrop: 1300,
+  modal: 1400,
+  popover: 1500,
+  tooltip: 1600,
+  notification: 1700,
+  toast: 1800,
+} as const;
+
+/**
+ * 影の強度
+ * Material Design風のelevation
+ */
+export const elevation = {
+  0: 'shadow-none',
+  1: 'shadow-sm',   // 2px
+  2: 'shadow',      // 4px
+  3: 'shadow-md',   // 6px
+  4: 'shadow-lg',   // 10px
+  5: 'shadow-xl',   // 20px
+  6: 'shadow-2xl',  // 25px
+
+  // ニューモーフィズム
+  neumorphic: {
+    light: 'shadow-[4px_4px_10px_rgba(0,0,0,0.1),-4px_-4px_10px_rgba(255,255,255,0.9)]',
+    dark: 'shadow-[4px_4px_10px_rgba(0,0,0,0.3),-4px_-4px_10px_rgba(255,255,255,0.05)]',
+  },
+} as const;
+
+/**
+ * フォーカスリング設定
+ * アクセシビリティ準拠のフォーカス表示
+ */
+export const focusRing = {
+  default: 'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2',
+  error: 'focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2',
+  success: 'focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2',
+  dark: 'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900',
+} as const;
+
+/**
+ * トランジション設定
+ * アニメーション用のプリセット
+ */
+export const transitions = {
+  // 速度
+  fast: {
+    duration: '150ms',
+    timing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    className: 'transition-all duration-150 ease-in-out',
+  },
+  normal: {
+    duration: '300ms',
+    timing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    className: 'transition-all duration-300 ease-in-out',
+  },
+  slow: {
+    duration: '500ms',
+    timing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    className: 'transition-all duration-500 ease-in-out',
+  },
+
+  // イージング
+  easing: {
+    default: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    in: 'cubic-bezier(0.4, 0, 1, 1)',
+    out: 'cubic-bezier(0, 0, 0.2, 1)',
+    inOut: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    spring: 'cubic-bezier(0.68, -0.55, 0.265, 1.55)',
+  },
+} as const;
+
+/**
+ * Figmaコンポーネント変数
+ * Phase 6: UI/UX総仕上げで使用
+ */
+export const figmaComponents = {
+  // アバターサイズ
+  avatar: {
+    sm: '32px',
+    md: '48px',
+    lg: '64px',
+    xl: '96px',
+  },
+  // FAB（Floating Action Button）サイズ
+  fab: {
+    width: '56px',
+    height: '56px',
+    iconSize: '24px',
+    shadow: '0 4px 12px rgba(139, 92, 246, 0.3)',
+  },
+  // カードエレベーション
+  card: {
+    shadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+    shadowHover: '0 4px 16px rgba(0, 0, 0, 0.12)',
+    borderRadius: '16px',
+  },
+  // ボタン高さ
+  button: {
+    sm: '32px',
+    md: '40px',
+    lg: '48px',
+    xl: '56px',
+  },
+  // バッジサイズ
+  badge: {
+    sm: '20px',
+    md: '24px',
+    lg: '32px',
+  },
+} as const;
+
+/**
+ * Framer Motionアニメーションプリセット
+ * 全コンポーネントで統一されたアニメーションを提供
+ */
+export const motionPresets = {
+  // フェードイン
+  fadeIn: {
+    initial: { opacity: 0 },
+    animate: { opacity: 1 },
+    exit: { opacity: 0 },
+    transition: { duration: 0.2 },
+  },
+  // スライドアップ
+  slideUp: {
+    initial: { opacity: 0, y: 20 },
+    animate: { opacity: 1, y: 0 },
+    exit: { opacity: 0, y: -20 },
+    transition: { duration: 0.3, ease: 'easeOut' },
+  },
+  // スライドダウン
+  slideDown: {
+    initial: { opacity: 0, y: -20 },
+    animate: { opacity: 1, y: 0 },
+    exit: { opacity: 0, y: 20 },
+    transition: { duration: 0.3, ease: 'easeOut' },
+  },
+  // スケールイン
+  scaleIn: {
+    initial: { opacity: 0, scale: 0.9 },
+    animate: { opacity: 1, scale: 1 },
+    exit: { opacity: 0, scale: 0.9 },
+    transition: { duration: 0.2, ease: 'easeOut' },
+  },
+  // スケールアップ（大きく）
+  scaleUp: {
+    initial: { opacity: 0, scale: 0.5 },
+    animate: { opacity: 1, scale: 1 },
+    exit: { opacity: 0, scale: 0.5 },
+    transition: { duration: 0.3, ease: [0.68, -0.55, 0.265, 1.55] }, // Spring
+  },
+  // スライドイン（左から）
+  slideInLeft: {
+    initial: { opacity: 0, x: -100 },
+    animate: { opacity: 1, x: 0 },
+    exit: { opacity: 0, x: 100 },
+    transition: { duration: 0.3 },
+  },
+  // スライドイン（右から）
+  slideInRight: {
+    initial: { opacity: 0, x: 100 },
+    animate: { opacity: 1, x: 0 },
+    exit: { opacity: 0, x: -100 },
+    transition: { duration: 0.3 },
+  },
+  // スタッガーアニメーション（リスト用）
+  stagger: {
+    container: {
+      hidden: { opacity: 0 },
+      show: {
+        opacity: 1,
+        transition: {
+          staggerChildren: 0.1,
+        },
+      },
+    },
+    item: {
+      hidden: { opacity: 0, y: 20 },
+      show: { opacity: 1, y: 0 },
+    },
+  },
+  // ホバーエフェクト
+  hover: {
+    scale: {
+      whileHover: { scale: 1.05 },
+      whileTap: { scale: 0.95 },
+      transition: { duration: 0.2 },
+    },
+    lift: {
+      whileHover: { y: -4, boxShadow: '0 8px 24px rgba(0, 0, 0, 0.15)' },
+      transition: { duration: 0.2 },
+    },
+    glow: {
+      whileHover: { boxShadow: '0 0 20px rgba(139, 92, 246, 0.5)' },
+      transition: { duration: 0.3 },
+    },
+  },
+  // ページトランジション
+  page: {
+    initial: { opacity: 0, y: 20 },
+    animate: { opacity: 1, y: 0 },
+    exit: { opacity: 0, y: -20 },
+    transition: { duration: 0.4, ease: 'easeInOut' },
+  },
+} as const;
+
+/**
+ * レスポンシブユーティリティ
+ * モバイルファーストデザインのための設定
+ */
+export const responsive = {
+  // タッチターゲットサイズ（WCAG 2.1 Level AAA準拠）
+  touchTarget: {
+    minWidth: '44px',
+    minHeight: '44px',
+    className: 'min-w-[44px] min-h-[44px]',
+  },
+  // モバイル設定
+  mobile: {
+    padding: '16px',
+    fontSize: '14px',
+    lineHeight: '1.5',
+    maxWidth: '100%',
+    containerPadding: 'px-4',
+  },
+  // タブレット設定
+  tablet: {
+    padding: '24px',
+    fontSize: '16px',
+    lineHeight: '1.6',
+    maxWidth: '768px',
+    containerPadding: 'px-6',
+  },
+  // デスクトップ設定
+  desktop: {
+    padding: '32px',
+    fontSize: '16px',
+    lineHeight: '1.6',
+    maxWidth: '1280px',
+    containerPadding: 'px-8',
+  },
+  // メディアクエリヘルパー
+  mediaQueries: {
+    mobile: '@media (max-width: 767px)',
+    tablet: '@media (min-width: 768px) and (max-width: 1023px)',
+    desktop: '@media (min-width: 1024px)',
+    touch: '@media (hover: none) and (pointer: coarse)',
+  },
+} as const;
+
+/**
+ * アクセシビリティユーティリティ
+ * WCAG 2.1 AAA準拠のための設定
+ */
+export const a11y = {
+  // フォーカス可視性
+  focusVisible: {
+    outline: '2px solid',
+    outlineColor: figmaColors.primary.base,
+    outlineOffset: '2px',
+    className: 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2',
+  },
+  // スキップリンク
+  skipLink: {
+    position: 'absolute',
+    left: '-9999px',
+    zIndex: 9999,
+    className: 'sr-only focus:not-sr-only focus:absolute focus:top-0 focus:left-0 focus:z-[9999]',
+  },
+  // スクリーンリーダー専用
+  srOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: '0',
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: '0',
+    className: 'sr-only',
+  },
+  // ARIAラベルテンプレート
+  ariaLabels: {
+    close: 'Close',
+    menu: 'Menu',
+    navigation: 'Main navigation',
+    search: 'Search',
+    loading: 'Loading...',
+  },
+} as const;
+
+/**
  * 型エクスポート
  */
 export type GradientTheme = keyof typeof gradientThemes;
 export type StatCardTheme = GradientTheme;
+export type TypographyScale = keyof typeof typographyScale.scale;
+export type Breakpoint = keyof typeof breakpoints.values;
+export type ZIndex = keyof typeof zIndex;
+export type MotionPreset = keyof typeof motionPresets;
+export type FigmaComponent = keyof typeof figmaComponents;

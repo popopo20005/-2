@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { recommendationEngine } from '../lib/recommendationEngine';
 import type { StudyRecommendation, LearningSchedule, DifficultyAdjustment } from '../lib/recommendationEngine';
+import type { RecommendedProblem } from '../types/recommendation';
+import { generateRecommendedProblems } from '../services/recommendationEngine';
 
 interface RecommendationDashboardProps {
   onBack: () => void;
@@ -167,6 +169,8 @@ export function RecommendationDashboard({ onBack, onStartQuiz, onNavigateToSetti
 
   const currentLang = language as keyof typeof t;
   const [recommendations, setRecommendations] = useState<StudyRecommendation[]>([]);
+  const [topRecommendedProblems, setTopRecommendedProblems] = useState<RecommendedProblem[]>([]);
+  const [selectedRecommendation, setSelectedRecommendation] = useState<RecommendedProblem | null>(null);
 
   // 推薦テキストを翻訳する関数
   const translateRecommendationText = (text: string, type: 'title' | 'description' | 'actionText'): string => {
@@ -249,17 +253,19 @@ export function RecommendationDashboard({ onBack, onStartQuiz, onNavigateToSetti
       setIsLoading(true);
       console.log(t[currentLang].loadingLog);
 
-      const [recsResult, scheduleResult, difficultyResult] = await Promise.all([
+      const [recsResult, scheduleResult, difficultyResult, recommendedProblemsResult] = await Promise.all([
         recommendationEngine.generatePersonalizedRecommendations(language),
         recommendationEngine.generateOptimalSchedule(),
-        recommendationEngine.calculateAdaptiveDifficulty(language)
+        recommendationEngine.calculateAdaptiveDifficulty(language),
+        generateRecommendedProblems(10)
       ]);
 
-      console.log(t[currentLang].loadingComplete, { recsResult, scheduleResult, difficultyResult });
+      console.log(t[currentLang].loadingComplete, { recsResult, scheduleResult, difficultyResult, recommendedProblemsResult });
 
       setRecommendations(recsResult);
       setSchedule(scheduleResult);
       setDifficultyAdjustment(difficultyResult);
+      setTopRecommendedProblems(recommendedProblemsResult);
     } catch (error) {
       console.error(t[currentLang].loadingError, error);
     } finally {
@@ -536,6 +542,112 @@ export function RecommendationDashboard({ onBack, onStartQuiz, onNavigateToSetti
         {/* パーソナル推薦タブ */}
         {activeTab === 'recommendations' && (
           <div className="space-y-6">
+            {/* トップ10推奨問題セクション */}
+            {topRecommendedProblems.length > 0 && (
+              <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-lg">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    <span>🎯</span>
+                    <span>{language === 'ja' ? 'トップ10推奨問題' : 'Top 10 Recommended Problems'}</span>
+                  </h3>
+                  <button
+                    onClick={() => {
+                      if (onStartQuiz) {
+                        const allProblemIds = topRecommendedProblems.map(rec => rec.problem.id);
+                        console.log('全推奨問題から学習開始:', {
+                          problemCount: allProblemIds.length,
+                          problemIds: allProblemIds
+                        });
+                        onStartQuiz({
+                          problemIds: allProblemIds,
+                          mode: 'review'
+                        });
+                      }
+                    }}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition font-medium text-sm"
+                  >
+                    {language === 'ja' ? '全10問を学習' : 'Study All 10'}
+                  </button>
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                  {language === 'ja'
+                    ? 'あなたの学習履歴に基づいて、最も効果的な10問を推奨します（個別の問題をクリックしてその問題だけを学習することもできます）'
+                    : 'Based on your learning history, we recommend these 10 most effective problems (click individual problems to study them separately)'}
+                </p>
+                <div className="space-y-3">
+                  {topRecommendedProblems.map((rec, index) => (
+                    <div
+                      key={rec.problem.id}
+                      className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-400 hover:shadow-lg transition"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div
+                          className="flex-1 cursor-pointer"
+                          onClick={() => {
+                            if (onStartQuiz) {
+                              console.log('推奨問題から学習開始:', {
+                                problemId: rec.problem.id,
+                                question: rec.problem.question,
+                                category: rec.problem.category
+                              });
+                              onStartQuiz({
+                                problemIds: [rec.problem.id],
+                                mode: 'review'
+                              });
+                            }
+                          }}
+                        >
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-sm font-bold">
+                              {index + 1}
+                            </span>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                              {rec.problem.category}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                              rec.priority === 'high'
+                                ? 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200'
+                                : rec.priority === 'medium'
+                                ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200'
+                                : 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
+                            }`}>
+                              {rec.reason}
+                            </span>
+                          </div>
+                          <p className="text-sm font-medium text-gray-900 dark:text-white mb-2">
+                            {rec.problem.question}
+                          </p>
+                          <div className="flex items-center gap-4 text-xs text-gray-600 dark:text-gray-400">
+                            <span title="総合スコア">
+                              📊 {rec.score.totalScore.toFixed(1)}
+                            </span>
+                            <span title="弱点スコア (40%)">
+                              🎯 {rec.score.weaknessScore.toFixed(0)}
+                            </span>
+                            <span title="復習タイミング (30%)">
+                              ⏰ {rec.score.timeScore.toFixed(0)}
+                            </span>
+                            <span title="難易度適正 (30%)">
+                              ⚖️ {rec.score.difficultyScore.toFixed(0)}
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedRecommendation(rec);
+                          }}
+                          className="ml-4 px-3 py-1 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 rounded hover:bg-blue-200 dark:hover:bg-blue-800 transition"
+                        >
+                          {language === 'ja' ? '理由' : 'Why'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {recommendations.length > 0 ? (
               recommendations.map((recommendation, index) => (
                 <div
@@ -797,6 +909,188 @@ export function RecommendationDashboard({ onBack, onStartQuiz, onNavigateToSetti
                     <div className="text-sm text-green-800 dark:text-green-200">{t[currentLang].goalAchievementPeriod}</div>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 推奨理由詳細モーダル */}
+        {selectedRecommendation && (
+          <div
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={() => setSelectedRecommendation(null)}
+          >
+            <div
+              className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                  {language === 'ja' ? '推奨理由の詳細' : 'Recommendation Details'}
+                </h3>
+                <button
+                  onClick={() => setSelectedRecommendation(null)}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+                >
+                  <span className="text-2xl text-gray-500 dark:text-gray-400">×</span>
+                </button>
+              </div>
+
+              {/* 問題情報 */}
+              <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                    {selectedRecommendation.problem.category}
+                  </span>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                    selectedRecommendation.priority === 'high'
+                      ? 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200'
+                      : selectedRecommendation.priority === 'medium'
+                      ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200'
+                      : 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
+                  }`}>
+                    {selectedRecommendation.reason}
+                  </span>
+                </div>
+                <p className="text-sm text-gray-900 dark:text-white font-medium">
+                  {selectedRecommendation.problem.question}
+                </p>
+              </div>
+
+              {/* スコア内訳 */}
+              <div className="mb-6">
+                <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                  {language === 'ja' ? 'スコア内訳' : 'Score Breakdown'}
+                </h4>
+
+                {/* 総合スコア */}
+                <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      📊 {language === 'ja' ? '総合スコア' : 'Total Score'}
+                    </span>
+                    <span className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                      {selectedRecommendation.score.totalScore.toFixed(1)}
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                    <div
+                      className="bg-blue-600 h-2 rounded-full"
+                      style={{ width: `${Math.min(100, selectedRecommendation.score.totalScore)}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                {/* 弱点スコア */}
+                <div className="mb-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm text-gray-700 dark:text-gray-300">
+                      🎯 {language === 'ja' ? '弱点スコア' : 'Weakness Score'} (40%)
+                    </span>
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">
+                      {selectedRecommendation.score.weaknessScore.toFixed(1)}
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                    <div
+                      className="bg-red-500 h-2 rounded-full"
+                      style={{ width: `${Math.min(100, selectedRecommendation.score.weaknessScore)}%` }}
+                    ></div>
+                  </div>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                    {language === 'ja'
+                      ? 'このカテゴリーでの過去の正答率に基づくスコア'
+                      : 'Score based on past accuracy in this category'}
+                  </p>
+                </div>
+
+                {/* 復習タイミングスコア */}
+                <div className="mb-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm text-gray-700 dark:text-gray-300">
+                      ⏰ {language === 'ja' ? '復習タイミング' : 'Review Timing'} (30%)
+                    </span>
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">
+                      {selectedRecommendation.score.timeScore.toFixed(1)}
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                    <div
+                      className="bg-yellow-500 h-2 rounded-full"
+                      style={{ width: `${Math.min(100, selectedRecommendation.score.timeScore)}%` }}
+                    ></div>
+                  </div>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                    {language === 'ja'
+                      ? '最後に解いてからの経過時間に基づくスコア'
+                      : 'Score based on time since last attempt'}
+                  </p>
+                </div>
+
+                {/* 難易度適正スコア */}
+                <div className="mb-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm text-gray-700 dark:text-gray-300">
+                      ⚖️ {language === 'ja' ? '難易度適正' : 'Difficulty Match'} (30%)
+                    </span>
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">
+                      {selectedRecommendation.score.difficultyScore.toFixed(1)}
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                    <div
+                      className="bg-green-500 h-2 rounded-full"
+                      style={{ width: `${Math.min(100, selectedRecommendation.score.difficultyScore)}%` }}
+                    ></div>
+                  </div>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                    {language === 'ja'
+                      ? 'あなたの現在のレベルとの適合度'
+                      : 'How well this matches your current level'}
+                  </p>
+                </div>
+              </div>
+
+              {/* 推奨理由の説明 */}
+              <div className="mb-6 p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-800">
+                <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
+                  💡 {language === 'ja' ? 'なぜこの問題が推奨されるのか' : 'Why This Problem is Recommended'}
+                </h4>
+                <p className="text-sm text-gray-700 dark:text-gray-300">
+                  {selectedRecommendation.priority === 'high' && (language === 'ja'
+                    ? 'この問題は高優先度です。あなたの弱点カテゴリーであり、復習のタイミングも最適です。'
+                    : 'This problem is high priority. It\'s in your weak category and the review timing is optimal.')}
+                  {selectedRecommendation.priority === 'medium' && (language === 'ja'
+                    ? 'この問題は中優先度です。定期的な復習により知識を定着させましょう。'
+                    : 'This problem is medium priority. Regular review will help solidify your knowledge.')}
+                  {selectedRecommendation.priority === 'low' && (language === 'ja'
+                    ? 'この問題は低優先度ですが、継続的な学習で更なる向上が見込めます。'
+                    : 'This problem is low priority, but continued study will bring further improvement.')}
+                </p>
+              </div>
+
+              {/* アクションボタン */}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    if (onStartQuiz) {
+                      onStartQuiz({
+                        problemIds: [selectedRecommendation.problem.id],
+                        mode: 'review'
+                      });
+                    }
+                    setSelectedRecommendation(null);
+                  }}
+                  className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition font-medium"
+                >
+                  {language === 'ja' ? 'この問題を学習' : 'Study This Problem'}
+                </button>
+                <button
+                  onClick={() => setSelectedRecommendation(null)}
+                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg transition"
+                >
+                  {language === 'ja' ? '閉じる' : 'Close'}
+                </button>
               </div>
             </div>
           </div>

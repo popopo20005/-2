@@ -87,7 +87,7 @@ export const DEFAULT_RECOMMENDATION_CONFIG: RecommendationConfig = {
   timeWeight: 0.3,
   difficultyWeight: 0.3,
   maxRecommendations: 20,
-  minScore: 20,
+  minScore: 0, // 0に下げて全ての問題を推奨対象にする
   targetAccuracy: 0.7,
 };
 

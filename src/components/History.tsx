@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
 import { historyService } from '../lib/database';
 import type { Problem, QuizSet, HistoryEntry } from '../types';
+import { HistoryDetailModal } from './HistoryDetailModal';
+import { StudyCalendar } from './StudyCalendar';
+import { List, Calendar } from 'lucide-react';
 
 interface HistoryProps {
   onBack: () => void;
@@ -35,6 +38,13 @@ export function History({ onBack }: HistoryProps) {
   const [showCorrectOnly, setShowCorrectOnly] = useState(false);
   const [showIncorrectOnly, setShowIncorrectOnly] = useState(false);
 
+  // 表示モード: 'timeline' (デフォルト) または 'calendar'
+  const [viewMode, setViewMode] = useState<'timeline' | 'calendar'>('timeline');
+
+  // 詳細モーダル
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [selectedHistoryEntry, setSelectedHistoryEntry] = useState<DetailedHistoryEntry | null>(null);
+
   const itemsPerPage = 20;
 
   useEffect(() => {
@@ -43,7 +53,7 @@ export function History({ onBack }: HistoryProps) {
     };
 
     window.addEventListener('storage', handleStorageChange);
-    
+
     // 定期的に言語設定をチェック
     const interval = setInterval(() => {
       const currentLang = localStorage.getItem('language') || 'ja';
@@ -60,11 +70,11 @@ export function History({ onBack }: HistoryProps) {
 
   const t = {
     ja: {
-      pageTitle: '📝 解答履歴',
+      pageTitle: '解答履歴',
       backToMenu: '← メインメニューに戻る',
       loading: '解答履歴を読み込み中...',
       stats: {
-        title: '📊 履歴統計',
+        title: '履歴統計',
         totalAnswers: '総回答数',
         correctAnswers: '正解数',
         incorrectAnswers: '不正解数',
@@ -73,8 +83,12 @@ export function History({ onBack }: HistoryProps) {
         firstAnswer: '初回回答',
         lastAnswer: '最新回答'
       },
+      viewMode: {
+        timeline: 'タイムライン表示',
+        calendar: 'カレンダー表示'
+      },
       filters: {
-        title: '🔍 フィルター・検索',
+        title: 'フィルター・検索',
         category: 'カテゴリ',
         allCategories: '全カテゴリ',
         date: '日付',
@@ -84,13 +98,13 @@ export function History({ onBack }: HistoryProps) {
         correctOnly: '正解のみ',
         incorrectOnly: '不正解のみ',
         actions: '操作',
-        clearAll: '🗑️ 全履歴削除'
+        clearAll: '全履歴削除'
       },
       history: {
-        title: '📋 履歴一覧',
+        title: '履歴一覧',
         itemCount: '件',
-        correct: '✅ 正解',
-        incorrect: '❌ 不正解',
+        correct: '正解',
+        incorrect: '不正解',
         yourAnswer: 'あなたの回答',
         trueAnswer: '○ (正しい)',
         falseAnswer: '× (間違い)',
@@ -115,11 +129,11 @@ export function History({ onBack }: HistoryProps) {
       }
     },
     en: {
-      pageTitle: '📝 Answer History',
+      pageTitle: 'Answer History',
       backToMenu: '← Back to Main Menu',
       loading: 'Loading answer history...',
       stats: {
-        title: '📊 History Statistics',
+        title: 'History Statistics',
         totalAnswers: 'Total Answers',
         correctAnswers: 'Correct',
         incorrectAnswers: 'Incorrect',
@@ -128,8 +142,12 @@ export function History({ onBack }: HistoryProps) {
         firstAnswer: 'First Answer',
         lastAnswer: 'Latest Answer'
       },
+      viewMode: {
+        timeline: 'Timeline View',
+        calendar: 'Calendar View'
+      },
       filters: {
-        title: '🔍 Filter & Search',
+        title: 'Filter & Search',
         category: 'Category',
         allCategories: 'All Categories',
         date: 'Date',
@@ -139,13 +157,13 @@ export function History({ onBack }: HistoryProps) {
         correctOnly: 'Correct Only',
         incorrectOnly: 'Incorrect Only',
         actions: 'Actions',
-        clearAll: '🗑️ Clear All History'
+        clearAll: 'Clear All History'
       },
       history: {
-        title: '📋 History List',
+        title: 'History List',
         itemCount: 'items',
-        correct: '✅ Correct',
-        incorrect: '❌ Incorrect',
+        correct: 'Correct',
+        incorrect: 'Incorrect',
         yourAnswer: 'Your Answer',
         trueAnswer: '○ (True)',
         falseAnswer: '× (False)',
@@ -206,7 +224,7 @@ export function History({ onBack }: HistoryProps) {
 
   const deleteEntry = async (id: number) => {
     if (!confirm(t[currentLang].confirmations.deleteEntry)) return;
-    
+
     try {
       await historyService.deleteHistoryEntry(id);
       setHistoryData(prev => prev.filter(item => item.entry.id !== id));
@@ -219,7 +237,7 @@ export function History({ onBack }: HistoryProps) {
 
   const clearAllHistory = async () => {
     if (!confirm(t[currentLang].confirmations.clearAllHistory)) return;
-    
+
     try {
       await historyService.clear();
       setHistoryData([]);
@@ -250,12 +268,12 @@ export function History({ onBack }: HistoryProps) {
     return historyData.filter(item => {
       const matchesCategory = !selectedCategory || item.entry.category === selectedCategory;
       const matchesDate = !selectedDate || item.entry.timestamp.toISOString().split('T')[0] === selectedDate;
-      const matchesSearch = !searchTerm || 
+      const matchesSearch = !searchTerm ||
         item.entry.questionText?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.problem?.question.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesCorrect = !showCorrectOnly || item.entry.isCorrect;
       const matchesIncorrect = !showIncorrectOnly || !item.entry.isCorrect;
-      
+
       return matchesCategory && matchesDate && matchesSearch && matchesCorrect && matchesIncorrect;
     });
   };
@@ -267,10 +285,10 @@ export function History({ onBack }: HistoryProps) {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#0F172A' }}>
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-300">{t[currentLang].loading}</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#6366F1] mx-auto mb-4"></div>
+          <p className="text-[#CBD5E1]">{t[currentLang].loading}</p>
         </div>
       </div>
     );
@@ -278,213 +296,286 @@ export function History({ onBack }: HistoryProps) {
 
   const filteredData = getFilteredData();
 
+  // Render history component with timeline/calendar view toggle
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-50 dark:from-indigo-900/20 dark:to-blue-900/20 p-8">
+    <div className="min-h-screen p-4 sm:p-8" style={{ background: '#0F172A' }}>
       <div className="max-w-7xl mx-auto">
         <header className="mb-8">
           <button
             onClick={onBack}
-            className="quiz-action-button mb-4 px-4 py-2 rounded-lg transition-colors"
+            className="mb-4 px-4 py-2 rounded-lg text-[#818CF8] hover:bg-white/5 transition-colors text-sm font-medium"
           >
             {t[currentLang].backToMenu}
           </button>
-          <h1 className="text-3xl font-bold text-indigo-900 dark:text-indigo-100">{t[currentLang].pageTitle}</h1>
+          <div className="flex justify-between items-center">
+            <h1 className="text-3xl font-bold text-[#F8FAFC]">{t[currentLang].pageTitle}</h1>
+
+            {/* 表示モード切り替えボタン */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setViewMode('timeline')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${
+                  viewMode === 'timeline'
+                    ? 'bg-[#6366F1] text-white shadow-md'
+                    : 'text-[#94A3B8] hover:text-[#CBD5E1] hover:bg-white/5'
+                }`}
+              >
+                <List className="w-4 h-4" />
+                <span className="hidden sm:inline">{t[currentLang].viewMode.timeline}</span>
+              </button>
+              <button
+                onClick={() => setViewMode('calendar')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${
+                  viewMode === 'calendar'
+                    ? 'bg-[#6366F1] text-white shadow-md'
+                    : 'text-[#94A3B8] hover:text-[#CBD5E1] hover:bg-white/5'
+                }`}
+              >
+                <Calendar className="w-4 h-4" />
+                <span className="hidden sm:inline">{t[currentLang].viewMode.calendar}</span>
+              </button>
+            </div>
+          </div>
         </header>
 
         {/* 統計情報 */}
         {historyStats && (
-          <div className="mb-8 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-800 rounded-lg shadow-md p-6">
-            <h2 className="text-xl font-semibold text-blue-900 dark:text-blue-100 mb-4">{t[currentLang].stats.title}</h2>
+          <div className="mb-8 rounded-2xl border border-white/10 p-6" style={{ background: 'rgba(30,41,59,0.7)' }}>
+            <h2 className="text-xl font-semibold text-[#F8FAFC] mb-4">{t[currentLang].stats.title}</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-              <div className="text-center bg-white dark:bg-gray-800 rounded-lg p-3">
-                <div className="text-lg font-bold text-blue-600 dark:text-blue-400">{historyStats.totalEntries}</div>
-                <div className="text-xs text-gray-600 dark:text-gray-300">{t[currentLang].stats.totalAnswers}</div>
+              <div className="text-center rounded-xl border border-white/10 p-3" style={{ background: 'rgba(15,23,42,0.5)' }}>
+                <div className="text-lg font-bold text-[#818CF8]">{historyStats.totalEntries}</div>
+                <div className="text-xs text-[#94A3B8]">{t[currentLang].stats.totalAnswers}</div>
               </div>
-              <div className="text-center bg-white dark:bg-gray-800 rounded-lg p-3">
-                <div className="text-lg font-bold text-green-600 dark:text-green-400">{historyStats.correctEntries}</div>
-                <div className="text-xs text-gray-600 dark:text-gray-300">{t[currentLang].stats.correctAnswers}</div>
+              <div className="text-center rounded-xl border border-white/10 p-3" style={{ background: 'rgba(15,23,42,0.5)' }}>
+                <div className="text-lg font-bold text-[#34D399]">{historyStats.correctEntries}</div>
+                <div className="text-xs text-[#94A3B8]">{t[currentLang].stats.correctAnswers}</div>
               </div>
-              <div className="text-center bg-white dark:bg-gray-800 rounded-lg p-3">
-                <div className="text-lg font-bold text-red-600 dark:text-red-400">{historyStats.incorrectEntries}</div>
-                <div className="text-xs text-gray-600 dark:text-gray-300">{t[currentLang].stats.incorrectAnswers}</div>
+              <div className="text-center rounded-xl border border-white/10 p-3" style={{ background: 'rgba(15,23,42,0.5)' }}>
+                <div className="text-lg font-bold text-[#EF4444]">{historyStats.incorrectEntries}</div>
+                <div className="text-xs text-[#94A3B8]">{t[currentLang].stats.incorrectAnswers}</div>
               </div>
-              <div className="text-center bg-white dark:bg-gray-800 rounded-lg p-3">
-                <div className="text-lg font-bold text-purple-600 dark:text-purple-400">{formatAccuracy(historyStats.accuracy)}</div>
-                <div className="text-xs text-gray-600 dark:text-gray-300">{t[currentLang].stats.accuracy}</div>
+              <div className="text-center rounded-xl border border-white/10 p-3" style={{ background: 'rgba(15,23,42,0.5)' }}>
+                <div className="text-lg font-bold text-[#A78BFA]">{formatAccuracy(historyStats.accuracy)}</div>
+                <div className="text-xs text-[#94A3B8]">{t[currentLang].stats.accuracy}</div>
               </div>
-              <div className="text-center bg-white dark:bg-gray-800 rounded-lg p-3">
-                <div className="text-lg font-bold text-orange-600 dark:text-orange-400">{historyStats.categoriesAnswered}</div>
-                <div className="text-xs text-gray-600 dark:text-gray-300">{t[currentLang].stats.categories}</div>
+              <div className="text-center rounded-xl border border-white/10 p-3" style={{ background: 'rgba(15,23,42,0.5)' }}>
+                <div className="text-lg font-bold text-[#FB923C]">{historyStats.categoriesAnswered}</div>
+                <div className="text-xs text-[#94A3B8]">{t[currentLang].stats.categories}</div>
               </div>
-              <div className="text-center bg-white dark:bg-gray-800 rounded-lg p-3">
-                <div className="text-sm font-bold text-indigo-600 dark:text-indigo-400">
+              <div className="text-center rounded-xl border border-white/10 p-3" style={{ background: 'rgba(15,23,42,0.5)' }}>
+                <div className="text-sm font-bold text-[#818CF8]">
                   {historyStats.firstAnswer ? formatDate(historyStats.firstAnswer).split(' ')[0] : '-'}
                 </div>
-                <div className="text-xs text-gray-600 dark:text-gray-300">{t[currentLang].stats.firstAnswer}</div>
+                <div className="text-xs text-[#94A3B8]">{t[currentLang].stats.firstAnswer}</div>
               </div>
-              <div className="text-center bg-white dark:bg-gray-800 rounded-lg p-3">
-                <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+              <div className="text-center rounded-xl border border-white/10 p-3" style={{ background: 'rgba(15,23,42,0.5)' }}>
+                <div className="text-sm font-bold text-[#34D399]">
                   {historyStats.lastAnswer ? formatDate(historyStats.lastAnswer).split(' ')[0] : '-'}
                 </div>
-                <div className="text-xs text-gray-600 dark:text-gray-300">{t[currentLang].stats.lastAnswer}</div>
+                <div className="text-xs text-[#94A3B8]">{t[currentLang].stats.lastAnswer}</div>
               </div>
             </div>
           </div>
         )}
 
-        {/* フィルター */}
-        <div className="mb-6 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border border-green-200 dark:border-green-800 rounded-lg shadow-md p-6">
-          <h2 className="text-xl font-semibold text-green-900 dark:text-green-100 mb-4">{t[currentLang].filters.title}</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t[currentLang].filters.category}</label>
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white text-sm"
-              >
-                <option value="">{t[currentLang].filters.allCategories}</option>
-                {getCategories().map(category => (
-                  <option key={category} value={category}>{category}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t[currentLang].filters.date}</label>
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t[currentLang].filters.searchProblem}</label>
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder={t[currentLang].filters.searchPlaceholder}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t[currentLang].filters.resultFilter}</label>
-              <div className="space-y-1">
-                <label className="flex items-center text-sm">
+        {/* 表示モードに応じたコンテンツ */}
+        {viewMode === 'calendar' ? (
+          /* カレンダー表示 */
+          <StudyCalendar language={currentLang} />
+        ) : (
+          /* タイムライン表示（既存の履歴機能） */
+          <>
+            {/* フィルター */}
+            <div className="mb-6 rounded-2xl border border-white/10 p-6" style={{ background: 'rgba(30,41,59,0.7)' }}>
+              <h2 className="text-xl font-semibold text-[#F8FAFC] mb-4">{t[currentLang].filters.title}</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-[#CBD5E1] mb-1">{t[currentLang].filters.category}</label>
+                  <select
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                    className="w-full px-3 py-2 border border-white/10 rounded-lg text-[#F8FAFC] text-sm focus:outline-none focus:ring-2 focus:ring-[#6366F1]"
+                    style={{ background: 'rgba(15,23,42,0.5)' }}
+                  >
+                    <option value="">{t[currentLang].filters.allCategories}</option>
+                    {getCategories().map(category => (
+                      <option key={category} value={category}>{category}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[#CBD5E1] mb-1">{t[currentLang].filters.date}</label>
                   <input
-                    type="checkbox"
-                    checked={showCorrectOnly}
-                    onChange={(e) => {
-                      setShowCorrectOnly(e.target.checked);
-                      if (e.target.checked) setShowIncorrectOnly(false);
-                    }}
-                    className="mr-2"
+                    type="date"
+                    value={selectedDate}
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                    className="w-full px-3 py-2 border border-white/10 rounded-lg text-[#F8FAFC] text-sm focus:outline-none focus:ring-2 focus:ring-[#6366F1]"
+                    style={{ background: 'rgba(15,23,42,0.5)' }}
                   />
-                  {t[currentLang].filters.correctOnly}
-                </label>
-                <label className="flex items-center text-sm">
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[#CBD5E1] mb-1">{t[currentLang].filters.searchProblem}</label>
                   <input
-                    type="checkbox"
-                    checked={showIncorrectOnly}
-                    onChange={(e) => {
-                      setShowIncorrectOnly(e.target.checked);
-                      if (e.target.checked) setShowCorrectOnly(false);
-                    }}
-                    className="mr-2"
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder={t[currentLang].filters.searchPlaceholder}
+                    className="w-full px-3 py-2 border border-white/10 rounded-lg text-[#F8FAFC] text-sm placeholder-[#64748B] focus:outline-none focus:ring-2 focus:ring-[#6366F1]"
+                    style={{ background: 'rgba(15,23,42,0.5)' }}
                   />
-                  {t[currentLang].filters.incorrectOnly}
-                </label>
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t[currentLang].filters.actions}</label>
-              <button
-                onClick={clearAllHistory}
-                className="w-full px-3 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors text-sm"
-              >
-                {t[currentLang].filters.clearAll}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* 履歴一覧 */}
-        <div className="bg-gradient-to-br from-gray-50 to-white dark:from-gray-800 dark:to-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg shadow-md p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{t[currentLang].history.title}</h2>
-            <div className="text-sm text-gray-600 dark:text-gray-300">
-              {filteredData.length}{t[currentLang].history.itemCount} / {historyData.length}{t[currentLang].history.itemCount}
-            </div>
-          </div>
-
-          {filteredData.length === 0 ? (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-              {historyData.length === 0 ? t[currentLang].history.noHistory : t[currentLang].history.noMatchingHistory}
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {filteredData.map((item) => (
-                <div key={item.entry.id} className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-2 mb-2">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          item.entry.isCorrect 
-                            ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' 
-                            : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                        }`}>
-                          {item.entry.isCorrect ? t[currentLang].history.correct : t[currentLang].history.incorrect}
-                        </span>
-                        <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-xs">
-                          {item.entry.category}
-                        </span>
-                        {item.quizSet && (
-                          <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 rounded text-xs">
-                            📖 {item.quizSet.name}
-                          </span>
-                        )}
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
-                          {formatDate(item.entry.timestamp)}
-                        </span>
-                      </div>
-                      <p className="text-gray-900 dark:text-white mb-2">
-                        {item.problem?.question || item.entry.questionText || t[currentLang].history.problemNotFound}
-                      </p>
-                      {item.entry.userAnswer !== undefined && (
-                        <div className="text-sm text-gray-600 dark:text-gray-300">
-                          {t[currentLang].history.yourAnswer}: {
-                            typeof item.entry.userAnswer === 'boolean' 
-                              ? (item.entry.userAnswer ? t[currentLang].history.trueAnswer : t[currentLang].history.falseAnswer)
-                              : `${t[currentLang].history.choice} ${item.entry.userAnswer + 1}`
-                          }
-                        </div>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => item.entry.id && deleteEntry(item.entry.id)}
-                      className="ml-4 px-2 py-1 text-red-500 hover:text-red-700 text-sm"
-                    >
-                      {t[currentLang].history.delete}
-                    </button>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[#CBD5E1] mb-1">{t[currentLang].filters.resultFilter}</label>
+                  <div className="space-y-1">
+                    <label className="flex items-center text-sm text-[#CBD5E1] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showCorrectOnly}
+                        onChange={(e) => {
+                          setShowCorrectOnly(e.target.checked);
+                          if (e.target.checked) setShowIncorrectOnly(false);
+                        }}
+                        className="mr-2 accent-[#6366F1]"
+                      />
+                      {t[currentLang].filters.correctOnly}
+                    </label>
+                    <label className="flex items-center text-sm text-[#CBD5E1] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showIncorrectOnly}
+                        onChange={(e) => {
+                          setShowIncorrectOnly(e.target.checked);
+                          if (e.target.checked) setShowCorrectOnly(false);
+                        }}
+                        className="mr-2 accent-[#6366F1]"
+                      />
+                      {t[currentLang].filters.incorrectOnly}
+                    </label>
                   </div>
                 </div>
-              ))}
+                <div>
+                  <label className="block text-sm font-medium text-[#CBD5E1] mb-1">{t[currentLang].filters.actions}</label>
+                  <button
+                    onClick={clearAllHistory}
+                    className="w-full px-3 py-2 bg-[#EF4444] text-white rounded-lg hover:bg-[#DC2626] transition-colors text-sm font-medium"
+                  >
+                    {t[currentLang].filters.clearAll}
+                  </button>
+                </div>
+              </div>
             </div>
-          )}
 
-          {/* もっと読み込む */}
-          {hasMore && filteredData.length === historyData.length && (
-            <div className="text-center mt-6">
-              <button
-                onClick={loadMore}
-                className="quiz-action-button px-6 py-2 rounded-lg transition-colors"
-              >
-                {t[currentLang].history.loadMore}
-              </button>
+            {/* 履歴一覧 */}
+            <div className="rounded-2xl border border-white/10 p-6" style={{ background: 'rgba(30,41,59,0.7)' }}>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold text-[#F8FAFC]">{t[currentLang].history.title}</h2>
+                <div className="text-sm text-[#94A3B8]">
+                  {filteredData.length}{t[currentLang].history.itemCount} / {historyData.length}{t[currentLang].history.itemCount}
+                </div>
+              </div>
+
+              {filteredData.length === 0 ? (
+                <div className="text-center py-8 text-[#64748B]">
+                  {historyData.length === 0 ? t[currentLang].history.noHistory : t[currentLang].history.noMatchingHistory}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {filteredData.map((item) => (
+                    <div
+                      key={item.entry.id}
+                      className="rounded-xl p-4 border border-white/10 cursor-pointer hover:bg-white/5 transition-colors"
+                      style={{ background: 'rgba(15,23,42,0.5)' }}
+                      onClick={() => {
+                        setSelectedHistoryEntry(item);
+                        setIsDetailModalOpen(true);
+                      }}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2 mb-2 flex-wrap gap-y-1">
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                              item.entry.isCorrect
+                                ? 'bg-[#10B981]/20 text-[#34D399]'
+                                : 'bg-[#EF4444]/20 text-[#EF4444]'
+                            }`}>
+                              {item.entry.isCorrect ? t[currentLang].history.correct : t[currentLang].history.incorrect}
+                            </span>
+                            <span className="px-2 py-1 bg-white/10 text-[#CBD5E1] rounded text-xs">
+                              {item.entry.category}
+                            </span>
+                            {item.quizSet && (
+                              <span className="px-2 py-1 bg-[#6366F1]/20 text-[#A78BFA] rounded text-xs">
+                                {item.quizSet.name}
+                              </span>
+                            )}
+                            <span className="text-xs text-[#64748B]">
+                              {formatDate(item.entry.timestamp)}
+                            </span>
+                          </div>
+                          <p className="text-[#F8FAFC] mb-2">
+                            {item.problem?.question || item.entry.questionText || t[currentLang].history.problemNotFound}
+                          </p>
+                          {item.entry.userAnswer !== undefined && (
+                            <div className="text-sm text-[#94A3B8]">
+                              {t[currentLang].history.yourAnswer}: {
+                                typeof item.entry.userAnswer === 'boolean'
+                                  ? (item.entry.userAnswer ? t[currentLang].history.trueAnswer : t[currentLang].history.falseAnswer)
+                                  : `${t[currentLang].history.choice} ${item.entry.userAnswer + 1}`
+                              }
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            item.entry.id && deleteEntry(item.entry.id);
+                          }}
+                          className="ml-4 px-2 py-1 text-[#EF4444] hover:bg-[#EF4444]/10 text-sm rounded transition-colors"
+                        >
+                          {t[currentLang].history.delete}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* もっと読み込む */}
+              {hasMore && filteredData.length === historyData.length && (
+                <div className="text-center mt-6">
+                  <button
+                    onClick={loadMore}
+                    className="px-6 py-2 bg-[#6366F1] text-white rounded-lg hover:bg-[#5558E6] transition-colors text-sm font-medium"
+                  >
+                    {t[currentLang].history.loadMore}
+                  </button>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
+
+        {/* 詳細モーダル */}
+        {isDetailModalOpen && selectedHistoryEntry && (
+          <HistoryDetailModal
+            entry={selectedHistoryEntry.entry}
+            problem={selectedHistoryEntry.problem}
+            quizSet={selectedHistoryEntry.quizSet}
+            onClose={() => {
+              setIsDetailModalOpen(false);
+              setSelectedHistoryEntry(null);
+            }}
+            onRetry={(problemId) => {
+              console.log('Retry problem:', problemId);
+              // TODO: Implement retry logic (single problem mode)
+            }}
+            onAddToReview={(problemId) => {
+              console.log('Add to review:', problemId);
+              // TODO: Implement add to review logic
+            }}
+          />
+        )}
       </div>
     </div>
   );
