@@ -77,7 +77,8 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
   const [currentProblems, setCurrentProblems] = useState<Problem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [score, setScore] = useState(0);
-  const [userAnswers, setUserAnswers] = useState<(boolean | number)[]>([]);
+  const [userAnswers, setUserAnswers] = useState<(boolean | number | number[])[]>([]);
+  const [multiSelectSelections, setMultiSelectSelections] = useState<number[]>([]); // 複数選択問題の現在の選択状態
   const [strikethroughStates, setStrikethroughStates] = useState<boolean[][]>([]); // Track strikethrough for each question's options
   const [showFeedback, setShowFeedback] = useState(false);
   const [startTime, setStartTime] = useState<Date | null>(null);
@@ -91,7 +92,7 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
   const [showSubjectiveFeedback, setShowSubjectiveFeedback] = useState(false);
   const [pendingSubjectiveFeedback, setPendingSubjectiveFeedback] = useState<{
     problemIndex: number;
-    answer: boolean | number;
+    answer: boolean | number | number[];
   } | null>(null);
   const [showNoteEditor, setShowNoteEditor] = useState(false);
   const [lastAnswerCorrect, setLastAnswerCorrect] = useState<boolean | null>(null);
@@ -110,8 +111,8 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
   const [analyticsTracker, setAnalyticsTracker] = useState<AnalyticsTracker | null>(null);
   const [studyTimeSessionId, setStudyTimeSessionId] = useState<number | null>(null);
 
-  // Track if initialParams have been processed
-  const initialParamsProcessed = useRef(false);
+  // Track which initialParams object was last processed (by reference)
+  const lastProcessedParams = useRef<QuizParams | null | undefined>(undefined);
 
   useEffect(() => {
     loadData();
@@ -182,7 +183,7 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
     const pendingParamsStr = sessionStorage.getItem('pendingQuizParams');
     let effectiveParams = initialParams;
 
-    if (pendingParamsStr && !initialParamsProcessed.current) {
+    if (pendingParamsStr && lastProcessedParams.current !== initialParams) {
       try {
         const pendingParams = JSON.parse(pendingParamsStr);
         debugLog('🔄 Found pending params in sessionStorage:', pendingParams);
@@ -193,7 +194,7 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
       }
     }
 
-    debugLog('🎯 QuizView initialParams effect:', { initialParams, effectiveParams, isLoading, processed: initialParamsProcessed.current });
+    debugLog('🎯 QuizView initialParams effect:', { initialParams, effectiveParams, isLoading, alreadyProcessed: lastProcessedParams.current === initialParams });
     debugLog('🔍 Detailed params check:', {
       hasInitialParams: !!initialParams,
       hasEffectiveParams: !!effectiveParams,
@@ -203,10 +204,11 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
       quizSetId: effectiveParams?.quizSetId,
     });
 
-    // Only process params once
-    if (effectiveParams && !isLoading && !initialParamsProcessed.current) {
-      initialParamsProcessed.current = true;
-      debugLog('✅ Processing params (first time only)');
+    // Only process params once per unique initialParams object
+    const alreadyProcessed = lastProcessedParams.current === initialParams;
+    if (effectiveParams && !isLoading && !alreadyProcessed) {
+      lastProcessedParams.current = initialParams;
+      debugLog('✅ Processing params (new params detected)');
 
       // Clear sessionStorage now that we're processing the params
       if (pendingParamsStr) {
@@ -235,6 +237,18 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
       } else if (effectiveParams.mode === 'review' && effectiveParams.problemIds && effectiveParams.problemIds.length > 0) {
         debugLog('📝 Starting review mode with problemIds:', effectiveParams.problemIds.length);
         startReviewQuiz(effectiveParams.problemIds);
+      } else if (effectiveParams.mode === 'review' && (!effectiveParams.problemIds || effectiveParams.problemIds.length === 0)) {
+        // SM-2 review without explicit problemIds — fetch due cards
+        debugLog('📝 Review mode without problemIds, fetching due cards...');
+        spacedRepetitionService.getDueCards(200).then(dueCards => {
+          const ids = dueCards.map(c => c.problemId);
+          if (ids.length > 0) {
+            debugLog('📝 Found due cards:', ids.length);
+            startReviewQuiz(ids);
+          } else {
+            debugLog('⚠️ No due cards found for review');
+          }
+        });
       } else if (effectiveParams.quizSetId && !effectiveParams.mode) {
         debugLog('📝 Starting quizSet mode with ID:', effectiveParams.quizSetId);
         setSelectedQuizSet(effectiveParams.quizSetId);
@@ -480,7 +494,17 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
     const currentProblem = currentProblems[currentIndex];
     const userAnswer = userAnswers[currentIndex];
 
-    if (currentProblem.type === 'multiple-choice') {
+    if (currentProblem.type === 'multi-select') {
+      const correctSet = new Set(currentProblem.correctAnswers || []);
+      const answerSet = new Set(Array.isArray(userAnswer) ? userAnswer as number[] : []);
+      const isCorrect = correctSet.size === answerSet.size && [...correctSet].every(v => answerSet.has(v));
+      speechService.speakAnswerFeedback(
+        isCorrect,
+        (currentProblem.correctAnswers || [])[0] || 0,
+        currentProblem.options || [],
+        currentProblem.explanation
+      );
+    } else if (currentProblem.type === 'multiple-choice') {
       const isCorrect = userAnswer === currentProblem.correctAnswer;
       speechService.speakAnswerFeedback(
         isCorrect,
@@ -886,10 +910,20 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
     }
   };
 
-  const handleAnswer = async (answer: boolean | number) => {
+  const handleAnswer = async (answer: boolean | number | number[]) => {
     if (showFeedback) return;
     const currentProblem = currentProblems[currentIndex];
-    const isCorrect = typeof answer === 'boolean' ? answer : answer === currentProblem.correctAnswer;
+    let isCorrect: boolean;
+    if (Array.isArray(answer)) {
+      // multi-select: 正解配列と完全一致チェック
+      const correctSet = new Set(currentProblem.correctAnswers || []);
+      const answerSet = new Set(answer);
+      isCorrect = correctSet.size === answerSet.size && [...correctSet].every(v => answerSet.has(v));
+    } else if (typeof answer === 'boolean') {
+      isCorrect = answer === currentProblem.answer;
+    } else {
+      isCorrect = answer === currentProblem.correctAnswer;
+    }
     const newUserAnswers = [...userAnswers, answer];
     setUserAnswers(newUserAnswers);
     if (isCorrect) {
@@ -903,7 +937,8 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
     const responseTime = Date.now() - questionStartTime.getTime();
 
     if (analyticsTracker && currentProblem.id) {
-      analyticsTracker.recordAnswer(answer, isCorrect, undefined);
+      const analyticsAnswer = Array.isArray(answer) ? answer[0] ?? 0 : answer;
+      analyticsTracker.recordAnswer(analyticsAnswer, isCorrect, undefined);
     }
     try {
       await historyService.add({
@@ -1043,6 +1078,7 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
 
   const proceedToNextQuestion = async () => {
     setShowFeedback(false);
+    setMultiSelectSelections([]);
     if (currentIndex < currentProblems.length - 1) {
       const nextIndex = currentIndex + 1;
       setCurrentIndex(nextIndex);
@@ -1280,7 +1316,15 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
                 const cat = problem.category || 'その他';
                 const existing = categoryMap.get(cat) || { total: 0, correct: 0 };
                 existing.total++;
-                if (userAnswers[i] === true || (typeof userAnswers[i] === 'number' && userAnswers[i] === problem.correctAnswer)) {
+                let isAnswerCorrect: boolean;
+                if (problem.type === 'multi-select' && Array.isArray(userAnswers[i])) {
+                  const correctSet = new Set(problem.correctAnswers || []);
+                  const answerSet = new Set(userAnswers[i] as number[]);
+                  isAnswerCorrect = correctSet.size === answerSet.size && [...correctSet].every(v => answerSet.has(v));
+                } else {
+                  isAnswerCorrect = userAnswers[i] === true || (typeof userAnswers[i] === 'number' && userAnswers[i] === problem.correctAnswer);
+                }
+                if (isAnswerCorrect) {
                   existing.correct++;
                 }
                 categoryMap.set(cat, existing);
@@ -1761,10 +1805,65 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
             category={currentProblem.category}
             question={currentProblem.question}
             showFeedback={showFeedback}
-            isCorrect={userAnswers[currentIndex] === currentProblem.correctAnswer || (typeof userAnswers[currentIndex] === 'boolean' && userAnswers[currentIndex] === true)}
+            isCorrect={
+              currentProblem.type === 'multi-select'
+                ? (() => {
+                    const correctSet = new Set(currentProblem.correctAnswers || []);
+                    const answerSet = new Set(Array.isArray(userAnswers[currentIndex]) ? userAnswers[currentIndex] as number[] : []);
+                    return correctSet.size === answerSet.size && [...correctSet].every(v => answerSet.has(v));
+                  })()
+                : userAnswers[currentIndex] === currentProblem.correctAnswer || (typeof userAnswers[currentIndex] === 'boolean' && userAnswers[currentIndex] === true)
+            }
           >
             <div className="grid grid-cols-1 gap-4">
-              {currentProblem.options ? (
+              {currentProblem.type === 'multi-select' && currentProblem.options ? (
+                <>
+                  <div className="text-xs text-[#818CF8] font-medium mb-1">
+                    {language === 'ja'
+                      ? `正解を全て選択してください（${(currentProblem.correctAnswers || []).length}つ）`
+                      : `Select all correct answers (${(currentProblem.correctAnswers || []).length})`}
+                  </div>
+                  {currentProblem.options.map((option, idx) => (
+                    <AnswerButton
+                      key={idx}
+                      index={idx}
+                      label={option}
+                      onClick={() => {
+                        if (showFeedback) return;
+                        setMultiSelectSelections(prev =>
+                          prev.includes(idx)
+                            ? prev.filter(i => i !== idx)
+                            : [...prev, idx].sort((a, b) => a - b)
+                        );
+                      }}
+                      disabled={showFeedback}
+                      showResult={showFeedback}
+                      isCorrect={(currentProblem.correctAnswers || []).includes(idx)}
+                      isSelected={
+                        showFeedback
+                          ? (Array.isArray(userAnswers[currentIndex]) ? (userAnswers[currentIndex] as number[]).includes(idx) : false)
+                          : multiSelectSelections.includes(idx)
+                      }
+                      isStrikedThrough={strikethroughStates[currentIndex]?.[idx] || false}
+                      onStrikethrough={() => handleToggleStrikethrough(idx)}
+                    />
+                  ))}
+                  {!showFeedback && (
+                    <button
+                      onClick={() => handleAnswer([...multiSelectSelections])}
+                      disabled={multiSelectSelections.length === 0}
+                      className={`w-full rounded-2xl h-[48px] flex items-center justify-center text-[15px] font-bold text-white transition-all ${
+                        multiSelectSelections.length === 0
+                          ? 'opacity-40 cursor-not-allowed'
+                          : 'shadow-lg shadow-[#6366F1]/30'
+                      }`}
+                      style={{ background: multiSelectSelections.length === 0 ? '#475569' : '#6366F1' }}
+                    >
+                      {language === 'ja' ? `確定する (${multiSelectSelections.length}つ選択中)` : `Confirm (${multiSelectSelections.length} selected)`}
+                    </button>
+                  )}
+                </>
+              ) : currentProblem.options ? (
                 currentProblem.options.map((option, idx) => (
                   <AnswerButton
                     key={idx}
@@ -1820,9 +1919,13 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
                     </div>
                     <div>
                       <h3 className="font-bold text-white mb-2">{t[currentLang].labels.explanation}</h3>
-                      <p className="text-text-secondary leading-relaxed">
-                        {currentProblem.explanation || "No explanation available."}
-                      </p>
+                      <div className="text-text-secondary leading-relaxed">
+                        {currentProblem.explanation ? (
+                          <MarkdownPreview content={currentProblem.explanation} className="text-text-secondary [&_strong]:text-white [&_em]:text-[#818CF8]" />
+                        ) : (
+                          <p>No explanation available.</p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1991,8 +2094,15 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
               onClick={() => {
                 const incorrectIds: number[] = [];
                 currentProblems.forEach((problem, i) => {
-                  const isCorrect = userAnswers[i] === true ||
-                    (typeof userAnswers[i] === 'number' && userAnswers[i] === problem.correctAnswer);
+                  let isCorrect: boolean;
+                  if (problem.type === 'multi-select' && Array.isArray(userAnswers[i])) {
+                    const correctSet = new Set(problem.correctAnswers || []);
+                    const answerSet = new Set(userAnswers[i] as number[]);
+                    isCorrect = correctSet.size === answerSet.size && [...correctSet].every(v => answerSet.has(v));
+                  } else {
+                    isCorrect = userAnswers[i] === true ||
+                      (typeof userAnswers[i] === 'number' && userAnswers[i] === problem.correctAnswer);
+                  }
                   if (!isCorrect && problem.id) {
                     incorrectIds.push(problem.id);
                   }

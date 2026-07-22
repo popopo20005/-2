@@ -521,7 +521,9 @@ export function History({ onBack }: HistoryProps) {
                               {t[currentLang].history.yourAnswer}: {
                                 typeof item.entry.userAnswer === 'boolean'
                                   ? (item.entry.userAnswer ? t[currentLang].history.trueAnswer : t[currentLang].history.falseAnswer)
-                                  : `${t[currentLang].history.choice} ${item.entry.userAnswer + 1}`
+                                  : Array.isArray(item.entry.userAnswer)
+                                    ? `${t[currentLang].history.choice} ${item.entry.userAnswer.map((v: number) => v + 1).join(', ')}`
+                                    : `${t[currentLang].history.choice} ${(item.entry.userAnswer as number) + 1}`
                               }
                             </div>
                           )}

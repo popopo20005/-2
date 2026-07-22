@@ -10,9 +10,10 @@ export interface Problem {
   question: string;
   answer?: boolean;
   explanation: string;
-  type?: 'true-false' | 'multiple-choice';
+  type?: 'true-false' | 'multiple-choice' | 'multi-select';
   options?: string[];
   correctAnswer?: number;
+  correctAnswers?: number[];
   // 学習メモ機能
   userNotes?: string;
   noteUpdatedAt?: Date;
@@ -45,7 +46,7 @@ export interface HistoryEntry {
   category: string;
   isCorrect: boolean;
   timestamp: Date;
-  userAnswer?: boolean | number;
+  userAnswer?: boolean | number | number[];
   questionText?: string;
   subjectiveFeedback?: SubjectiveFeedbackData; // Subjective feedback
   responseTime?: number; // 解答時間（ミリ秒）
@@ -78,7 +79,7 @@ export interface QuizSession {
   problems: Problem[];
   currentIndex: number;
   score: number;
-  answers: (boolean | number)[];
+  answers: (boolean | number | number[])[];
   startTime: Date;
   isCompleted: boolean;
   isPaused: boolean;
@@ -172,7 +173,7 @@ export interface AnswerAnalytics {
   answerSubmitTime: Date;
   responseTime: number; // milliseconds
   isCorrect: boolean;
-  selectedAnswer: boolean | number;
+  selectedAnswer: boolean | number | number[];
   // Behavioral pattern data
   timeToFirstClick?: number; // Time from problem display to first click
   answerChangeCount: number; // Number of answer changes
@@ -361,7 +362,7 @@ export interface ApiResponse<T> {
 }
 
 // View types
-export type View = 'menu' | 'quiz' | 'podcast' | 'editor' | 'quizSets' | 'stats' | 'history' | 'settings' | 'migration' | 'backup' | 'advancedBackup' | 'share' | 'qrShare' | 'exam' | 'categoryQuiz' | 'problemEdit' | 'quizSetStats' | 'diary' | 'insights' | 'recommendations' | 'sessionSettings' | 'reminderSettings' | 'difficultySettings' | 'spacedRepetition' | 'spacedRepetitionManager' | 'spacedRepetitionReview' | 'guide' | 'pomodoro' | 'weaknessAnalysis' | 'goalManager' | 'noteManager' | 'favorites' | 'templateManager' | 'allFeatures' | 'studyPlan' | 'studyPlanDashboard' | 'aiGenerator' | 'promptGenerator' | 'pricing' | 'paymentSuccess' | 'paymentCancel' | 'pastExamAnalysis' | 'badges' | 'smartNotes' | 'subtopicAnalysis' | 'pdcaCycle' | 'create' | 'review' | 'more' | 'promptWizard' | 'aiHandoff';
+export type View = 'menu' | 'quiz' | 'podcast' | 'editor' | 'quizSets' | 'stats' | 'history' | 'settings' | 'migration' | 'backup' | 'advancedBackup' | 'share' | 'qrShare' | 'exam' | 'categoryQuiz' | 'problemEdit' | 'quizSetStats' | 'diary' | 'insights' | 'recommendations' | 'sessionSettings' | 'reminderSettings' | 'difficultySettings' | 'spacedRepetition' | 'spacedRepetitionManager' | 'spacedRepetitionReview' | 'guide' | 'pomodoro' | 'weaknessAnalysis' | 'goalManager' | 'noteManager' | 'favorites' | 'templateManager' | 'allFeatures' | 'studyPlan' | 'studyPlanDashboard' | 'aiGenerator' | 'promptGenerator' | 'pricing' | 'paymentSuccess' | 'paymentCancel' | 'pastExamAnalysis' | 'badges' | 'smartNotes' | 'subtopicAnalysis' | 'pdcaCycle' | 'create' | 'review' | 'more' | 'promptWizard' | 'aiHandoff' | 'quizSetManage';
 
 export interface QuizParams {
   quizSetId?: number;

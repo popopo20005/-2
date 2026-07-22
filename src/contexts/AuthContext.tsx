@@ -5,7 +5,7 @@
  * アプリ全体に提供する。
  */
 
-import { createContext, useContext, useState, useEffect, useRef, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
 import { authService, type AuthUser } from '../services/authService';
 import { syncService } from '../services/syncService';
 import { setupNetworkListeners } from '../workers/syncQueue';
@@ -35,6 +35,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [migrating, setMigrating] = useState(false);
   const networkListenersSetup = useRef(false);
+  const isSyncing = useRef(false);
+
+  // Firestoreからデータを取り込む共通関数
+  const pullSync = useCallback(async () => {
+    if (!authService.getCurrentUser() || isSyncing.current) return;
+    isSyncing.current = true;
+    try {
+      const pullResult = await syncService.pullFromFirestore();
+      if (pullResult.success && (pullResult.problems > 0 || pullResult.quizSets > 0)) {
+        console.log(`[Auth] Pull同期完了: Problems +${pullResult.problems}, QuizSets +${pullResult.quizSets}`);
+      }
+    } catch (err) {
+      console.warn('[Auth] Pull同期エラー:', err);
+    } finally {
+      isSyncing.current = false;
+    }
+  }, []);
 
   useEffect(() => {
     if (!authService.isConfigured()) {
@@ -54,15 +71,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user) return;
 
-    // 初回マイグレーション（ローカルデータをFirestoreへ）
+    // 双方向同期（ローカル→Firestore + Firestore→ローカル）
     setMigrating(true);
     syncService.migrateAnonymousData()
       .then((result) => {
         if (result.success && result.totalRecords > 0) {
           console.log(`[Auth] マイグレーション完了: ${result.totalRecords}件`);
         }
+        // Firestoreの新データをローカルに取り込み
+        return pullSync();
       })
-      .catch((err) => console.warn('[Auth] マイグレーションエラー:', err))
+      .catch((err) => console.warn('[Auth] 同期エラー:', err))
       .finally(() => setMigrating(false));
 
     // ネットワークリスナー（一度だけ）
@@ -70,7 +89,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setupNetworkListeners();
       networkListenersSetup.current = true;
     }
-  }, [user]);
+  }, [user, pullSync]);
+
+  // アプリがフォアグラウンドに戻った時にFirestoreから同期
+  useEffect(() => {
+    if (!user) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[Auth] アプリ復帰 → Firestore同期開始');
+        pullSync();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [user, pullSync]);
 
   const signInWithGoogle = async () => {
     await authService.signInWithGoogle();

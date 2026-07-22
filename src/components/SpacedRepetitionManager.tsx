@@ -8,7 +8,7 @@ import { spacedRepetitionService, quizSetService, problemService, db } from '../
 import { createNewCard, isCardDue, calculateRetentionRate } from '../lib/sm2Algorithm';
 
 interface SpacedRepetitionManagerProps {
-  onNavigate: (view: 'spacedRepetitionReview' | 'menu' | 'editor', options?: { quizSetId?: number }) => void;
+  onNavigate: (view: 'spacedRepetitionReview' | 'menu' | 'editor', options?: { quizSetId?: number; problemIds?: number[] }) => void;
 }
 
 interface QuizSetGroup {
@@ -258,7 +258,13 @@ export const SpacedRepetitionManager: React.FC<SpacedRepetitionManagerProps> = (
         <div className="flex flex-wrap gap-4 mb-8">
           <Button
             variant="primary"
-            onClick={() => onNavigate('spacedRepetitionReview')}
+            onClick={async () => {
+              const dueCards = await spacedRepetitionService.getDueCards(200);
+              const problemIds = dueCards.map(c => c.problemId);
+              if (problemIds.length > 0) {
+                onNavigate('spacedRepetitionReview', { problemIds });
+              }
+            }}
             disabled={stats.dueCards === 0}
             className="flex items-center gap-2"
           >
@@ -416,7 +422,13 @@ export const SpacedRepetitionManager: React.FC<SpacedRepetitionManagerProps> = (
                         {group.dueCards > 0 && (
                           <Button
                             variant="primary"
-                            onClick={() => onNavigate('spacedRepetitionReview', { quizSetId: group.quizSetId })}
+                            onClick={async () => {
+                              const dueCards = await spacedRepetitionService.getDueCardsByQuizSet(group.quizSetId, 200);
+                              const problemIds = dueCards.map(c => c.problemId);
+                              if (problemIds.length > 0) {
+                                onNavigate('spacedRepetitionReview', { problemIds });
+                              }
+                            }}
                             className="flex items-center gap-1 text-xs px-3 py-1"
                           >
                             <Play className="w-3 h-3" />

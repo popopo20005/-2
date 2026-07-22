@@ -27,8 +27,7 @@ import { StreakAtRiskBanner } from './components/StreakAtRiskBanner';
 
 // コード分割: 頻繁に使用されないコンポーネントを遅延ロード
 const ProblemEditor = lazy(() => import('./components/ProblemEditor').then(m => ({ default: m.ProblemEditor })));
-// QuizSetManager は LibraryView に置き換え済み。MainMenu経由でアクセス可能
-// const QuizSetManager = lazy(() => import('./components/QuizSetManager').then(m => ({ default: m.QuizSetManager })));
+const QuizSetManager = lazy(() => import('./components/QuizSetManager').then(m => ({ default: m.QuizSetManager })));
 const Statistics = lazy(() => import('./components/Statistics'));
 import type { View, QuizParams } from './types';
 const History = lazy(() => import('./components/History').then(m => ({ default: m.History })));
@@ -431,6 +430,16 @@ function AppContent() {
       case 'quizSets':
         return <LibraryView
           onNavigate={handleViewChange}
+          onStartQuiz={startQuizSetQuiz}
+          onStartCategoryQuiz={startQuizSetCategoryQuiz}
+          onShare={(quizSetId) => {
+            setSelectedQuizSetId(quizSetId);
+            handleViewChange('qrShare');
+          }}
+        />;
+      case 'quizSetManage':
+        return <QuizSetManager
+          onBack={() => handleViewChange('quizSets')}
           onStartQuiz={startQuizSetQuiz}
           onStartCategoryQuiz={startQuizSetCategoryQuiz}
           onShare={(quizSetId) => {

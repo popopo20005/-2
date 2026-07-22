@@ -14,7 +14,7 @@ import type { UserProgress, UnlockedBadge, Achievement, StreakRecord } from '../
 function enqueueSyncItem(
   operation: 'create' | 'update' | 'delete',
   entityType: SyncQueueItem['entityType'],
-  entityId: number,
+  entityId: number | string,
   data: unknown
 ): void {
   // 非同期で実行、失敗してもローカル操作には影響させない
@@ -649,7 +649,11 @@ export const historyService = {
         };
 
         const id = await db.history.add(historyEntry);
-        enqueueSyncItem('create', 'history', id as number, { ...historyEntry, id });
+        enqueueSyncItem('create', 'history', id as number, {
+            ...historyEntry,
+            id,
+            timestamp: historyEntry.timestamp.toISOString(),
+        });
     },
 
     async getAll(): Promise<HistoryEntry[]> {
@@ -1095,18 +1099,38 @@ export const studyDiaryService = {
             createdAt: new Date(),
             updatedAt: new Date()
         };
-        return await db.studyDiary.add(newEntry);
+        const id = await db.studyDiary.add(newEntry);
+        enqueueSyncItem('create', 'studyDiary', entry.date || String(id), {
+            ...newEntry,
+            id,
+            createdAt: newEntry.createdAt.toISOString(),
+            updatedAt: newEntry.updatedAt?.toISOString(),
+        });
+        return id;
     },
 
     async update(id: number, updates: Partial<StudyDiaryEntry>): Promise<void> {
+        const updatedAt = new Date();
         await db.studyDiary.update(id, {
             ...updates,
-            updatedAt: new Date()
+            updatedAt,
         });
+        const full = await db.studyDiary.get(id);
+        if (full) {
+            enqueueSyncItem('update', 'studyDiary', full.date || String(id), {
+                ...full,
+                createdAt: full.createdAt?.toISOString?.() || full.createdAt,
+                updatedAt: updatedAt.toISOString(),
+            });
+        }
     },
 
     async delete(id: number): Promise<void> {
+        const entry = await db.studyDiary.get(id);
         await db.studyDiary.delete(id);
+        if (entry) {
+            enqueueSyncItem('delete', 'studyDiary', entry.date || String(id), null);
+        }
     },
 
     async getAll(): Promise<StudyDiaryEntry[]> {
@@ -1267,7 +1291,16 @@ export const learningAnalyticsService = {
 export const spacedRepetitionService = {
     // カードの作成
     async createCard(card: Omit<SpacedRepetitionCard, 'id'>): Promise<number> {
-        return await db.spacedRepetitionCards.add(card);
+        const id = await db.spacedRepetitionCards.add(card);
+        enqueueSyncItem('create', 'spacedRepetitionCard', id, {
+            ...card,
+            id,
+            nextReviewDate: card.nextReviewDate?.toISOString?.() || card.nextReviewDate,
+            lastReviewDate: card.lastReviewDate?.toISOString?.() || card.lastReviewDate,
+            createdAt: card.createdAt?.toISOString?.() || card.createdAt,
+            updatedAt: card.updatedAt?.toISOString?.() || card.updatedAt,
+        });
+        return id;
     },
 
     // 問題IDでカードを取得
@@ -1290,6 +1323,13 @@ export const spacedRepetitionService = {
             throw new Error('Card ID is required for update');
         }
         await db.spacedRepetitionCards.put(card);
+        enqueueSyncItem('update', 'spacedRepetitionCard', card.id, {
+            ...card,
+            nextReviewDate: card.nextReviewDate?.toISOString?.() || card.nextReviewDate,
+            lastReviewDate: card.lastReviewDate?.toISOString?.() || card.lastReviewDate,
+            createdAt: card.createdAt?.toISOString?.() || card.createdAt,
+            updatedAt: card.updatedAt?.toISOString?.() || card.updatedAt,
+        });
     },
 
     // 復習対象のカードを取得

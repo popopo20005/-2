@@ -84,10 +84,9 @@ export function LibraryView({ onNavigate, onStartQuiz }: LibraryViewProps) {
     { id: 'tags', label: language === 'ja' ? 'タグ' : 'Tags' },
   ];
 
-  // フルマネージャーに切り替え (既存機能へのフォールバック)
+  // フルマネージャーに切り替え
   if (showFullManager) {
-    // App.tsx の quizSets ビューと同じ挙動にフォールバック
-    onNavigate('quizSets');
+    onNavigate('quizSetManage');
     return null;
   }
 

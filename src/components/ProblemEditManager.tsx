@@ -70,8 +70,9 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
         },
         types: {
           'true-false': '○×',
-          'multiple-choice': '多択'
-        },
+          'multiple-choice': '多択',
+          'multi-select': '複数'
+        } as Record<string, string>,
         buttons: {
           edit: '✏️ 編集',
           delete: '🗑️ 削除'
@@ -141,8 +142,9 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
         },
         types: {
           'true-false': 'T/F',
-          'multiple-choice': 'MC'
-        },
+          'multiple-choice': 'MC',
+          'multi-select': 'Multi'
+        } as Record<string, string>,
         buttons: {
           edit: '✏️ Edit',
           delete: '🗑️ Delete'
@@ -202,11 +204,12 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
   const [formData, setFormData] = useState({
     category: '',
     question: '',
-    type: 'true-false' as 'true-false' | 'multiple-choice',
+    type: 'true-false' as 'true-false' | 'multiple-choice' | 'multi-select',
     answer: true,
     explanation: '',
     options: ['', '', '', ''],
     correctAnswer: 0,
+    correctAnswers: [] as number[],
     tags: [] as string[]
   });
 
@@ -277,6 +280,7 @@ export function ProblemEditManager({ onBack }: ProblemEditManagerProps) {
       explanation: latestProblem?.explanation || problem.explanation,
       options: latestProblem?.options || problem.options || ['', '', '', ''],
       correctAnswer: latestProblem?.correctAnswer !== undefined ? latestProblem.correctAnswer : (problem.correctAnswer || 0),
+      correctAnswers: latestProblem?.correctAnswers || problem.correctAnswers || [],
       tags: latestProblem?.tags || problem.tags || []  // DBから最新のtagsを取得
     });
     setIsEditModalOpen(true);

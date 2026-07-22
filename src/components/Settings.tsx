@@ -616,6 +616,10 @@ export function Settings({ onBack, isDarkMode, language: propsLanguage, onShowOn
   const handleUserNameChange = (newName: string) => {
     setUserName(newName);
     localStorage.setItem('userName', newName);
+    // Firestoreに同期
+    import('../services/syncService').then(({ syncService }) => {
+      syncService.syncUserName(newName).catch(() => {});
+    });
   };
 
 

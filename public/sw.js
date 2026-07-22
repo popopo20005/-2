@@ -1,4 +1,4 @@
-const CACHE_NAME = 'minguella-v1.0.2';
+const CACHE_NAME = 'minguella-v1.0.3';
 const STATIC_CACHE = `${CACHE_NAME}-static`;
 const DYNAMIC_CACHE = `${CACHE_NAME}-dynamic`;
 
@@ -58,54 +58,76 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
-  
+
   // 外部リソース（API等）は除外
   if (url.origin !== self.location.origin) {
     return;
   }
-  
+
   // GET リクエストのみキャッシュ対象
   if (request.method !== 'GET') {
     return;
   }
-  
-  event.respondWith(
-    caches.match(request)
-      .then((cachedResponse) => {
-        if (cachedResponse) {
-          console.log('[SW] Serving from cache:', request.url);
-          return cachedResponse;
-        }
-        
-        // キャッシュにない場合はネットワークから取得
-        console.log('[SW] Fetching from network:', request.url);
-        return fetch(request)
-          .then((networkResponse) => {
-            // レスポンスが有効な場合のみキャッシュ
+
+  // ナビゲーションリクエスト（HTML）→ Network First
+  if (request.mode === 'navigate' || request.destination === 'document') {
+    event.respondWith(
+      fetch(request)
+        .then((networkResponse) => {
+          if (networkResponse.ok) {
+            const responseClone = networkResponse.clone();
+            caches.open(STATIC_CACHE)
+              .then((cache) => cache.put(request, responseClone))
+              .catch(() => {});
+          }
+          return networkResponse;
+        })
+        .catch(() => {
+          // オフライン時はキャッシュから返す
+          return caches.match(request)
+            .then((cached) => cached || caches.match('/index.html'));
+        })
+    );
+    return;
+  }
+
+  // ハッシュ付きアセット（例: app-abc123.js）→ Cache First（内容が変わればURLも変わるため安全）
+  const hasHash = /\.[a-f0-9]{8,}\.(js|css|woff2?|png|jpg|svg|webp)$/i.test(url.pathname);
+  if (hasHash) {
+    event.respondWith(
+      caches.match(request)
+        .then((cachedResponse) => {
+          if (cachedResponse) {
+            return cachedResponse;
+          }
+          return fetch(request).then((networkResponse) => {
             if (networkResponse.ok) {
               const responseClone = networkResponse.clone();
-              
               caches.open(DYNAMIC_CACHE)
-                .then((cache) => {
-                  cache.put(request, responseClone);
-                })
-                .catch((error) => {
-                  console.error('[SW] Failed to cache dynamic resource:', error);
-                });
+                .then((cache) => cache.put(request, responseClone))
+                .catch(() => {});
             }
-            
             return networkResponse;
-          })
-          .catch((error) => {
-            console.error('[SW] Network request failed:', error);
-            
-            // ネットワークエラー時のフォールバック
-            if (request.destination === 'document') {
-              return caches.match('/index.html');
-            }
-            
-            throw error;
           });
+        })
+    );
+    return;
+  }
+
+  // その他のリソース → Network First（フォールバックでキャッシュ）
+  event.respondWith(
+    fetch(request)
+      .then((networkResponse) => {
+        if (networkResponse.ok) {
+          const responseClone = networkResponse.clone();
+          caches.open(DYNAMIC_CACHE)
+            .then((cache) => cache.put(request, responseClone))
+            .catch(() => {});
+        }
+        return networkResponse;
+      })
+      .catch(() => {
+        return caches.match(request);
       })
   );
 });

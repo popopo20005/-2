@@ -107,6 +107,24 @@ async function processSyncItem(item: SyncQueueItem): Promise<void> {
     case 'goal':
       await syncGoal(item);
       break;
+    case 'userProgress':
+      await syncUserProgress(item);
+      break;
+    case 'unlockedBadge':
+      await syncUnlockedBadge(item);
+      break;
+    case 'streakRecord':
+      await syncStreakRecord(item);
+      break;
+    case 'spacedRepetitionCard':
+      await syncSpacedRepetitionCard(item);
+      break;
+    case 'studyTimeSession':
+      await syncStudyTimeSession(item);
+      break;
+    case 'studyDiary':
+      await syncStudyDiary(item);
+      break;
     default:
       console.warn(`[SyncQueue] 未対応のエンティティタイプ: ${item.entityType}`);
   }
@@ -134,6 +152,39 @@ async function syncHistory(item: SyncQueueItem): Promise<void> {
 async function syncGoal(item: SyncQueueItem): Promise<void> {
   const operation = item.operation === 'delete' ? 'delete' : 'set';
   await syncService.uploadChange('goals', item.entityId, item.data, operation);
+}
+
+async function syncUserProgress(item: SyncQueueItem): Promise<void> {
+  // シングルトン: 常にdoc ID "1"、常にset
+  await syncService.uploadChange('userProgress', '1', item.data, 'set');
+}
+
+async function syncUnlockedBadge(item: SyncQueueItem): Promise<void> {
+  const operation = item.operation === 'delete' ? 'delete' : 'set';
+  const docId = item.data?.badgeId || String(item.entityId);
+  await syncService.uploadChange('unlockedBadges', docId, item.data, operation);
+}
+
+async function syncStreakRecord(item: SyncQueueItem): Promise<void> {
+  const operation = item.operation === 'delete' ? 'delete' : 'set';
+  const docId = item.data?.date || String(item.entityId);
+  await syncService.uploadChange('streakRecords', docId, item.data, operation);
+}
+
+async function syncSpacedRepetitionCard(item: SyncQueueItem): Promise<void> {
+  const operation = item.operation === 'delete' ? 'delete' : 'set';
+  await syncService.uploadChange('spacedRepetitionCards', item.entityId, item.data, operation);
+}
+
+async function syncStudyTimeSession(item: SyncQueueItem): Promise<void> {
+  const operation = item.operation === 'delete' ? 'delete' : 'set';
+  await syncService.uploadChange('studyTimeSessions', item.entityId, item.data, operation);
+}
+
+async function syncStudyDiary(item: SyncQueueItem): Promise<void> {
+  const operation = item.operation === 'delete' ? 'delete' : 'set';
+  const docId = item.data?.date || String(item.entityId);
+  await syncService.uploadChange('studyDiary', docId, item.data, operation);
 }
 
 /**

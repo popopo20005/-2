@@ -61,6 +61,9 @@ export function Onboarding({ onComplete, language = 'ja' }: OnboardingProps) {
     // オンボーディング完了時にユーザー名と選択した目標を保存
     if (userName) {
       localStorage.setItem('userName', userName);
+      import('../../services/syncService').then(({ syncService }) => {
+        syncService.syncUserName(userName).catch(() => {});
+      });
     }
     if (selectedGoal) {
       localStorage.setItem('learningGoal', selectedGoal);

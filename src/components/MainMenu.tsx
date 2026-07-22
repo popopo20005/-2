@@ -245,6 +245,9 @@ export function MainMenu({ onNavigate }: MainMenuProps) {
   const handleSaveUserName = (name: string) => {
     localStorage.setItem('userName', name);
     setUserName(name);
+    import('../services/syncService').then(({ syncService }) => {
+      syncService.syncUserName(name).catch(() => {});
+    });
   };
 
   // ストリークのマイルストーン設定

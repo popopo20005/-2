@@ -97,8 +97,10 @@ export interface MonthlyStatistics {
 export interface SyncQueueItem {
   id?: number;
   operation: 'create' | 'update' | 'delete';
-  entityType: 'problem' | 'quizSet' | 'history' | 'goal';
-  entityId: number;
+  entityType: 'problem' | 'quizSet' | 'history' | 'goal'
+    | 'userProgress' | 'unlockedBadge' | 'streakRecord'
+    | 'spacedRepetitionCard' | 'studyTimeSession' | 'studyDiary';
+  entityId: number | string;
   data: any;
   createdAt: Date;
   syncedAt?: Date;

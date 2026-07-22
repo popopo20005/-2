@@ -8,6 +8,7 @@ import { ProblemEditorGuide } from './ProblemEditorGuide';
 import { useTags } from '../hooks/useTags';
 import { TagManager } from './TagManager';
 import { NoteEditor } from './NoteEditor';
+import { MarkdownPreview } from './MarkdownPreview';
 import { actionHistoryService } from '../services/actionHistoryService';
 import { UndoToast } from './UndoToast';
 import { checkDuplicate, type DuplicateCheckResult } from '../lib/duplicateDetection';
@@ -45,11 +46,12 @@ export function ProblemEditor({ onBack, initialMode: _initialMode }: ProblemEdit
   const [formData, setFormData] = useState({
     category: '',
     question: '',
-    type: 'true-false' as 'true-false' | 'multiple-choice',
+    type: 'true-false' as 'true-false' | 'multiple-choice' | 'multi-select',
     answer: true,
     explanation: '',
     options: ['', ''],
     correctAnswer: 0,
+    correctAnswers: [] as number[],
     userNotes: '',
     noteTags: [] as string[],
     tags: [] as string[]
@@ -517,10 +519,14 @@ export function ProblemEditor({ onBack, initialMode: _initialMode }: ProblemEdit
       return;
     }
 
-    if (formData.type === 'multiple-choice') {
+    if (formData.type === 'multiple-choice' || formData.type === 'multi-select') {
       const validOptions = formData.options.filter(opt => opt.trim());
       if (validOptions.length < 2) {
         alert(t[currentLang].messages.minimumTwoOptions);
+        return;
+      }
+      if (formData.type === 'multi-select' && formData.correctAnswers.length < 1) {
+        alert(currentLang === 'ja' ? '正解を1つ以上選択してください' : 'Select at least 1 correct answer');
         return;
       }
     }
@@ -552,6 +558,15 @@ export function ProblemEditor({ onBack, initialMode: _initialMode }: ProblemEdit
           type: formData.type,
           explanation: formData.explanation,
           answer: formData.answer
+        };
+      } else if (formData.type === 'multi-select') {
+        problemData = {
+          category: formData.category,
+          question: formData.question,
+          type: formData.type,
+          explanation: formData.explanation,
+          options: formData.options.filter(opt => opt.trim()),
+          correctAnswers: formData.correctAnswers
         };
       } else {
         problemData = {
@@ -601,6 +616,7 @@ export function ProblemEditor({ onBack, initialMode: _initialMode }: ProblemEdit
       explanation: problem.explanation,
       options: problem.options && problem.options.length > 0 ? problem.options : ['', ''],
       correctAnswer: problem.correctAnswer || 0,
+      correctAnswers: problem.correctAnswers || [],
       userNotes: problem.userNotes || '',
       noteTags: problem.noteTags || [],
       tags: problem.tags || []
@@ -864,6 +880,7 @@ export function ProblemEditor({ onBack, initialMode: _initialMode }: ProblemEdit
       explanation: '',
       options: ['', '', '', ''],
       correctAnswer: 0,
+      correctAnswers: [],
       userNotes: '',
       noteTags: [],
       tags: []
@@ -2269,12 +2286,13 @@ ________________________________________
                 </label>
                 <select
                   value={formData.type}
-                  onChange={(e) => setFormData({ ...formData, type: e.target.value as 'true-false' | 'multiple-choice' })}
+                  onChange={(e) => setFormData({ ...formData, type: e.target.value as 'true-false' | 'multiple-choice' | 'multi-select' })}
                   className="w-full px-3 py-2 border border-white/10 rounded-md text-[#F8FAFC]"
                   style={{ background: 'rgba(15,23,42,0.5)' }}
                 >
                   <option value="true-false">{t[currentLang].labels.trueFalse}</option>
                   <option value="multiple-choice">{t[currentLang].labels.multipleChoice}</option>
+                  <option value="multi-select">{currentLang === 'ja' ? '複数選択' : 'Multi-select'}</option>
                 </select>
               </div>
 
@@ -2322,16 +2340,35 @@ ________________________________________
                 <div>
                   <label className="block text-sm font-medium text-[#CBD5E1] mb-2">
                     {t[currentLang].labels.options}
+                    {formData.type === 'multi-select' && (
+                      <span className="ml-2 text-xs text-[#818CF8]">
+                        ({currentLang === 'ja' ? '複数選択可' : 'select multiple'})
+                      </span>
+                    )}
                   </label>
                   <div className="space-y-2">
                     {formData.options.map((option, index) => (
                       <div key={index} className="flex items-center space-x-2">
-                        <input
-                          type="radio"
-                          checked={formData.correctAnswer === index}
-                          onChange={() => setFormData({ ...formData, correctAnswer: index })}
-                          title={currentLang === 'ja' ? '正解として選択' : 'Select as correct answer'}
-                        />
+                        {formData.type === 'multi-select' ? (
+                          <input
+                            type="checkbox"
+                            checked={formData.correctAnswers.includes(index)}
+                            onChange={() => {
+                              const newCorrectAnswers = formData.correctAnswers.includes(index)
+                                ? formData.correctAnswers.filter(i => i !== index)
+                                : [...formData.correctAnswers, index].sort((a, b) => a - b);
+                              setFormData({ ...formData, correctAnswers: newCorrectAnswers });
+                            }}
+                            title={currentLang === 'ja' ? '正解として選択' : 'Select as correct answer'}
+                          />
+                        ) : (
+                          <input
+                            type="radio"
+                            checked={formData.correctAnswer === index}
+                            onChange={() => setFormData({ ...formData, correctAnswer: index })}
+                            title={currentLang === 'ja' ? '正解として選択' : 'Select as correct answer'}
+                          />
+                        )}
                         <input
                           type="text"
                           value={option}
@@ -2354,7 +2391,10 @@ ________________________________________
                                 : formData.correctAnswer > index
                                   ? formData.correctAnswer - 1
                                   : formData.correctAnswer;
-                              setFormData({ ...formData, options: newOptions, correctAnswer: newCorrectAnswer });
+                              const newCorrectAnswers = formData.correctAnswers
+                                .filter(i => i !== index)
+                                .map(i => i > index ? i - 1 : i);
+                              setFormData({ ...formData, options: newOptions, correctAnswer: newCorrectAnswer, correctAnswers: newCorrectAnswers });
                             }}
                             className="px-3 py-2 text-[#EF4444] hover:text-red-300"
                             title={currentLang === 'ja' ? '選択肢を削除' : 'Remove option'}
@@ -3009,7 +3049,7 @@ ________________________________________
                       {problem.question.length > 50 ? problem.question.substring(0, 50) + '...' : problem.question}
                     </td>
                     <td className="py-2 px-4 text-[#F8FAFC]">
-                      {problem.type === 'multiple-choice' ? t[currentLang].labels.multipleChoiceShort : t[currentLang].labels.trueFalseShort}
+                      {problem.type === 'multi-select' ? (currentLang === 'ja' ? '複数' : 'Multi') : problem.type === 'multiple-choice' ? t[currentLang].labels.multipleChoiceShort : t[currentLang].labels.trueFalseShort}
                     </td>
                     <td className="py-2 px-4">
                       <div className="flex space-x-2">
@@ -3098,28 +3138,36 @@ ________________________________________
                 </p>
               </div>
 
-              {/* 選択肢（多択問題の場合） */}
-              {selectedProblemDetail.type === 'multiple-choice' && selectedProblemDetail.options && (
+              {/* 選択肢（多択問題・複数選択問題の場合） */}
+              {(selectedProblemDetail.type === 'multiple-choice' || selectedProblemDetail.type === 'multi-select') && selectedProblemDetail.options && (
                 <div>
-                  <label className="text-sm font-semibold text-[#94A3B8]">選択肢</label>
+                  <label className="text-sm font-semibold text-[#94A3B8]">
+                    選択肢
+                    {selectedProblemDetail.type === 'multi-select' && <span className="ml-2 text-xs text-[#818CF8]">(複数選択)</span>}
+                  </label>
                   <div className="mt-1 space-y-2">
-                    {selectedProblemDetail.options.map((option, index) => (
-                      <div
-                        key={index}
-                        className={`p-3 rounded-lg border-l-4 ${
-                          index === selectedProblemDetail.correctAnswer
-                            ? 'border-[#10B981] text-[#34D399]'
-                            : 'border-white/10 text-[#F8FAFC]'
-                        }`}
-                        style={{ background: index === selectedProblemDetail.correctAnswer ? 'rgba(16,185,129,0.1)' : 'rgba(15,23,42,0.5)' }}
-                      >
-                        <span className="font-semibold">{index + 1}. </span>
-                        {option}
-                        {index === selectedProblemDetail.correctAnswer && (
-                          <span className="ml-2 text-[#34D399] font-bold">✓ 正解</span>
-                        )}
-                      </div>
-                    ))}
+                    {selectedProblemDetail.options.map((option, index) => {
+                      const isCorrect = selectedProblemDetail.type === 'multi-select'
+                        ? (selectedProblemDetail.correctAnswers || []).includes(index)
+                        : index === selectedProblemDetail.correctAnswer;
+                      return (
+                        <div
+                          key={index}
+                          className={`p-3 rounded-lg border-l-4 ${
+                            isCorrect
+                              ? 'border-[#10B981] text-[#34D399]'
+                              : 'border-white/10 text-[#F8FAFC]'
+                          }`}
+                          style={{ background: isCorrect ? 'rgba(16,185,129,0.1)' : 'rgba(15,23,42,0.5)' }}
+                        >
+                          <span className="font-semibold">{index + 1}. </span>
+                          {option}
+                          {isCorrect && (
+                            <span className="ml-2 text-[#34D399] font-bold">✓ 正解</span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -3137,9 +3185,9 @@ ________________________________________
               {/* 解説 */}
               <div>
                 <label className="text-sm font-semibold text-[#94A3B8]">解説</label>
-                <p className="mt-1 text-[#CBD5E1] p-4 rounded-lg border-l-4 border-[#6366F1] whitespace-pre-wrap" style={{ background: 'rgba(99,102,241,0.1)' }}>
-                  {selectedProblemDetail.explanation}
-                </p>
+                <div className="mt-1 text-[#CBD5E1] p-4 rounded-lg border-l-4 border-[#6366F1]" style={{ background: 'rgba(99,102,241,0.1)' }}>
+                  <MarkdownPreview content={selectedProblemDetail.explanation} className="text-[#CBD5E1] [&_strong]:text-white [&_em]:text-[#818CF8]" />
+                </div>
               </div>
 
               {/* タグ */}

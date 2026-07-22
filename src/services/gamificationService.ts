@@ -92,10 +92,31 @@ async function migrateFromHistory(): Promise<UserProgress> {
   };
 }
 
-/** Save progress to DB */
+/** Save progress to DB and sync to Firestore */
 async function saveProgress(progress: UserProgress): Promise<void> {
   progress.updatedAt = new Date();
   await db.userProgress.put(progress);
+  enqueueSyncGamification('userProgress', 1, {
+    ...progress,
+    updatedAt: progress.updatedAt.toISOString(),
+  });
+}
+
+/** Enqueue a gamification entity for Firestore sync (lazy import to avoid circular deps) */
+function enqueueSyncGamification(
+  entityType: 'userProgress' | 'unlockedBadge' | 'streakRecord',
+  entityId: number | string,
+  data: Record<string, unknown>,
+  operation: 'create' | 'update' = 'update',
+): void {
+  import('../workers/syncQueue').then(({ addToSyncQueue }) => {
+    import('./syncService').then(({ syncService }) => {
+      if (!syncService.canSync()) return;
+      addToSyncQueue({ operation, entityType, entityId, data }).catch(err =>
+        console.warn('[Gamification] sync queue error:', err)
+      );
+    });
+  });
 }
 
 // ============================================
@@ -176,6 +197,7 @@ export async function updateStreak(): Promise<StreakUpdateResult> {
   const existingToday = await db.streakRecords.where('date').equals(today).first();
   if (!existingToday) {
     await db.streakRecords.add({ date: today });
+    enqueueSyncGamification('streakRecord', today, { date: today }, 'create');
   }
 
   // Check milestones
@@ -247,6 +269,10 @@ export async function checkAndUnlockBadges(): Promise<UnlockedBadge[]> {
       const id = await db.unlockedBadges.add(record);
       record.id = id as number;
       newlyUnlocked.push(record);
+      enqueueSyncGamification('unlockedBadge', badge.id, {
+        ...record,
+        unlockedAt: record.unlockedAt.toISOString(),
+      }, 'create');
 
       // Award bonus XP for badge unlock
       await awardXP(badge.xpReward);
@@ -321,6 +347,10 @@ export async function markBadgesNotified(badgeIds: string[]): Promise<void> {
     if (badgeIds.includes(badge.badgeId) && !badge.notified) {
       badge.notified = true;
       await db.unlockedBadges.put(badge);
+      enqueueSyncGamification('unlockedBadge', badge.badgeId, {
+        ...badge,
+        unlockedAt: badge.unlockedAt?.toISOString?.() || badge.unlockedAt,
+      });
     }
   }
 }

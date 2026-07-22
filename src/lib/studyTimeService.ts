@@ -130,6 +130,27 @@ export async function endSession(
     pausedDuration: activeSession.totalPausedDuration,
   });
 
+  // Sync completed session to Firestore
+  const completedSession = await db.studyTimeSessions.get(sessionId);
+  if (completedSession) {
+    import('../workers/syncQueue').then(({ addToSyncQueue }) => {
+      import('../services/syncService').then(({ syncService }) => {
+        if (!syncService.canSync()) return;
+        addToSyncQueue({
+          operation: 'update',
+          entityType: 'studyTimeSession',
+          entityId: sessionId,
+          data: {
+            ...completedSession,
+            startTime: completedSession.startTime?.toISOString?.() || completedSession.startTime,
+            endTime: completedSession.endTime?.toISOString?.() || completedSession.endTime,
+            createdAt: completedSession.createdAt?.toISOString?.() || completedSession.createdAt,
+          },
+        }).catch(err => console.warn('[StudyTime] sync queue error:', err));
+      });
+    });
+  }
+
   // 目標進捗を自動更新
   updateAllGoalProgress().catch(error => {
     console.error('[StudyTimeService] Goal progress update failed:', error);
