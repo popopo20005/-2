@@ -111,12 +111,42 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
   const [analyticsTracker, setAnalyticsTracker] = useState<AnalyticsTracker | null>(null);
   const [studyTimeSessionId, setStudyTimeSessionId] = useState<number | null>(null);
 
+  /**
+   * ○×問題の正解を boolean で返すヘルパー。
+   * answer (boolean | string) → correctAnswer (number 0=○,1=×) の両方に対応。
+   * 判定不能時は undefined。
+   */
+  const getTrueFalseCorrectAnswer = (problem: Problem): boolean | undefined => {
+    const raw = problem.answer as unknown;
+    if (typeof raw === 'boolean') return raw;
+    if (typeof raw === 'string') {
+      const lower = raw.toLowerCase();
+      if (lower === 'true') return true;
+      if (lower === 'false') return false;
+    }
+    // answer が未設定の場合、correctAnswer (0=True, 1=False) から推定
+    if (problem.correctAnswer === 0) return true;
+    if (problem.correctAnswer === 1) return false;
+    return undefined;
+  };
+
   // Track which initialParams object was last processed (by reference)
   const lastProcessedParams = useRef<QuizParams | null | undefined>(undefined);
 
   useEffect(() => {
     loadData();
   }, []);
+
+  // Firestore同期完了後にデータを再読み込み（選択画面で新しい問題を反映）
+  useEffect(() => {
+    const handleSyncCompleted = () => {
+      if (mode === 'selection') {
+        loadData();
+      }
+    };
+    window.addEventListener('syncCompleted', handleSyncCompleted);
+    return () => window.removeEventListener('syncCompleted', handleSyncCompleted);
+  }, [mode]);
 
   // Timer
   useEffect(() => {
@@ -920,7 +950,8 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
       const answerSet = new Set(answer);
       isCorrect = correctSet.size === answerSet.size && [...correctSet].every(v => answerSet.has(v));
     } else if (typeof answer === 'boolean') {
-      isCorrect = answer === currentProblem.answer;
+      const correctAnswer = getTrueFalseCorrectAnswer(currentProblem);
+      isCorrect = correctAnswer !== undefined && answer === correctAnswer;
     } else {
       isCorrect = answer === currentProblem.correctAnswer;
     }
@@ -1046,6 +1077,83 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
     }
     proceedToNextQuestion();
   };
+
+  // Keyboard shortcuts for quiz play
+  useEffect(() => {
+    if (mode !== 'playing') return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip when typing in input fields
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+
+      const problem = currentProblems[currentIndex];
+      if (!problem) return;
+
+      // Escape → quit quiz
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        handleQuitQuiz();
+        return;
+      }
+
+      // After answering: Enter/Space/→ → next question
+      if (showFeedback) {
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight') {
+          e.preventDefault();
+          handleNext();
+        }
+        return;
+      }
+
+      // True/False questions: T/F keys
+      if (problem.type === 'true-false') {
+        if (e.key === 't' || e.key === 'T') { e.preventDefault(); handleAnswer(true); }
+        if (e.key === 'f' || e.key === 'F') { e.preventDefault(); handleAnswer(false); }
+        return;
+      }
+
+      // Multiple choice / multi-select questions
+      const options = problem.options;
+      if (!options) return;
+
+      // Map key to option index (1-9 or A-I)
+      let idx = -1;
+      if (e.key >= '1' && e.key <= '9') {
+        idx = parseInt(e.key) - 1;
+      } else {
+        const lower = e.key.toLowerCase();
+        if (lower >= 'a' && lower <= 'i') {
+          idx = lower.charCodeAt(0) - 97; // a=0, b=1, ...
+        }
+      }
+
+      if (idx >= 0 && idx < options.length) {
+        e.preventDefault();
+        if (problem.type === 'multi-select') {
+          // Toggle selection
+          setMultiSelectSelections(prev =>
+            prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx].sort((a, b) => a - b)
+          );
+        } else {
+          // Single choice → immediate answer
+          handleAnswer(idx);
+        }
+        return;
+      }
+
+      // Multi-select: Enter/Space to confirm
+      if (problem.type === 'multi-select' && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        if (multiSelectSelections.length > 0) {
+          handleAnswer([...multiSelectSelections]);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [mode, showFeedback, currentIndex, currentProblems, multiSelectSelections]);
 
   const handleSaveNote = async (note: string, tags: string[]) => {
     const currentProblem = currentProblems[currentIndex];
@@ -1322,7 +1430,9 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
                   const answerSet = new Set(userAnswers[i] as number[]);
                   isAnswerCorrect = correctSet.size === answerSet.size && [...correctSet].every(v => answerSet.has(v));
                 } else {
-                  isAnswerCorrect = userAnswers[i] === true || (typeof userAnswers[i] === 'number' && userAnswers[i] === problem.correctAnswer);
+                  isAnswerCorrect = typeof userAnswers[i] === 'boolean'
+                    ? userAnswers[i] === getTrueFalseCorrectAnswer(problem)
+                    : (typeof userAnswers[i] === 'number' && userAnswers[i] === problem.correctAnswer);
                 }
                 if (isAnswerCorrect) {
                   existing.correct++;
@@ -1812,7 +1922,9 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
                     const answerSet = new Set(Array.isArray(userAnswers[currentIndex]) ? userAnswers[currentIndex] as number[] : []);
                     return correctSet.size === answerSet.size && [...correctSet].every(v => answerSet.has(v));
                   })()
-                : userAnswers[currentIndex] === currentProblem.correctAnswer || (typeof userAnswers[currentIndex] === 'boolean' && userAnswers[currentIndex] === true)
+                : currentProblem.type === 'true-false' || typeof userAnswers[currentIndex] === 'boolean'
+                  ? userAnswers[currentIndex] === getTrueFalseCorrectAnswer(currentProblem)
+                  : userAnswers[currentIndex] === currentProblem.correctAnswer
             }
           >
             <div className="grid grid-cols-1 gap-4">
@@ -1885,7 +1997,7 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
                     onClick={() => handleAnswer(true)}
                     disabled={showFeedback}
                     showResult={showFeedback}
-                    isCorrect={currentProblem.answer === true}
+                    isCorrect={getTrueFalseCorrectAnswer(currentProblem) === true}
                     isSelected={userAnswers[currentIndex] === true}
                   />
                   <AnswerButton
@@ -1893,7 +2005,7 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
                     onClick={() => handleAnswer(false)}
                     disabled={showFeedback}
                     showResult={showFeedback}
-                    isCorrect={typeof currentProblem.correctAnswer === 'boolean' ? currentProblem.correctAnswer === false : false}
+                    isCorrect={getTrueFalseCorrectAnswer(currentProblem) === false}
                     isSelected={userAnswers[currentIndex] === false}
                   />
                 </div>
@@ -2082,6 +2194,36 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
 
         {/* Action Buttons */}
         <div className="w-full mt-auto flex flex-col gap-3 pt-6">
+          {/* Share to X */}
+          <button
+            onClick={() => {
+              const accuracy = Math.round((score / currentProblems.length) * 100);
+              const text = [
+                `Minguellaでクイズに挑戦！`,
+                `${currentProblems.length}問中${score}問正解（正答率${accuracy}%）`,
+                ``,
+                `無料で使えるクイズ学習アプリ`,
+                `https://minguella-quiz-v4.netlify.app`,
+                `#Minguella #クイズ #学習`,
+              ].join('\n');
+              window.open(
+                `https://x.com/intent/tweet?text=${encodeURIComponent(text)}`,
+                '_blank',
+                'noopener,noreferrer,width=550,height=420'
+              );
+            }}
+            className="w-full rounded-2xl h-[48px] flex items-center justify-center gap-2 text-[15px] font-bold"
+            style={{
+              background: 'rgba(30,41,59,0.7)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              color: '#94A3B8',
+            }}
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+              <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+            </svg>
+            {currentLang === 'ja' ? '結果をXでシェア' : 'Share on X'}
+          </button>
           <button
             onClick={onBack}
             className="w-full rounded-2xl h-[56px] flex items-center justify-center text-[17px] font-bold text-white"
@@ -2100,8 +2242,9 @@ const QuizView = ({ onBack, initialParams }: QuizViewProps) => {
                     const answerSet = new Set(userAnswers[i] as number[]);
                     isCorrect = correctSet.size === answerSet.size && [...correctSet].every(v => answerSet.has(v));
                   } else {
-                    isCorrect = userAnswers[i] === true ||
-                      (typeof userAnswers[i] === 'number' && userAnswers[i] === problem.correctAnswer);
+                    isCorrect = typeof userAnswers[i] === 'boolean'
+                      ? userAnswers[i] === getTrueFalseCorrectAnswer(problem)
+                      : (typeof userAnswers[i] === 'number' && userAnswers[i] === problem.correctAnswer);
                   }
                   if (!isCorrect && problem.id) {
                     incorrectIds.push(problem.id);

@@ -89,7 +89,31 @@ export const ExamResult: React.FC<ExamResultProps> = ({ result, onRetry, onHome 
                                 </motion.div>
                             )}
 
-                            <div className="flex gap-4">
+                            <div className="flex flex-col gap-3">
+                              <button
+                                onClick={() => {
+                                  const text = [
+                                    `Minguellaで模試に挑戦！`,
+                                    `${result.totalQuestions}問中${result.correctCount}問正解（正答率${percentage}%）グレード: ${result.grade}`,
+                                    ``,
+                                    `無料で使えるクイズ学習アプリ`,
+                                    `https://minguella-quiz-v4.netlify.app`,
+                                    `#Minguella #クイズ #学習`,
+                                  ].join('\n');
+                                  window.open(
+                                    `https://x.com/intent/tweet?text=${encodeURIComponent(text)}`,
+                                    '_blank',
+                                    'noopener,noreferrer,width=550,height=420'
+                                  );
+                                }}
+                                className="w-full py-3 rounded-xl flex items-center justify-center gap-2 text-sm font-semibold transition-colors bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/20"
+                              >
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+                                  <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                                </svg>
+                                結果をXでシェア
+                              </button>
+                              <div className="flex gap-4">
                                 <NeumorphicButton onClick={onHome} variant="secondary" className="flex-1 py-3">
                                     <div className="flex items-center justify-center gap-2">
                                         <Home className="w-5 h-5" />
@@ -102,6 +126,7 @@ export const ExamResult: React.FC<ExamResultProps> = ({ result, onRetry, onHome 
                                         Retry
                                     </div>
                                 </NeumorphicButton>
+                              </div>
                             </div>
                         </div>
                     </GlassCard>
