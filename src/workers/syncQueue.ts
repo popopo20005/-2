@@ -8,6 +8,47 @@ import { db } from '../lib/database';
 import type { SyncQueueItem } from '../types/backgroundTask';
 import { syncService } from '../services/syncService';
 
+// これ以上失敗した項目は自動では再送しない（retryFailedItems で手動再試行する）
+const MAX_RETRIES = 3;
+// 解答のたびに送らず、連続した変更をまとめて送る
+const SYNC_DEBOUNCE_MS = 3000;
+// ドキュメントIDが端末の連番に依存しない種類だけを送る。問題やクイズセットなどは
+// ローカルIDとFirestoreのIDが一致しないので、送ると別の問題を上書きしたり消したりする
+const SYNCABLE_TYPES = new Set<SyncQueueItem['entityType']>([
+  'history',
+  'studyDiary',
+  'streakRecord',
+  'unlockedBadge',
+  'userProgress',
+]);
+
+let isProcessing = false;
+let syncTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * 未同期のアイテムを取得
+ *
+ * syncedAt が無い行はインデックスに載らず、where().equals(undefined) は
+ * 例外になるので、インデックスを使わずに絞り込む
+ */
+function pendingQueue() {
+  return db.syncQueue.filter(
+    (item) =>
+      SYNCABLE_TYPES.has(item.entityType) && !item.syncedAt && item.retryCount < MAX_RETRIES
+  );
+}
+
+/**
+ * 少し待ってから同期キューを処理する
+ */
+export function scheduleSyncQueue(): void {
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => {
+    syncTimer = null;
+    processSyncQueue().catch((err) => console.warn('[SyncQueue] 自動同期失敗:', err));
+  }, SYNC_DEBOUNCE_MS);
+}
+
 /**
  * 同期キューに追加
  */
@@ -25,6 +66,7 @@ export async function addToSyncQueue(
 
     await db.syncQueue.add(queueItem as any);
     console.log('[SyncQueue] キューに追加しました');
+    scheduleSyncQueue();
   } catch (error) {
     console.error('[SyncQueue] キューへの追加エラー:', error);
     throw error;
@@ -42,12 +84,18 @@ export async function processSyncQueue(): Promise<void> {
     return;
   }
 
+  // 未ログインのまま進むと、送っていないのに同期済みの印が付いてしまう
+  if (!syncService.canSync()) {
+    console.log('[SyncQueue] 未ログインのため処理をスキップします');
+    return;
+  }
+
+  if (isProcessing) return;
+  isProcessing = true;
+
   try {
     // 同期待ちのアイテムを取得
-    const pendingItems = await db.syncQueue
-      .where('syncedAt')
-      .equals(undefined as any)
-      .toArray();
+    const pendingItems = await pendingQueue().toArray();
 
     console.log(`[SyncQueue] 処理待ちアイテム: ${pendingItems.length}件`);
 
@@ -71,7 +119,7 @@ export async function processSyncQueue(): Promise<void> {
         });
 
         // 最大リトライ回数を超えた場合
-        if (item.retryCount >= 3) {
+        if (item.retryCount + 1 >= MAX_RETRIES) {
           console.error(`[SyncQueue] 最大リトライ回数を超えました: ${item.entityType} ${item.entityId}`);
           // エラーとしてマークするか、削除するかの判断
           // 現状は保持して手動対処を促す
@@ -82,6 +130,8 @@ export async function processSyncQueue(): Promise<void> {
     console.log('[SyncQueue] キューの処理完了');
   } catch (error) {
     console.error('[SyncQueue] キュー処理エラー:', error);
+  } finally {
+    isProcessing = false;
   }
 }
 
@@ -144,9 +194,21 @@ async function syncQuizSet(item: SyncQueueItem): Promise<void> {
   await syncService.uploadChange('quizSets', item.entityId, item.data, operation);
 }
 
+/**
+ * 履歴のドキュメントIDを作る
+ *
+ * ローカルの連番は端末ごとに同じ番号が振られるので、そのままIDにすると
+ * 別の端末の履歴を上書きしてしまう。解答時刻と問題IDから決める。
+ */
+export function historyDocId(item: Pick<SyncQueueItem, 'entityId' | 'data'>): string {
+  const time = Date.parse(String(item.data?.timestamp));
+  if (Number.isNaN(time)) return String(item.entityId);
+  return `${time}_${item.data?.problemId ?? 'unknown'}`;
+}
+
 async function syncHistory(item: SyncQueueItem): Promise<void> {
   const operation = item.operation === 'delete' ? 'delete' : 'set';
-  await syncService.uploadChange('history', item.entityId, item.data, operation);
+  await syncService.uploadChange('history', historyDocId(item), item.data, operation);
 }
 
 async function syncGoal(item: SyncQueueItem): Promise<void> {
@@ -205,11 +267,7 @@ export async function getSyncQueue(): Promise<SyncQueueItem[]> {
  */
 export async function getPendingSyncCount(): Promise<number> {
   try {
-    const count = await db.syncQueue
-      .where('syncedAt')
-      .equals(undefined as any)
-      .count();
-    return count;
+    return await pendingQueue().count();
   } catch (error) {
     console.error('[SyncQueue] 同期待ちカウント取得エラー:', error);
     return 0;
@@ -223,7 +281,7 @@ export async function getFailedSyncCount(): Promise<number> {
   try {
     const count = await db.syncQueue
       .where('retryCount')
-      .aboveOrEqual(3)
+      .aboveOrEqual(MAX_RETRIES)
       .count();
     return count;
   } catch (error) {
@@ -240,8 +298,7 @@ export async function clearSyncedItems(): Promise<number> {
 
   try {
     const syncedItems = await db.syncQueue
-      .where('syncedAt')
-      .notEqual(undefined as any)
+      .filter((item) => !!item.syncedAt)
       .toArray();
 
     if (syncedItems.length > 0) {
@@ -267,7 +324,7 @@ export async function retryFailedItems(): Promise<void> {
   try {
     const failedItems = await db.syncQueue
       .where('retryCount')
-      .aboveOrEqual(3)
+      .aboveOrEqual(MAX_RETRIES)
       .toArray();
 
     for (const item of failedItems) {

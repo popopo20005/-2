@@ -300,13 +300,24 @@ class SyncService {
         });
       });
 
+      // undefinedフィールドを除去（Firestoreはundefinedを受け付けない）
+      const removeUndefined = (obj: Record<string, unknown>): Record<string, unknown> => {
+        const cleaned: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(obj)) {
+          if (value !== undefined) {
+            cleaned[key] = value;
+          }
+        }
+        return cleaned;
+      };
+
       // バッチ分割して書き込み（Firestore制限: 500件/バッチ）
       const BATCH_SIZE = 490;
       for (let i = 0; i < allOperations.length; i += BATCH_SIZE) {
         const batchOps = allOperations.slice(i, i + BATCH_SIZE);
         const batch = writeBatch(firestore);
         for (const op of batchOps) {
-          batch.set(doc(firestore, op.path), op.data);
+          batch.set(doc(firestore, op.path), removeUndefined(op.data));
         }
         await batch.commit();
       }
@@ -376,8 +387,9 @@ class SyncService {
       if (operation === 'delete') {
         await deleteDoc(docRef);
       } else if (data) {
+        // Firestoreはundefinedを受け付けないので、入れ子の分も含めて取り除く
         await setDoc(docRef, {
-          ...data,
+          ...JSON.parse(JSON.stringify(data)),
           _syncedAt: new Date().toISOString(),
         });
       }
@@ -387,6 +399,8 @@ class SyncService {
       const errorMsg = error instanceof Error ? error.message : 'アップロード失敗';
       console.error('[Sync] アップロードエラー:', error);
       saveSyncStatus({ syncError: errorMsg });
+      // 同期キューが再試行できるよう、失敗を呼び出し元へ伝える
+      throw error;
     }
   }
 
@@ -464,6 +478,18 @@ class SyncService {
       // --- Problems ---
       const problemsSnapshot = await getDocs(collection(firestore, `users/${uid}/problems`));
       const localProblems = await db.problems.toArray();
+      console.log(`[Sync] Firestore problems: ${problemsSnapshot.docs.length}, Local problems: ${localProblems.length}`);
+      // デバッグ: Firestore doc IDのサンプルを表示（数字=ローカル移行、英数字=API追加）
+      const apiDocs = problemsSnapshot.docs.filter(d => isNaN(Number(d.id)));
+      const migratedDocs = problemsSnapshot.docs.filter(d => !isNaN(Number(d.id)));
+      console.log(`[Sync] Firestore内訳: migrated=${migratedDocs.length}, API-added=${apiDocs.length}`);
+      if (apiDocs.length > 0) {
+        const sample = apiDocs.slice(0, 3).map(d => {
+          const dd = d.data();
+          return `"${dd.question?.substring(0, 25)}..." (cat: ${dd.category})`;
+        });
+        console.log(`[Sync] API問題サンプル:`, sample);
+      }
 
       // ローカルの問題をquestion+categoryで重複チェック（IDは異なるため内容で比較）
       const localProblemKeys = new Set(
@@ -473,22 +499,34 @@ class SyncService {
       // Firestore doc ID → ローカルの新しいID のマッピング（QuizSet用）
       const firestoreToLocalIdMap = new Map<string, number>();
 
-      // 既存のローカル問題のFirestore IDマッピングも構築
+      // category::question → ローカルIDのマップも構築（既存問題の逆引き用）
+      const keyToLocalIdMap = new Map<string, number>();
       localProblems.forEach((p) => {
+        const key = `${p.category}::${p.question}`;
         if (p.id !== undefined) {
-          firestoreToLocalIdMap.set(String(p.id), p.id);
+          keyToLocalIdMap.set(key, p.id);
         }
       });
 
       const categoriesToAdd = new Set<string>();
 
+      let skippedApiProblems = 0;
       for (const docSnap of problemsSnapshot.docs) {
         const data = docSnap.data();
         const firestoreId = docSnap.id;
         const key = `${data.category || ''}::${data.question || ''}`;
 
+        // ローカルに同じ内容の問題が存在する場合 → Firestore ID→ローカルIDマッピングを登録
+        if (localProblemKeys.has(key)) {
+          const existingLocalId = keyToLocalIdMap.get(key);
+          if (existingLocalId !== undefined) {
+            firestoreToLocalIdMap.set(firestoreId, existingLocalId);
+          }
+        }
+
         // ローカルに同じ内容の問題が存在しない場合 → 追加
         if (!localProblemKeys.has(key)) {
+          console.log(`[Sync] Adding problem: "${data.question?.substring(0, 30)}..." (fsId: ${firestoreId})`);
           const problem: Record<string, unknown> = {
             category: data.category || '',
             question: data.question || '',
@@ -497,7 +535,12 @@ class SyncService {
           };
 
           // オプショナルフィールドを追加
-          if (data.answer !== undefined) problem.answer = data.answer;
+          if (data.answer !== undefined) {
+            // Normalize answer to boolean (API may store as string "true"/"false")
+            problem.answer = typeof data.answer === 'string'
+              ? data.answer.toLowerCase() === 'true'
+              : !!data.answer;
+          }
           if (data.options) problem.options = data.options;
           if (data.correctAnswer !== undefined) problem.correctAnswer = data.correctAnswer;
           if (data.correctAnswers) problem.correctAnswers = data.correctAnswers;
@@ -518,7 +561,16 @@ class SyncService {
 
           // ローカルキーセットを更新（重複防止）
           localProblemKeys.add(key);
+        } else if (isNaN(Number(firestoreId))) {
+          // API追加の問題がスキップされた場合
+          skippedApiProblems++;
+          if (skippedApiProblems <= 3) {
+            console.log(`[Sync] Skipped API problem (dedup): "${data.question?.substring(0, 30)}..." key="${key}"`);
+          }
         }
+      }
+      if (skippedApiProblems > 0) {
+        console.log(`[Sync] Total API problems skipped by dedup: ${skippedApiProblems}`);
       }
 
       // カテゴリをIndexedDBに登録
@@ -533,6 +585,7 @@ class SyncService {
       // --- QuizSets ---
       const quizSetsSnapshot = await getDocs(collection(firestore, `users/${uid}/quizSets`));
       const localQuizSets = await db.quizSets.toArray();
+      console.log(`[Sync] QuizSets: Firestore=${quizSetsSnapshot.docs.length}, Local=${localQuizSets.length}, ID map size=${firestoreToLocalIdMap.size}`);
       // 名前で重複チェック
       const localQuizSetNames = new Set(localQuizSets.map((qs) => qs.name));
 
@@ -548,8 +601,12 @@ class SyncService {
             const localId = firestoreToLocalIdMap.get(fid);
             if (localId !== undefined) {
               localProblemIds.push(localId);
+            } else {
+              console.warn(`[Sync] QuizSet "${data.name}": Firestore問題ID "${fid}" のローカルマッピングが見つかりません`);
             }
           }
+
+          console.log(`[Sync] Adding QuizSet "${data.name}": ${firestoreProblemIds.length}問 → ${localProblemIds.length}問マッピング成功`);
 
           const quizSet: Record<string, unknown> = {
             name: data.name || '',

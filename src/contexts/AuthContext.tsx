@@ -8,7 +8,7 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
 import { authService, type AuthUser } from '../services/authService';
 import { syncService } from '../services/syncService';
-import { setupNetworkListeners } from '../workers/syncQueue';
+import { processSyncQueue, setupNetworkListeners } from '../workers/syncQueue';
 
 // ============================================================
 // Context 型定義
@@ -45,6 +45,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const pullResult = await syncService.pullFromFirestore();
       if (pullResult.success && (pullResult.problems > 0 || pullResult.quizSets > 0)) {
         console.log(`[Auth] Pull同期完了: Problems +${pullResult.problems}, QuizSets +${pullResult.quizSets}`);
+        // 新データが取り込まれたことをコンポーネントに通知
+        window.dispatchEvent(new CustomEvent('syncCompleted', { detail: pullResult }));
       }
     } catch (err) {
       console.warn('[Auth] Pull同期エラー:', err);
@@ -78,10 +80,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (result.success && result.totalRecords > 0) {
           console.log(`[Auth] マイグレーション完了: ${result.totalRecords}件`);
         }
-        // Firestoreの新データをローカルに取り込み
-        return pullSync();
       })
-      .catch((err) => console.warn('[Auth] 同期エラー:', err))
+      .catch((err) => console.warn('[Auth] マイグレーションエラー (pullSyncは続行):', err))
+      .then(() => pullSync())
+      .catch((err) => console.warn('[Auth] Pull同期エラー:', err))
+      // 前回までに送れなかった分を送る
+      .then(() => processSyncQueue())
+      .catch((err) => console.warn('[Auth] キュー同期エラー:', err))
       .finally(() => setMigrating(false));
 
     // ネットワークリスナー（一度だけ）

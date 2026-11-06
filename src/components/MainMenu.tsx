@@ -54,7 +54,7 @@ interface MainMenuProps {
  * メインメニュー - すべての機能へのアクセスポイント
  */
 export function MainMenu({ onNavigate }: MainMenuProps) {
-  const { user } = useAuth();
+  const { user, migrating } = useAuth();
   const [language] = useState(localStorage.getItem('language') || 'ja');
   const [userName, setUserName] = useState(localStorage.getItem('userName') || (language === 'ja' ? 'ユーザー' : 'User'));
   const [showNameSettings, setShowNameSettings] = useState(false);
@@ -75,6 +75,22 @@ export function MainMenu({ onNavigate }: MainMenuProps) {
 
   useEffect(() => {
     loadDashboardData();
+  }, []);
+
+  // Firestore同期完了後にデータを再読み込み
+  useEffect(() => {
+    if (!migrating) {
+      loadDashboardData();
+    }
+  }, [migrating]);
+
+  // pullSync完了時（visibilitychange等）にもデータを再読み込み
+  useEffect(() => {
+    const handleSyncCompleted = () => {
+      loadDashboardData();
+    };
+    window.addEventListener('syncCompleted', handleSyncCompleted);
+    return () => window.removeEventListener('syncCompleted', handleSyncCompleted);
   }, []);
 
   const loadDashboardData = async () => {
