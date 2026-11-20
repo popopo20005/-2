@@ -6,6 +6,7 @@ export interface Category {
 
 export interface Problem {
   id?: number;
+  uuid?: string; // グローバル一意ID（複数端末同期用）
   category: string;
   question: string;
   answer?: boolean;
@@ -54,9 +55,11 @@ export interface HistoryEntry {
 
 export interface QuizSet {
   id?: number;
+  uuid?: string; // グローバル一意ID（複数端末同期用）
   name: string;
   description?: string;
   problemIds: number[];
+  problemUuids?: string[]; // UUID参照用（将来的にproblemIdsを置き換え）
   subjects?: string[];
   subjectMap?: Record<string, number[]>;
   stats?: Record<string, QuizSetStats>;

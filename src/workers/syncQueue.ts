@@ -12,9 +12,10 @@ import { syncService } from '../services/syncService';
 const MAX_RETRIES = 3;
 // 解答のたびに送らず、連続した変更をまとめて送る
 const SYNC_DEBOUNCE_MS = 3000;
-// ドキュメントIDが端末の連番に依存しない種類だけを送る。問題やクイズセットなどは
-// ローカルIDとFirestoreのIDが一致しないので、送ると別の問題を上書きしたり消したりする
+// UUID対応により、問題とクイズセットも同期可能に
 const SYNCABLE_TYPES = new Set<SyncQueueItem['entityType']>([
+  'problem',         // ⭐ UUID対応により追加
+  'quizSet',         // ⭐ UUID対応により追加
   'history',
   'studyDiary',
   'streakRecord',

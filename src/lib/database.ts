@@ -548,6 +548,40 @@ export class QuizAppDatabase extends Dexie {
             mockExamResults: '++id, planId, examDate, createdAt',
             milestones: '++id, planId, phase, targetDate, [planId+phase]',
         });
+
+        // Version 26: UUID support for multi-device sync
+        this.version(26).stores({
+            problems: '++id, uuid, category, question, type, [category+type], [category+sourceExamYear]',
+            quizSets: '++id, uuid, name, createdAt',
+        }).upgrade(async (tx) => {
+            console.log('[DB Migration] Version 26: Adding UUIDs to existing problems and quiz sets...');
+
+            // 既存の問題にUUIDを付与
+            const problems = await tx.table('problems').toArray();
+            console.log(`[DB Migration] Found ${problems.length} problems to migrate`);
+
+            for (const problem of problems) {
+                if (!problem.uuid) {
+                    await tx.table('problems').update(problem.id, {
+                        uuid: crypto.randomUUID()
+                    });
+                }
+            }
+
+            // 既存の問題セットにUUIDを付与
+            const quizSets = await tx.table('quizSets').toArray();
+            console.log(`[DB Migration] Found ${quizSets.length} quiz sets to migrate`);
+
+            for (const quizSet of quizSets) {
+                if (!quizSet.uuid) {
+                    await tx.table('quizSets').update(quizSet.id, {
+                        uuid: crypto.randomUUID()
+                    });
+                }
+            }
+
+            console.log('[DB Migration] Version 26: UUID migration completed');
+        });
     }
 }
 
@@ -588,8 +622,13 @@ export const problemService = {
             throw new Error('問題データが無効です');
         }
 
+        // UUIDがなければ生成
+        if (!problem.uuid) {
+            (problem as Problem).uuid = crypto.randomUUID();
+        }
+
         const id = await db.problems.add(problem);
-        enqueueSyncItem('create', 'problem', id, { ...problem, id });
+        enqueueSyncItem('create', 'problem', problem.uuid || String(id), { ...problem, id });
         return id;
     },
 
@@ -598,13 +637,23 @@ export const problemService = {
             throw new Error('問題データが無効です');
         }
 
+        // UUIDがなければ生成
+        if (!problem.uuid) {
+            problem.uuid = crypto.randomUUID();
+        }
+
         await db.problems.put(problem);
-        enqueueSyncItem('update', 'problem', problem.id, problem);
+        enqueueSyncItem('update', 'problem', problem.uuid || String(problem.id), problem);
     },
 
     async delete(id: number): Promise<void> {
+        const problem = await db.problems.get(id);
         await db.problems.delete(id);
-        enqueueSyncItem('delete', 'problem', id, null);
+
+        // UUIDで削除を同期
+        if (problem?.uuid) {
+            enqueueSyncItem('delete', 'problem', problem.uuid, null);
+        }
     },
 
     async getAll(): Promise<Problem[]> {
@@ -769,6 +818,11 @@ export const quizSetService = {
             throw new Error('問題集データが無効です');
         }
 
+        // UUIDがなければ生成
+        if (!quizSet.uuid) {
+            (quizSet as QuizSet).uuid = crypto.randomUUID();
+        }
+
         const now = new Date();
         const setWithTimestamps = {
             ...quizSet,
@@ -778,11 +832,11 @@ export const quizSetService = {
 
         if ('id' in quizSet && quizSet.id) {
             await db.quizSets.put(setWithTimestamps);
-            enqueueSyncItem('update', 'quizSet', quizSet.id, setWithTimestamps);
+            enqueueSyncItem('update', 'quizSet', quizSet.uuid || String(quizSet.id), setWithTimestamps);
             return quizSet.id;
         } else {
             const id = await db.quizSets.add(setWithTimestamps);
-            enqueueSyncItem('create', 'quizSet', id, { ...setWithTimestamps, id });
+            enqueueSyncItem('create', 'quizSet', quizSet.uuid || String(id), { ...setWithTimestamps, id });
             return id;
         }
     },
@@ -796,8 +850,13 @@ export const quizSetService = {
     },
 
     async delete(id: number): Promise<void> {
+        const quizSet = await db.quizSets.get(id);
         await db.quizSets.delete(id);
-        enqueueSyncItem('delete', 'quizSet', id, null);
+
+        // UUIDで削除を同期
+        if (quizSet?.uuid) {
+            enqueueSyncItem('delete', 'quizSet', quizSet.uuid, null);
+        }
     },
 
     async updateStats(quizSetId: number, subject: string | null, totalAnswered: number, totalCorrect: number): Promise<void> {

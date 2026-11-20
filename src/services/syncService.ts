@@ -169,18 +169,20 @@ class SyncService {
       type BatchOp = { path: string; data: Record<string, unknown> };
       const allOperations: BatchOp[] = [];
 
-      // Problems
+      // Problems (UUID優先、なければローカルIDを使用)
       problems.forEach((problem, idx) => {
+        const docId = problem.uuid || String(problem.id || idx);
         allOperations.push({
-          path: `users/${uid}/problems/${String(problem.id || idx)}`,
+          path: `users/${uid}/problems/${docId}`,
           data: { ...problem, migratedAt },
         });
       });
 
-      // QuizSets
+      // QuizSets (UUID優先、なければローカルIDを使用)
       quizSets.forEach((qs, idx) => {
+        const docId = qs.uuid || String(qs.id || idx);
         allOperations.push({
-          path: `users/${uid}/quizSets/${String(qs.id || idx)}`,
+          path: `users/${uid}/quizSets/${docId}`,
           data: {
             ...qs,
             createdAt: qs.createdAt?.toISOString?.() || qs.createdAt,
