@@ -316,6 +316,8 @@ export function MainMenu({ onNavigate }: MainMenuProps) {
       statistics: '統計',
       create: '作成',
       problemEdit: '問題編集',
+      categoryQuiz: 'カテゴリー別クイズ',
+      quizSetCategoryQuiz: '問題集カテゴリー別',
       allFeatures: 'すべての機能',
       sections: {
         learning: '学習',
@@ -395,6 +397,8 @@ export function MainMenu({ onNavigate }: MainMenuProps) {
       statistics: 'Statistics',
       create: 'Create',
       problemEdit: 'Edit Problems',
+      categoryQuiz: 'Category Quiz',
+      quizSetCategoryQuiz: 'Quiz Set Category',
       allFeatures: 'All Features',
       sections: {
         learning: 'Learning',
@@ -810,13 +814,24 @@ export function MainMenu({ onNavigate }: MainMenuProps) {
             {translations.quickAccess}
           </h2>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <Card hoverable clickable onClick={() => onNavigate('categoryQuiz')}>
+            <Card hoverable clickable onClick={() => onNavigate('allCategoryQuiz')}>
               <CardContent className="p-5 text-center">
                 <div className="size-12 mx-auto mb-3 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
                   <BookOpen className="size-6 text-white" />
                 </div>
                 <h3 className="font-bold text-gray-900 dark:text-gray-100 text-sm">
-                  {translations.quizSets}
+                  {translations.categoryQuiz}
+                </h3>
+              </CardContent>
+            </Card>
+
+            <Card hoverable clickable onClick={() => onNavigate('categoryQuiz')}>
+              <CardContent className="p-5 text-center">
+                <div className="size-12 mx-auto mb-3 rounded-lg bg-gradient-to-br from-cyan-500 to-cyan-600 flex items-center justify-center shadow-lg">
+                  <BookMarked className="size-6 text-white" />
+                </div>
+                <h3 className="font-bold text-gray-900 dark:text-gray-100 text-sm">
+                  {translations.quizSetCategoryQuiz}
                 </h3>
               </CardContent>
             </Card>

@@ -39,6 +39,7 @@ const ShareCenter = lazy(() => import('./components/ShareCenter').then(m => ({ d
 const LearningGroup = lazy(() => import('./components/LearningGroup').then(m => ({ default: m.LearningGroup })));
 const ExamView = lazy(() => import('./components/ExamView').then(m => ({ default: m.ExamView })));
 const QuizSetCategorySelector = lazy(() => import('./components/QuizSetCategorySelector').then(m => ({ default: m.QuizSetCategorySelector })));
+const CategoryQuizSelector = lazy(() => import('./components/CategoryQuizSelector').then(m => ({ default: m.CategoryQuizSelector })));
 const ProblemEditManager = lazy(() => import('./components/ProblemEditManager').then(m => ({ default: m.ProblemEditManager })));
 const QuizSetDetailStats = lazy(() => import('./components/QuizSetDetailStats').then(m => ({ default: m.QuizSetDetailStats })));
 const StudyDiary = lazy(() => import('./components/StudyDiary').then(m => ({ default: m.StudyDiary })));
@@ -389,6 +390,15 @@ function AppContent() {
     setAdView('quiz');
   };
 
+  const startAllCategoryQuiz = (category: string) => {
+    setQuizParams({
+      category,
+      mode: 'categoryQuiz'
+    });
+    setCurrentView('quiz');
+    setAdView('quiz');
+  };
+
   const openQuizSetStats = (quizSetId: number) => {
     setSelectedQuizSetId(quizSetId);
     handleViewChange('quizSetStats');
@@ -494,6 +504,11 @@ function AppContent() {
         return <QuizSetCategorySelector
           onBack={() => handleViewChange('menu')}
           onStartQuiz={startQuizSetCategoryQuiz}
+        />;
+      case 'allCategoryQuiz':
+        return <CategoryQuizSelector
+          onBack={() => handleViewChange('menu')}
+          onStartQuiz={startAllCategoryQuiz}
         />;
       case 'problemEdit':
         return <ProblemEditManager onBack={() => handleViewChange('menu')} />;
