@@ -491,6 +491,16 @@ export function HomeView({ language, onNavigate }: HomeViewProps) {
               </p>
               <p className="text-[11px] text-[#64748B] mt-[2px]">3{language === 'ja' ? '分' : 'min'}</p>
             </button>
+            <button
+              onClick={() => onNavigate('allCategoryQuiz')}
+              className="flex-1 rounded-[14px] py-[14px] px-3 text-center"
+              style={{ background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(255,255,255,0.1)' }}
+            >
+              <p className="text-[13px] font-bold text-[#60A5FA]">
+                {language === 'ja' ? 'カテゴリー別' : 'Category'}
+              </p>
+              <p className="text-[11px] text-[#64748B] mt-[2px]">{language === 'ja' ? '絞り込み' : 'Filter'}</p>
+            </button>
             {isFeatureUnlocked('pomodoro') && (
               <button
                 onClick={() => onNavigate('pomodoro')}
